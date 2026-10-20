@@ -164,10 +164,14 @@ export function WeekGrid({
   days,
   slots,
   currentMinutes,
+  onLessonClick,
+  onEmptySlotClick,
 }: {
   days: Day[]
   slots: TimeSlot[]
   currentMinutes: number
+  onLessonClick?: (lesson: Lesson, day: Day) => void
+  onEmptySlotClick?: (day: Day, slot: TimeSlot) => void
 }) {
   const todayIndex = days.findIndex((day) => day.is_today)
   const gridStart = slots.length ? minutesOf(slots[0].start_time) : 0
@@ -209,14 +213,41 @@ export function WeekGrid({
             style={{ gridColumn: column + 2, gridRow: row + 2 }}
           />
         )))}
-        {days.map((day, column) => groupByRow(day.lessons, rowOf).map(([row, lessons]) => (
-          <div className="grid-slot" key={`${day.date}-${row}`} style={{ gridColumn: column + 2, gridRow: row + 2 }}>
+        {days.map((day, column) => slots.map((slot, row) => {
+          const lessons = groupByRow(day.lessons, rowOf).find(([lessonRow]) => lessonRow === row)?.[1] ?? []
+          const canAdd = Boolean(onEmptySlotClick && lessons.length === 0)
+          return <div
+            className={`grid-slot ${canAdd ? 'grid-slot-empty' : ''}`}
+            key={`${day.date}-${slot.number}`}
+            style={{ gridColumn: column + 2, gridRow: row + 2 }}
+            onClick={(event) => {
+              if (event.target === event.currentTarget) onEmptySlotClick?.(day, slot)
+            }}
+            role={canAdd ? 'button' : undefined}
+            tabIndex={canAdd ? 0 : undefined}
+            aria-label={canAdd ? `Добавить пару: ${dayLabel(day.date)}, ${slot.start_time}` : undefined}
+            onKeyDown={(event) => {
+              if ((event.key === 'Enter' || event.key === ' ') && canAdd) {
+                event.preventDefault()
+                onEmptySlotClick?.(day, slot)
+              }
+            }}
+          >
             {lessons.map((lesson) => (
               <div
                 key={lesson.id}
-                className={`grid-lesson ${statusClass(lesson.status)}`}
+                className={`grid-lesson ${statusClass(lesson.status)} ${onLessonClick ? 'grid-lesson-selectable' : ''}`}
                 title={`${lesson.start_time}–${lesson.end_time} · ${lesson.subject} · ${lesson.type.name}`
                   + `${lesson.teacher ? ` · ${lesson.teacher}` : ''}${lesson.room ? ` · ауд. ${lesson.room}` : ''}`}
+                role={onLessonClick ? 'button' : undefined}
+                tabIndex={onLessonClick ? 0 : undefined}
+                onClick={onLessonClick ? () => onLessonClick(lesson, day) : undefined}
+                onKeyDown={onLessonClick ? (event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    onLessonClick(lesson, day)
+                  }
+                } : undefined}
               >
                 <b>{lesson.start_time}</b>
                 <span>{lesson.subject}</span>
@@ -226,7 +257,7 @@ export function WeekGrid({
               </div>
             ))}
           </div>
-        )))}
+        }))}
         {lineVisible && (
           <div
             className="current-time-track"

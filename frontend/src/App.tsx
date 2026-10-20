@@ -4,7 +4,8 @@ import { ChevronDown, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react'
 import { readSelectedGroup, writeSelectedGroup } from './api/cache'
 import { useCurrentWeek, useGroups, useSchedule, useTimeSlots } from './api/queries'
 import { BottomNav, DaySchedule, Header, WeekGrid, dayNumber, weekRangeLabel } from './ScheduleComponents'
-import type { Group, View } from './types'
+import { AdminSchedule } from './pages/admin/AdminSchedule'
+import type { Day, Group, View } from './types'
 
 const WEEKDAY_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
 const COURSES = [1, 2, 3, 4]
@@ -18,9 +19,12 @@ function directionOf(name: string): string {
 export function App() {
   const [view, setView] = useState<View>('day')
   const [groupId, setGroupId] = useState<number | null>(() => readSelectedGroup())
+  const [adminGroupId, setAdminGroupId] = useState<number | null>(null)
   const [weekNumber, setWeekNumber] = useState<number | null>(null)
   const [selectedDay, setSelectedDay] = useState(0)
   const [now, setNow] = useState(() => new Date())
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [scheduleOverrides, setScheduleOverrides] = useState<Record<string, Day[]>>({})
 
   // Выбор группы на экране настройки.
   const [course, setCourse] = useState(1)
@@ -37,6 +41,7 @@ export function App() {
   const timeSlots = useTimeSlots()
   const currentWeek = useCurrentWeek()
   const schedule = useSchedule(groupId, weekNumber)
+  const adminSchedule = useSchedule(adminGroupId, weekNumber)
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 60_000)
@@ -53,8 +58,23 @@ export function App() {
     if (groupId === null && groups.data?.length) setView('group')
   }, [groupId, groups.data])
 
+  useEffect(() => {
+    if (view === 'admin' && adminGroupId === null && groups.data?.length) {
+      setAdminGroupId(groupId ?? groups.data[0].id)
+    }
+  }, [view, adminGroupId, groupId, groups.data])
+
+  const overrideKey = (id: number | null) => id !== null && weekNumber !== null ? `${id}:${weekNumber}` : ''
   const week = schedule.data?.week
-  const days = schedule.data?.days ?? []
+  const days = scheduleOverrides[overrideKey(groupId)] ?? schedule.data?.days ?? []
+  const adminDays = scheduleOverrides[overrideKey(adminGroupId)] ?? adminSchedule.data?.days ?? []
+  const saveAdminDays = (nextDays: Day[], groupIds: number[]) => {
+    setScheduleOverrides((previous) => {
+      const next = { ...previous }
+      groupIds.forEach((id) => { next[overrideKey(id)] = nextDays })
+      return next
+    })
+  }
 
   // На текущей неделе открываем сегодняшний день.
   useEffect(() => {
@@ -92,7 +112,6 @@ export function App() {
   const handleDragStart = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.pointerType === 'mouse' && event.button !== 0) return
     dragStart.current = { x: event.clientX, y: event.clientY }
-    event.currentTarget.setPointerCapture(event.pointerId)
   }
 
   const handleDragMove = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -101,6 +120,7 @@ export function App() {
     const dy = event.clientY - dragStart.current.y
     if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 8) {
       event.preventDefault()
+      if (!dragging) event.currentTarget.setPointerCapture(event.pointerId)
       setDragging(true)
       setDragX(dx)
     }
@@ -120,7 +140,15 @@ export function App() {
     setDragX(0)
   }
 
-  const nav = (next: View) => setView(next)
+  const nav = (next: View) => {
+    setView(next)
+    setMenuOpen(false)
+  }
+
+  const moveAdminWeek = (delta: number) => {
+    const target = delta > 0 ? adminSchedule.data?.week.next : adminSchedule.data?.week.prev
+    if (target != null) setWeekNumber(target)
+  }
 
   if (groups.isLoading && !groups.data) {
     return <div className="app-shell"><div className="state-note">Загружаем расписание…</div></div>
@@ -141,12 +169,18 @@ export function App() {
 
   return <div className="app-shell">
     <Header
-      title={view === 'group' ? 'Выберите группу' : 'Расписание'}
+      title={view === 'group' ? 'Выберите группу' : view === 'admin' ? 'Администрирование' : 'Расписание'}
       subtitle={view === 'group'
         ? 'Группа сохранится на этом устройстве'
-        : `Институт ИТ · ${selectedGroup?.name ?? ''}`}
+        : view === 'admin' ? 'Управление расписанием' : `Институт ИТ · ${selectedGroup?.name ?? ''}`}
       onBack={view === 'group' && groupId !== null ? () => nav('day') : undefined}
+      onMenu={() => setMenuOpen((open) => !open)}
     />
+    {menuOpen && <div className="role-switch-menu">
+      <span>ДЕМО-РЕЖИМ</span>
+      <button onClick={() => nav('day')}>Студенческое расписание</button>
+      <button onClick={() => nav('admin')}>Администрирование расписания</button>
+    </div>}
 
     <main className="content">
       {view === 'group' && <section className="screen-card selection-screen">
@@ -276,6 +310,20 @@ export function App() {
           </div>
         )}
       </>}
+
+      {view === 'admin' && (
+        <AdminSchedule
+          groups={groups.data ?? []}
+          groupId={adminGroupId}
+          schedule={adminSchedule.data}
+          days={adminDays}
+          slots={timeSlots.data ?? []}
+          currentMinutes={currentMinutes}
+          onGroupChange={setAdminGroupId}
+          onWeekMove={moveAdminWeek}
+          onDaysChange={saveAdminDays}
+        />
+      )}
     </main>
 
     <BottomNav view={view} onNavigate={nav} />

@@ -1,4 +1,4 @@
-/** Экраны студента. Админские экраны пока не подключены (см. DemoAdminScreens). */
-export type View = 'group' | 'day' | 'week'
+/** Основные экраны приложения. */
+export type View = 'group' | 'day' | 'week' | 'admin'
 
 export type { Day, Group, Lesson, LessonStatus, TimeSlot, Week, WeekSchedule } from './api/types'

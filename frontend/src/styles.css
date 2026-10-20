@@ -169,6 +169,29 @@ h1 { margin-top: 7px; font-size: 24px; line-height: 1.16; letter-spacing: -.045e
 .selection-screen .button-primary { margin-top: 10px; }
 
 .admin-home { gap: 9px; padding: 21px 18px; border: 1px solid var(--line); border-radius: 19px; background: var(--surface); }
+.admin-schedule { display: flex; min-width: 0; flex-direction: column; gap: 12px; }
+.admin-schedule-heading h1 { margin-top: 5px; font-size: 21px; }
+.admin-schedule-heading p { margin-top: 5px; }
+.admin-target-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 12px; background: #eceef2; }
+.admin-target-tabs button { min-height: 36px; border: 0; border-radius: 9px; background: transparent; color: #676c76; font-size: 12px; font-weight: 600; }
+.admin-target-tabs button.active { background: var(--surface); color: var(--purple); box-shadow: 0 1px 3px rgba(35, 35, 45, .1); }
+.admin-field { display: flex; min-width: 0; flex-direction: column; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 600; }
+.stream-groups { display: grid; max-height: 140px; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 8px; margin: 0; padding: 8px; overflow-y: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.stream-groups legend { padding: 0 4px; color: var(--muted); font-size: 10px; }
+.stream-groups label { display: flex; min-width: 0; align-items: center; gap: 6px; padding: 5px 2px; color: var(--text); font-size: 11px; }
+.stream-groups input { accent-color: var(--purple); }
+.admin-week-heading { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; padding-top: 3px; }
+.admin-week-heading > div:first-child { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.admin-week-heading strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.admin-week-heading > div:last-child { display: flex; gap: 5px; }
+.admin-draft-notice { display: flex; align-items: flex-start; gap: 8px; padding: 10px; border: 1px solid #d9cbea; border-radius: 11px; background: var(--purple-soft); color: #49346b; font-size: 11px; line-height: 1.4; }
+.admin-draft-notice svg { flex: 0 0 auto; }
+.admin-edit-dialog { max-height: calc(100dvh - 36px); overflow-y: auto; }
+.admin-selected-lesson { display: flex; width: 100%; flex-direction: column; gap: 5px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: #faf9fc; }
+.admin-selected-lesson strong { font-size: 13px; }
+.admin-selected-lesson span, .admin-dialog-hint { color: var(--muted); font-size: 11px; line-height: 1.45; }
+.admin-edit-dialog .admin-field { width: 100%; }
+.admin-edit-dialog .text-field, .admin-edit-dialog .select-field { width: 100%; }
 .welcome { margin-bottom: 3px; }
 .welcome .muted { margin-top: 5px; }
 .admin-home .button-primary { margin-top: 10px; }
@@ -308,3 +331,7 @@ h1 { margin-top: 7px; font-size: 24px; line-height: 1.16; letter-spacing: -.045e
 /* Клетка сетки недели: несколько пар (подгруппы) показываются одна под другой */
 .grid-slot { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 3px; }
 .grid-slot .grid-lesson { margin: 0; }
+.grid-slot-empty { cursor: pointer; }
+.grid-slot-empty:hover { background: #f7f4fb; }
+.grid-lesson-selectable { cursor: pointer; }
+.grid-lesson-selectable:hover { outline: 2px solid var(--purple); outline-offset: -2px; }
