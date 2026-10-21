@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { ChevronDown, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react'
 
-import { readSelectedGroup, writeSelectedGroup } from './api/cache'
+import { clearAdminSession, readAdminSession, readSelectedGroup, writeAdminSession, writeSelectedGroup } from './api/cache'
 import { useCurrentWeek, useGroups, useSchedule, useTimeSlots } from './api/queries'
 import { BottomNav, DaySchedule, Header, WeekGrid, dayNumber, weekRangeLabel } from './ScheduleComponents'
+import { AdminLogin } from './pages/admin/AdminLogin'
 import { AdminSchedule } from './pages/admin/AdminSchedule'
-import type { Day, Group, View } from './types'
+import type { AdminSession, Group, View } from './types'
 
 const WEEKDAY_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
 const COURSES = [1, 2, 3, 4]
@@ -24,7 +25,7 @@ export function App() {
   const [selectedDay, setSelectedDay] = useState(0)
   const [now, setNow] = useState(() => new Date())
   const [menuOpen, setMenuOpen] = useState(false)
-  const [scheduleOverrides, setScheduleOverrides] = useState<Record<string, Day[]>>({})
+  const [adminSession, setAdminSession] = useState<AdminSession | null>(() => readAdminSession())
 
   // Выбор группы на экране настройки.
   const [course, setCourse] = useState(1)
@@ -64,16 +65,19 @@ export function App() {
     }
   }, [view, adminGroupId, groupId, groups.data])
 
-  const overrideKey = (id: number | null) => id !== null && weekNumber !== null ? `${id}:${weekNumber}` : ''
   const week = schedule.data?.week
-  const days = scheduleOverrides[overrideKey(groupId)] ?? schedule.data?.days ?? []
-  const adminDays = scheduleOverrides[overrideKey(adminGroupId)] ?? adminSchedule.data?.days ?? []
-  const saveAdminDays = (nextDays: Day[], groupIds: number[]) => {
-    setScheduleOverrides((previous) => {
-      const next = { ...previous }
-      groupIds.forEach((id) => { next[overrideKey(id)] = nextDays })
-      return next
-    })
+  const days = schedule.data?.days ?? []
+  const adminDays = adminSchedule.data?.days ?? []
+
+  const loginAdmin = (session: AdminSession) => {
+    writeAdminSession(session)
+    setAdminSession(session)
+  }
+
+  const logoutAdmin = () => {
+    clearAdminSession()
+    setAdminSession(null)
+    setMenuOpen(false)
   }
 
   // На текущей неделе открываем сегодняшний день.
@@ -177,9 +181,10 @@ export function App() {
       onMenu={() => setMenuOpen((open) => !open)}
     />
     {menuOpen && <div className="role-switch-menu">
-      <span>ДЕМО-РЕЖИМ</span>
+      <span>РЕЖИМ</span>
       <button onClick={() => nav('day')}>Студенческое расписание</button>
       <button onClick={() => nav('admin')}>Администрирование расписания</button>
+      {adminSession && <button onClick={logoutAdmin}>Выйти из админки</button>}
     </div>}
 
     <main className="content">
@@ -311,7 +316,9 @@ export function App() {
         )}
       </>}
 
-      {view === 'admin' && (
+      {view === 'admin' && !adminSession && <AdminLogin onLogin={loginAdmin} />}
+
+      {view === 'admin' && adminSession && (
         <AdminSchedule
           groups={groups.data ?? []}
           groupId={adminGroupId}
@@ -319,9 +326,10 @@ export function App() {
           days={adminDays}
           slots={timeSlots.data ?? []}
           currentMinutes={currentMinutes}
+          token={adminSession.token}
           onGroupChange={setAdminGroupId}
           onWeekMove={moveAdminWeek}
-          onDaysChange={saveAdminDays}
+          onUnauthorized={logoutAdmin}
         />
       )}
     </main>

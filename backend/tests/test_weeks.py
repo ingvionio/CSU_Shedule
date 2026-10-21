@@ -66,6 +66,15 @@ def test_текущая_неделя_прижимается_к_границам(
     assert weeks.current_week_number(semester, date(2026, 10, 20)) == 8
 
 
+def test_в_воскресенье_текущая_следующая_неделя(semester):
+    # 25.10.2026 — воскресенье 8-й недели.
+    assert weeks.current_week_number(semester, date(2026, 10, 24)) == 8
+    assert weeks.current_week_number(semester, date(2026, 10, 25)) == 9
+    assert weeks.build_week_info(semester, 9, date(2026, 10, 25)).is_current is True
+    # Воскресенье последней недели — следующей нет, остаётся последняя.
+    assert weeks.current_week_number(semester, date(2027, 1, 3)) == 18
+
+
 def test_соседние_недели_не_выходят_за_семестр(semester):
     first = weeks.build_week_info(semester, 1, date(2026, 10, 20))
     last = weeks.build_week_info(semester, 18, date(2026, 10, 20))

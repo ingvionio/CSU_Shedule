@@ -57,7 +57,12 @@ def current_week_number(semester: Semester, today: date) -> int:
 
     До начала семестра -- первая неделя, после конца -- последняя. Так
     расписание открывается всегда, а не отдаёт ошибку на каникулах.
+
+    В воскресенье пар нет, поэтому текущей считается следующая неделя:
+    студент сразу видит расписание на понедельник.
     """
+    if today.isoweekday() == 7:
+        today += timedelta(days=1)
     number = week_number_for_date(semester, today)
     if number is not None:
         return number

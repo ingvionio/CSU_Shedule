@@ -1,6 +1,6 @@
 import { ArrowLeft, CalendarDays, Clock3, MapPin, Menu, UserRound } from 'lucide-react'
 
-import type { Day, Lesson, TimeSlot, View } from './types'
+import type { Day, Lesson, MovePoint, TimeSlot, View } from './types'
 
 const WEEKDAY_NAMES = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота']
 const WEEKDAY_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
@@ -23,6 +23,38 @@ function statusClass(status: string): string {
 
 export function dayLabel(date: string): string {
   return new Date(date).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })
+}
+
+/** «23 октября, 13:15–14:45» — куда или откуда перенесена пара. */
+function pointLabel(point: MovePoint): string {
+  return `${dayLabel(point.date)}, ${point.start_time}–${point.end_time}`
+}
+
+/** Прежние значения изменённой пары: «ауд. 132Б», «13:15–14:45»… */
+function originalLabel(lesson: Lesson): string | null {
+  const original = lesson.change?.original
+  if (!original) return null
+  const parts: string[] = []
+  if ('start_time' in original || 'end_time' in original) {
+    parts.push(`${original.start_time ?? lesson.start_time}–${original.end_time ?? lesson.end_time}`)
+  }
+  if ('subject' in original) parts.push(String(original.subject))
+  if ('type' in original) parts.push((original.type as { name: string }).name)
+  if ('teacher' in original) parts.push(original.teacher ? String(original.teacher) : 'без преподавателя')
+  if ('room' in original) parts.push(original.room ? `ауд. ${original.room}` : 'без аудитории')
+  return parts.length ? `Было: ${parts.join(', ')}` : null
+}
+
+/** Пояснения к изменённой паре для студента и админа. */
+export function changeDetails(lesson: Lesson): string[] {
+  const change = lesson.change
+  if (!change) return []
+  return [
+    change.moved_to && `Перенесена на ${pointLabel(change.moved_to)}`,
+    change.moved_from && `Перенесена с ${pointLabel(change.moved_from)}`,
+    originalLabel(lesson),
+    change.comment,
+  ].filter((line): line is string => Boolean(line))
 }
 
 export function dayNumber(date: string): string {
@@ -119,7 +151,7 @@ export function LessonCard({ lesson }: { lesson: Lesson }) {
             </span>
           )}
         </div>
-        {lesson.change?.comment && <p className="change-note">{lesson.change.comment}</p>}
+        {changeDetails(lesson).map((line) => <p className="change-note" key={line}>{line}</p>)}
         <div className="lesson-meta">
           <span>{lesson.type.name}</span>
           {lesson.subgroup !== null && <span>{lesson.subgroup} подгруппа</span>}

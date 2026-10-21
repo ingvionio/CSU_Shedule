@@ -1,3 +1,4 @@
+import datetime as dt
 from datetime import date, datetime, time
 
 from sqlalchemy import (
@@ -11,6 +12,7 @@ from sqlalchemy import (
     SmallInteger,
     String,
     Time,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -90,4 +92,61 @@ class Lesson(Base, TimestampMixin):
         CheckConstraint("status IN ('draft','published')", name="ck_lessons_status"),
         CheckConstraint("subgroup IS NULL OR subgroup BETWEEN 1 AND 4", name="ck_lessons_subgroup"),
         Index("ix_lessons_lookup", "group_id", "weekday", "status"),
+    )
+
+
+class LessonOverride(Base):
+    """Временное изменение расписания группы на конкретную дату.
+
+    Постоянные пары не перезаписываются: итоговая неделя собирается при
+    запросе. Для `move`, `replace` и `add` запись хранит полное описание
+    итоговой пары (недостающие поля при создании берутся из исходной).
+    """
+
+    __tablename__ = "lesson_overrides"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    semester_id: Mapped[int] = mapped_column(ForeignKey("semesters.id", ondelete="CASCADE"), index=True)
+    group_id: Mapped[int] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))
+
+    # Дата исходной пары (для `add` — дата новой пары).
+    date: Mapped[dt.date] = mapped_column(Date, index=True)
+    # Исходная постоянная пара; null для `add`.
+    lesson_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lessons.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    # Для `move`: куда перенесли.
+    target_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True, index=True)
+
+    # Итоговая пара для `move` / `replace` / `add`.
+    start_time: Mapped[time | None] = mapped_column(Time, nullable=True)
+    end_time: Mapped[time | None] = mapped_column(Time, nullable=True)
+    slot: Mapped[int | None] = mapped_column(ForeignKey("time_slots.number"), nullable=True)
+    subject_id: Mapped[int | None] = mapped_column(ForeignKey("subjects.id", ondelete="RESTRICT"), nullable=True)
+    lesson_type: Mapped[str | None] = mapped_column(
+        ForeignKey("lesson_types.code", ondelete="RESTRICT"), nullable=True
+    )
+    teacher_id: Mapped[int | None] = mapped_column(ForeignKey("teachers.id", ondelete="SET NULL"), nullable=True)
+    room_id: Mapped[int | None] = mapped_column(ForeignKey("rooms.id", ondelete="SET NULL"), nullable=True)
+    subgroup: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+
+    comment: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Одно действие админа для потока создаёт по записи на группу с общим batch_id.
+    batch_id: Mapped[str] = mapped_column(String(36), index=True)
+    status: Mapped[str] = mapped_column(String(16), default=PublishStatus.PUBLISHED.value)
+    created_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    lesson: Mapped[Lesson | None] = relationship(lazy="joined")
+    subject: Mapped[Subject | None] = relationship(lazy="joined")
+    type: Mapped[LessonType | None] = relationship(lazy="joined")
+    teacher: Mapped[Teacher | None] = relationship(lazy="joined")
+    room: Mapped[Room | None] = relationship(lazy="joined")
+
+    __table_args__ = (
+        CheckConstraint("kind IN ('cancel','move','replace','add')", name="ck_lesson_overrides_kind"),
+        CheckConstraint("status IN ('draft','published')", name="ck_lesson_overrides_status"),
+        # У одной пары на одну дату — не больше одного изменения.
+        UniqueConstraint("lesson_id", "date", name="uq_lesson_overrides_lesson_date"),
     )

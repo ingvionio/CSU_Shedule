@@ -28,12 +28,18 @@ export type LessonType = {
   name: string
 }
 
+export type OverrideKind = 'cancel' | 'replace' | 'move' | 'add'
+
+export type MovePoint = { date: string; slot: number | null; start_time: string; end_time: string }
+
 export type LessonChange = {
-  kind: 'cancel' | 'replace' | 'move' | 'add'
+  /** id изменения на бэкенде — по нему админ откатывает изменение. */
+  override_id: number
+  kind: OverrideKind
   comment: string | null
   original: Record<string, unknown> | null
-  moved_to: { date: string; slot: number | null; start_time: string; end_time: string } | null
-  moved_from: { date: string; slot: number | null; start_time: string; end_time: string } | null
+  moved_to: MovePoint | null
+  moved_from: MovePoint | null
 }
 
 export type Lesson = {
@@ -86,4 +92,51 @@ export type CurrentWeek = {
   start_date: string
   end_date: string
   semester: { id: number; title: string; total_weeks: number }
+}
+
+/* --- Админка --- */
+
+export type AdminSession = {
+  token: string
+  /** ISO datetime истечения токена. */
+  expires_at: string
+}
+
+export type TokenResponse = {
+  access_token: string
+  token_type: 'bearer'
+  expires_at: string
+}
+
+/**
+ * Временное изменение для группы или потока (POST /admin/overrides).
+ * Поля итоговой пары: не передано или совпадает с исходной — без изменений.
+ * Пустая строка в teacher / room — убрать значение.
+ */
+export type OverrideInput = {
+  group_ids: number[]
+  kind: OverrideKind
+  date: string
+  source_lesson_id?: number | null
+  target_date?: string | null
+  slot?: number | null
+  start_time?: string | null
+  end_time?: string | null
+  subject?: string | null
+  lesson_type?: string | null
+  teacher?: string | null
+  room?: string | null
+  comment?: string | null
+}
+
+export type OverrideCreated = {
+  batch_id: string
+  override_ids: number[]
+  group_ids: number[]
+}
+
+export type Catalog = {
+  subjects: string[]
+  teachers: string[]
+  rooms: string[]
 }

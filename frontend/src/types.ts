@@ -1,4 +1,17 @@
 /** Основные экраны приложения. */
 export type View = 'group' | 'day' | 'week' | 'admin'
 
-export type { Day, Group, Lesson, LessonStatus, TimeSlot, Week, WeekSchedule } from './api/types'
+export type {
+  AdminSession,
+  Day,
+  Group,
+  Lesson,
+  LessonStatus,
+  LessonType,
+  MovePoint,
+  OverrideInput,
+  OverrideKind,
+  TimeSlot,
+  Week,
+  WeekSchedule,
+} from './api/types'

@@ -335,3 +335,9 @@ h1 { margin-top: 7px; font-size: 24px; line-height: 1.16; letter-spacing: -.045e
 .grid-slot-empty:hover { background: #f7f4fb; }
 .grid-lesson-selectable { cursor: pointer; }
 .grid-lesson-selectable:hover { outline: 2px solid var(--purple); outline-offset: -2px; }
+
+/* Админка: вход, ошибки формы, своё время пары */
+.admin-login { width: min(100%, 420px); margin-inline: auto; }
+.form-error { padding: 9px 11px; border: 1px solid #f0c9c2; border-radius: 10px; background: #fdf0ee; color: var(--red-dark); font-size: 11px; line-height: 1.45; }
+.admin-time-row { display: grid; width: 100%; grid-template-columns: 1fr 1fr; gap: 8px; }
+.admin-selected-lesson .admin-change-line { color: var(--purple); }

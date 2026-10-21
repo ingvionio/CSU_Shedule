@@ -4,6 +4,9 @@ from pathlib import Path
 # База для тестов — отдельный SQLite-файл, настройки читаются при импорте app.core.db.
 TEST_DB = Path(__file__).parent / "test_api.db"
 os.environ["DATABASE_URL"] = f"sqlite+pysqlite:///{TEST_DB.as_posix()}"
+os.environ["ADMIN_LOGIN"] = "admin"
+os.environ["ADMIN_PASSWORD"] = "secret"
+os.environ["JWT_SECRET"] = "test-secret"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -49,3 +52,9 @@ def client(filled_db) -> TestClient:
 @pytest.fixture
 def group_ids(client) -> dict[str, int]:
     return {group["name"]: group["id"] for group in client.get("/api/v1/groups").json()}
+
+
+@pytest.fixture
+def admin_headers(client) -> dict[str, str]:
+    response = client.post("/api/v1/auth/admin/login", json={"login": "admin", "password": "secret"})
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}

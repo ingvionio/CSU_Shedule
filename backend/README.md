@@ -11,7 +11,10 @@ FastAPI + SQLAlchemy + PostgreSQL. Отдаёт готовое расписан�
 | Импорт в БД | `app/services/importer.py` | справочники, группы, постоянные пары |
 | Календарь недель | `app/services/weeks.py` | номер, чётность и даты недели |
 | Сборка недели | `app/services/schedule.py` | отбор пар группы на неделю |
+| Временные изменения | `app/services/overrides.py` | создание и откат изменений, сопоставление пар потока, проверка пересечений |
+| Авторизация | `app/core/security.py` | вход админа по логину/паролю из `.env`, JWT |
 | API | `app/api/v1/public.py` | публичные эндпоинты для студента |
+| API | `app/api/v1/auth.py`, `app/api/v1/admin.py` | вход админа и админские эндпоинты |
 
 ## Запуск
 
@@ -19,6 +22,7 @@ FastAPI + SQLAlchemy + PostgreSQL. Отдаёт готовое расписан�
 
 ```bash
 docker compose up -d --build
+docker compose exec backend python -m alembic upgrade head
 docker compose exec backend python -m app.cli seed-semester
 docker compose exec backend python -m app.cli import-excel "/app/../Расписание_ИИТ_1_сем_26_27_уч_г_РАБОЧИЙ_ВАРИАНТ.xlsx"
 ```
@@ -65,9 +69,64 @@ DATABASE_URL="sqlite+pysqlite:///./schedule.db" python -m app.cli init-db
 | GET | `/api/v1/groups` | список групп (id, name, course) |
 | GET | `/api/v1/time-slots` | сетка звонков, нужна фронту для сетки недели |
 | GET | `/api/v1/weeks/current` | номер, чётность и даты текущей недели |
-| GET | `/api/v1/groups/{group_id}/schedule?week=N` | **расписание группы на неделю**; без `week` — текущая |
+| GET | `/api/v1/lesson-types` | форматы пар |
+| GET | `/api/v1/groups/{group_id}/schedule?week=N` | **расписание группы на неделю** с применёнными изменениями; без `week` — текущая |
+| POST | `/api/v1/auth/admin/login` | вход админа: `{login, password}` → `{access_token, expires_at}` |
+| GET | `/api/v1/admin/catalog` | предметы, преподаватели, аудитории для подсказок |
+| POST | `/api/v1/admin/overrides` | временное изменение для группы или потока |
+| DELETE | `/api/v1/admin/overrides/{id}?batch=true` | откатить изменение (`batch` — для всех групп потока) |
+
+`/admin/*` требуют заголовок `Authorization: Bearer <token>`. Логин и пароль
+админа — `ADMIN_LOGIN` / `ADMIN_PASSWORD` в `.env` (в docker-compose по
+умолчанию `admin` / `admin`), секрет подписи — `JWT_SECRET`. Пустой
+`ADMIN_PASSWORD` выключает вход.
 
 Структура ответа — в `03-schedule-json.md`. Интерактивная документация: `/docs`.
+
+## Временные изменения
+
+Постоянные пары (`lessons`) не меняются. Изменения лежат в `lesson_overrides`
+(одна запись — одна группа и одна дата) и применяются при сборке недели:
+
+| `kind` | Что в ответе недели |
+|---|---|
+| `cancel` | пара со статусом `cancelled` |
+| `replace` | пара с новыми полями, статус `changed`, прежние значения в `change.original` |
+| `move` | в исходный день `moved_out` (+ `moved_to`), в новый — `moved_in` (+ `moved_from`); может пересекать неделю |
+| `add` | новая пара `added` |
+
+Тело `POST /admin/overrides`:
+
+```json
+{
+  "group_ids": [5, 6],
+  "kind": "move",
+  "date": "2026-10-14",
+  "source_lesson_id": 120,
+  "target_date": "2026-10-16",
+  "slot": null, "start_time": "17:00", "end_time": "18:30",
+  "subject": "Английский язык", "lesson_type": "practice",
+  "teacher": "Смирнова Е. В.", "room": "Г-12",
+  "comment": "Отработка"
+}
+```
+
+* Время — либо `slot` (подставится из сетки), либо `start_time`/`end_time`;
+  своё время, совпавшее со звонком, получает номер пары.
+* Поля итоговой пары: не передано или совпадает с исходной парой — остаётся
+  как у пары группы. Так для потока у каждой группы сохраняются свои
+  аудитория и преподаватель. Пустая строка в `teacher`/`room` — убрать.
+* Поток: у остальных групп ищется та же пара — тот же день, время и предмет.
+  Если у какой-то группы её нет — 422, ничего не сохраняется.
+* Новое изменение пары на ту же дату заменяет прежнее.
+* Новая пара не может пересекаться по времени с другими парами группы —
+  409. Отменённые и перенесённые пары время не занимают, пары разных
+  подгрупп могут стоять одновременно.
+* Изменения сразу видны студентам (`status = published`); черновики заложены
+  в схеме, но пока не используются.
+* Повторный импорт Excel пересоздаёт постоянные пары, поэтому изменения,
+  привязанные к старым парам (`cancel`/`move`/`replace`), удаляются вместе с
+  ними. Доп. пары (`add`) остаются.
 
 ## Формат Excel
 
@@ -107,5 +166,5 @@ python -m pytest tests -q
 
 ## Чего ещё нет
 
-Временные изменения (`lesson_overrides`), админка, загрузка Excel через API,
-авторизация. У всех пар в ответе `status = "regular"`, `change = null`.
+Загрузка Excel через API, черновики и публикация, пользователи и роли
+(сейчас один админ из `.env`), вход через Moodle.

@@ -59,6 +59,7 @@ GET /api/v1/groups/{group_id}/schedule?week={week_number}
 
 | Поле | Тип | Когда заполнено |
 |---|---|---|
+| `override_id` | int | всегда: id изменения, по нему админка откатывает его (`DELETE /admin/overrides/{id}`) |
 | `kind` | `"cancel"` \| `"replace"` \| `"move"` \| `"add"` | всегда |
 | `comment` | string \| null | причина от админа |
 | `original` | object \| null | для `changed`: прежние значения изменённых полей |
@@ -130,6 +131,7 @@ GET /api/v1/groups/{group_id}/schedule?week={week_number}
           "teacher": "Сидоров П. А.",
           "status": "changed",
           "change": {
+            "override_id": 41,
             "kind": "replace",
             "comment": "Аудитория на ремонте",
             "original": { "room": "В-201" },
@@ -148,6 +150,7 @@ GET /api/v1/groups/{group_id}/schedule?week={week_number}
           "teacher": "Кузнецов В. Н.",
           "status": "cancelled",
           "change": {
+            "override_id": 42,
             "kind": "cancel",
             "comment": "Преподаватель на конференции",
             "original": null,
@@ -173,6 +176,7 @@ GET /api/v1/groups/{group_id}/schedule?week={week_number}
           "teacher": "Смирнова Е. В.",
           "status": "moved_out",
           "change": {
+            "override_id": 44,
             "kind": "move",
             "comment": null,
             "original": null,
@@ -198,6 +202,7 @@ GET /api/v1/groups/{group_id}/schedule?week={week_number}
           "teacher": "Орлов Д. М.",
           "status": "added",
           "change": {
+            "override_id": 45,
             "kind": "add",
             "comment": "Отработка",
             "original": null,
@@ -235,6 +240,7 @@ GET /api/v1/groups/{group_id}/schedule?week={week_number}
           "teacher": "Смирнова Е. В.",
           "status": "moved_in",
           "change": {
+            "override_id": 44,
             "kind": "move",
             "comment": null,
             "original": null,

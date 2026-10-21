@@ -20,6 +20,15 @@ class ImportStatus(StrEnum):
     PUBLISHED = "published"
 
 
+class OverrideKind(StrEnum):
+    """Вид временного изменения на конкретную дату."""
+
+    CANCEL = "cancel"
+    MOVE = "move"
+    REPLACE = "replace"
+    ADD = "add"
+
+
 class LessonStatus(StrEnum):
     """Статус пары в собранном расписании недели (контракт 03-schedule-json.md)."""
 

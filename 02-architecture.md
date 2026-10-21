@@ -71,7 +71,7 @@ docker-compose.yml
 
 | Метод | Путь | Назначение |
 |---|---|---|
-| POST | `/api/v1/auth/admin/login` | Вход админа, выдача JWT |
+| POST | `/api/v1/auth/admin/login` | Вход админа, выдача JWT (пока один логин/пароль из `.env`) |
 | GET | `/api/v1/auth/moodle/login` | Переход на вход через Moodle (после уточнения способа) |
 | GET | `/api/v1/auth/moodle/callback` | Возврат из Moodle, создание/обновление пользователя, определение группы |
 | GET | `/api/v1/me` | Текущий пользователь, роль, группа |
@@ -90,13 +90,14 @@ docker-compose.yml
 
 | Метод | Путь | Назначение |
 |---|---|---|
-| GET | `/api/v1/admin/time-slots` | Сетка звонков (для выбора времени в редакторе) |
-| GET | `/api/v1/admin/lesson-types` | Список форматов пар |
+| GET | `/api/v1/time-slots` | Сетка звонков (публичный: нужен и студенту для сетки недели) |
+| GET | `/api/v1/lesson-types` | Список форматов пар (публичный) |
+| GET | `/api/v1/admin/catalog` | Предметы, преподаватели, аудитории — подсказки в форме изменения |
 | POST | `/api/v1/admin/imports` | Загрузить Excel (курс, семестр) → черновик + отчёт об ошибках парсинга |
 | GET | `/api/v1/admin/imports/{id}` | Результат парсинга / предпросмотр |
 | POST | `/api/v1/admin/imports/{id}/publish` | Опубликовать загруженное расписание |
 | GET/POST/PATCH/DELETE | `/api/v1/admin/lessons` | Постоянные пары (постоянные изменения) |
-| GET/POST/PATCH/DELETE | `/api/v1/admin/overrides` | Временные изменения (отмена, перенос, замена, доп. пара) |
+| POST / DELETE | `/api/v1/admin/overrides` | Временные изменения (отмена, перенос, замена, доп. пара) для группы или потока; `DELETE /{id}?batch=true` — откат для всего потока |
 | GET | `/api/v1/admin/groups/{group_id}/schedule/preview?week={n}` | Предпросмотр недели с учётом черновиков |
 | POST | `/api/v1/admin/publish` | Опубликовать черновые изменения |
 

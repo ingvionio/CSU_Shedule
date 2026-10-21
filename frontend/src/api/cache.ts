@@ -6,6 +6,8 @@
  * поэтому каждое обращение защищено try/catch.
  */
 
+import type { AdminSession } from './types'
+
 const PREFIX = 'csu-schedule:'
 
 export function readCache<T>(key: string): T | null {
@@ -35,4 +37,29 @@ export function readSelectedGroup(): number | null {
 
 export function writeSelectedGroup(groupId: number): void {
   writeCache(GROUP_KEY, groupId)
+}
+
+export function removeCache(key: string): void {
+  try {
+    localStorage.removeItem(PREFIX + key)
+  } catch {
+    // см. writeCache
+  }
+}
+
+const ADMIN_KEY = 'admin-session'
+
+/** Сессия админа на устройстве. Истёкшая не возвращается. */
+export function readAdminSession(): AdminSession | null {
+  const session = readCache<AdminSession>(ADMIN_KEY)
+  if (!session?.token || new Date(session.expires_at).getTime() <= Date.now()) return null
+  return session
+}
+
+export function writeAdminSession(session: AdminSession): void {
+  writeCache(ADMIN_KEY, session)
+}
+
+export function clearAdminSession(): void {
+  removeCache(ADMIN_KEY)
 }

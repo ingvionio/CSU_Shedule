@@ -1,8 +1,8 @@
-import { useQuery, type UseQueryResult } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 
 import { api } from './client'
 import { readCache, writeCache } from './cache'
-import type { CurrentWeek, Group, TimeSlot, WeekSchedule } from './types'
+import type { Catalog, CurrentWeek, Group, LessonType, OverrideInput, TimeSlot, WeekSchedule } from './types'
 
 export function useGroups(): UseQueryResult<Group[]> {
   return useQuery({
@@ -18,6 +18,15 @@ export function useTimeSlots(): UseQueryResult<TimeSlot[]> {
     queryKey: ['time-slots'],
     queryFn: async () => writeCache('time-slots', await api.timeSlots()),
     initialData: () => readCache<TimeSlot[]>('time-slots') ?? undefined,
+    staleTime: 24 * 60 * 60 * 1000,
+  })
+}
+
+export function useLessonTypes(): UseQueryResult<LessonType[]> {
+  return useQuery({
+    queryKey: ['lesson-types'],
+    queryFn: async () => writeCache('lesson-types', await api.lessonTypes()),
+    initialData: () => readCache<LessonType[]>('lesson-types') ?? undefined,
     staleTime: 24 * 60 * 60 * 1000,
   })
 }
@@ -47,4 +56,39 @@ export function useSchedule(groupId: number | null, week: number | null): UseQue
     enabled: groupId !== null && week !== null,
     staleTime: 5 * 60 * 1000,
   })
+}
+
+/* --- Админка --- */
+
+/** Предметы, преподаватели и аудитории для подсказок в форме изменения. */
+export function useCatalog(token: string | null): UseQueryResult<Catalog> {
+  return useQuery({
+    queryKey: ['admin-catalog'],
+    queryFn: () => api.catalog(token!),
+    enabled: token !== null,
+    staleTime: 10 * 60 * 1000,
+  })
+}
+
+/**
+ * Создание и откат временных изменений. После ответа бэкенда все недели
+ * перезапрашиваются: изменение может касаться нескольких групп и недель
+ * (поток, перенос через границу недели).
+ */
+export function useOverrideMutations(token: string) {
+  const queryClient = useQueryClient()
+  const refresh = () => Promise.all([
+    queryClient.invalidateQueries({ queryKey: ['schedule'] }),
+    queryClient.invalidateQueries({ queryKey: ['admin-catalog'] }),
+  ])
+
+  const create = useMutation({
+    mutationFn: (body: OverrideInput) => api.createOverride(token, body),
+    onSuccess: refresh,
+  })
+  const remove = useMutation({
+    mutationFn: ({ id, batch }: { id: number; batch: boolean }) => api.deleteOverride(token, id, batch),
+    onSuccess: refresh,
+  })
+  return { create, remove }
 }

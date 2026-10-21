@@ -9,10 +9,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
-from app.models import Group, TimeSlot
+from app.models import Group, LessonType, TimeSlot
 from app.schemas.schedule import (
     CurrentWeekOut,
     GroupOut,
+    LessonTypeOut,
     SemesterOut,
     TimeSlotOut,
     WeekScheduleOut,
@@ -43,6 +44,12 @@ def list_time_slots(db: Session = Depends(get_db)) -> list[TimeSlotOut]:
         )
         for slot in slots
     ]
+
+
+@router.get("/lesson-types", response_model=list[LessonTypeOut], summary="Форматы пар")
+def list_lesson_types(db: Session = Depends(get_db)) -> list[LessonTypeOut]:
+    types = db.scalars(select(LessonType).order_by(LessonType.name)).all()
+    return [LessonTypeOut(code=item.code, name=item.name) for item in types]
 
 
 @router.get("/weeks/current", response_model=CurrentWeekOut, summary="Текущая учебная неделя")

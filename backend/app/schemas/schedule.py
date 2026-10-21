@@ -33,8 +33,9 @@ class LessonTypeOut(BaseModel):
 
 
 class ChangeOut(BaseModel):
-    """Детали временного изменения. Появится на следующем этапе."""
+    """Детали временного изменения."""
 
+    override_id: int = Field(description="id изменения — чтобы админ мог его откатить")
     kind: Literal["cancel", "replace", "move", "add"]
     comment: str | None = None
     original: dict | None = None
