@@ -1,4 +1,4 @@
-import { ArrowLeft, CalendarDays, Clock3, MapPin, Menu, UserRound } from 'lucide-react'
+import { ArrowLeft, CalendarDays, Clock3, Map as MapIcon, MapPin, Menu, UserRound } from 'lucide-react'
 
 import type { Day, Lesson, MovePoint, TimeSlot, View } from './types'
 
@@ -309,15 +309,17 @@ export function WeekGrid({
 export function BottomNav({ view, onNavigate }: { view: View; onNavigate: (view: View) => void }) {
   const items = [
     { label: 'Расписание', icon: CalendarDays, target: 'day' as View },
+    { label: 'Карта', icon: MapIcon, target: 'map' as View },
     { label: 'Группа', icon: UserRound, target: 'group' as View },
   ]
 
   return (
-    <nav className="bottom-nav student-nav">
+    <nav className="bottom-nav student-nav" aria-label="Разделы приложения">
       {items.map(({ label, icon: Icon, target }) => (
         <button
           key={label}
           className={`nav-item ${view === target || (target === 'day' && view === 'week') ? 'active' : ''}`}
+          aria-current={view === target || (target === 'day' && view === 'week') ? 'page' : undefined}
           onClick={() => onNavigate(target)}
         >
           <Icon size={18} />

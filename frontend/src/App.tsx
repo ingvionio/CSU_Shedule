@@ -6,6 +6,7 @@ import { useCurrentWeek, useGroups, useSchedule, useTimeSlots } from './api/quer
 import { BottomNav, DaySchedule, Header, WeekGrid, dayNumber, weekRangeLabel } from './ScheduleComponents'
 import { AdminLogin } from './pages/admin/AdminLogin'
 import { AdminSchedule } from './pages/admin/AdminSchedule'
+import { CampusMap } from './pages/CampusMap'
 import type { AdminSession, Group, View } from './types'
 
 const WEEKDAY_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
@@ -37,6 +38,7 @@ export function App() {
   const [dragging, setDragging] = useState(false)
   const dragStart = useRef<{ x: number; y: number } | null>(null)
   const ignoreDateClick = useRef(false)
+  const mapReturnView = useRef<View>('day')
 
   const groups = useGroups()
   const timeSlots = useTimeSlots()
@@ -56,7 +58,9 @@ export function App() {
 
   // Пока группа не выбрана, показываем экран выбора.
   useEffect(() => {
-    if (groupId === null && groups.data?.length) setView('group')
+    if (groupId === null && groups.data?.length) {
+      setView((current) => current === 'day' || current === 'week' ? 'group' : current)
+    }
   }, [groupId, groups.data])
 
   useEffect(() => {
@@ -145,6 +149,7 @@ export function App() {
   }
 
   const nav = (next: View) => {
+    if (next === 'map' && view !== 'map') mapReturnView.current = view
     setView(next)
     setMenuOpen(false)
   }
@@ -154,24 +159,9 @@ export function App() {
     if (target != null) setWeekNumber(target)
   }
 
-  if (groups.isLoading && !groups.data) {
-    return <div className="app-shell"><div className="state-note">Загружаем расписание…</div></div>
-  }
-
-  if (groups.isError && !groups.data) {
-    return (
-      <div className="app-shell">
-        <div className="state-note error-note">
-          <span>{(groups.error as Error).message}</span>
-          <button className="button button-secondary" onClick={() => groups.refetch()}>
-            <RefreshCw size={16} />Повторить
-          </button>
-        </div>
-      </div>
-    )
-  }
-
-  return <div className="app-shell">
+  return <>
+    <CampusMap active={view === 'map'} onBack={() => nav(mapReturnView.current)} />
+    <div className="app-shell" hidden={view === 'map'}>
     <Header
       title={view === 'group' ? 'Выберите группу' : view === 'admin' ? 'Администрирование' : 'Расписание'}
       subtitle={view === 'group'
@@ -188,6 +178,13 @@ export function App() {
     </div>}
 
     <main className="content">
+      {groups.isLoading && !groups.data && <div className="state-note">Загружаем расписание…</div>}
+      {groups.isError && !groups.data && <div className="state-note error-note">
+        <span>{(groups.error as Error).message}</span>
+        <button className="button button-secondary" onClick={() => groups.refetch()}>
+          <RefreshCw size={16} />Повторить
+        </button>
+      </div>}
       {view === 'group' && <section className="screen-card selection-screen">
         <div className="eyebrow">ПЕРВЫЙ ШАГ</div>
         <h1>Выберите свою группу</h1>
@@ -234,7 +231,7 @@ export function App() {
           : <div className="empty-day">На этом направлении групп нет</div>}
       </section>}
 
-      {groupId === null && view !== 'group' && (
+      {groupId === null && (view === 'day' || view === 'week') && !groups.isLoading && !groups.isError && (
         <div className="state-note">Выберите группу, чтобы увидеть расписание.</div>
       )}
 
@@ -335,5 +332,6 @@ export function App() {
     </main>
 
     <BottomNav view={view} onNavigate={nav} />
-  </div>
+    </div>
+  </>
 }

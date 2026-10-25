@@ -23,6 +23,7 @@
 }
 
 * { box-sizing: border-box; }
+.app-shell[hidden], .campus-map[hidden] { display: none; }
 body { margin: 0; min-width: 320px; min-height: 100vh; background: #eef0f3; }
 button, input { font: inherit; }
 button { color: inherit; cursor: pointer; }
@@ -91,7 +92,7 @@ h1 { margin-top: 7px; font-size: 24px; line-height: 1.16; letter-spacing: -.045e
 .week-grid-scroll { width: 100%; max-height: calc(100dvh - 300px); overflow: auto; overscroll-behavior: contain; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); }
 .week-grid { display: grid; grid-template-columns: 48px repeat(6, 104px); grid-template-rows: 52px repeat(8, 104px); width: max-content; min-width: 100%; position: relative; }
 .grid-corner, .grid-day, .grid-time, .grid-cell, .grid-lesson { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-.grid-corner { position: sticky; top: 0; left: 0; z-index: 4; background: #faf9fc; }
+.grid-corner { position: sticky; top: 0; left: 0; z-index: 3; background: #faf9fc; }
 .grid-day { position: sticky; top: 0; z-index: 3; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; background: #faf9fc; color: var(--text); }
 .grid-day b { font-size: 11px; }
 .grid-day span { color: var(--muted); font-size: 10px; }
@@ -139,7 +140,16 @@ h1 { margin-top: 7px; font-size: 24px; line-height: 1.16; letter-spacing: -.045e
 .empty-day { padding: 17px 14px; border: 1px dashed var(--line-strong); border-radius: 13px; color: #858a94; background: rgba(255,255,255,.55); font-size: 12px; text-align: center; }
 
 .bottom-nav { z-index: 3; position: fixed; bottom: 0; left: 50%; display: grid; grid-template-columns: repeat(3, 1fr); width: min(100%, 430px); min-height: 72px; padding: 8px 14px max(8px, env(safe-area-inset-bottom)); transform: translateX(-50%); border-top: 1px solid var(--line); background: rgba(255, 255, 255, .96); backdrop-filter: blur(18px); }
-.student-nav { grid-template-columns: repeat(2, 1fr); }
+.student-nav { grid-template-columns: repeat(3, 1fr); }
+.campus-map { position: fixed; inset: 0; z-index: 20; display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100dvh; background: #f4f4f4; overscroll-behavior: none; }
+.campus-map-header { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: center; min-height: 52px; padding: env(safe-area-inset-top, 0px) max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left)); border-bottom: 1px solid var(--line); background: var(--surface); }
+.campus-map-header strong { text-align: center; font-size: 14px; }
+.campus-map-header .icon-button { width: 44px; height: 44px; text-decoration: none; }
+.campus-map-body { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+.campus-map-frame { display: block; width: 100%; height: 100%; border: 0; }
+.campus-map-status { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px; background: var(--canvas); text-align: center; }
+.campus-map-status strong { font-size: 15px; }
+.campus-map-status p { max-width: 300px; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
 .nav-item { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; border: 0; background: transparent; color: #858a93; font-size: 10px; }
 .nav-item.active { color: var(--purple); font-weight: 650; }
 .nav-item.active svg { stroke-width: 2.4; }

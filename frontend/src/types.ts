@@ -1,5 +1,5 @@
 /** Основные экраны приложения. */
-export type View = 'group' | 'day' | 'week' | 'admin'
+export type View = 'group' | 'day' | 'week' | 'admin' | 'map'
 
 export type {
   AdminSession,
