@@ -12,6 +12,7 @@ from app.core.db import get_db
 from app.models import Group, LessonType, TimeSlot
 from app.schemas.schedule import (
     CurrentWeekOut,
+    DirectionOut,
     GroupOut,
     LessonTypeOut,
     SemesterOut,
@@ -33,7 +34,21 @@ def list_groups(db: Session = Depends(get_db)) -> list[Group]:
     return list(db.scalars(select(Group).order_by(Group.course, Group.name)).all())
 
 
-@router.get("/time-slots", response_model=list[TimeSlotOut], summary="Сетка звонков")
+@router.get("/directions", response_model=list[DirectionOut], summary="Направления подготовки (потоки)")
+def list_directions(db: Session = Depends(get_db)) -> list[DirectionOut]:
+    rows = db.execute(
+        select(Group.direction, Group.course)
+        .where(Group.direction.is_not(None))
+        .distinct()
+        .order_by(Group.direction, Group.course)
+    ).all()
+    courses: dict[str, list[int]] = {}
+    for direction, course in rows:
+        courses.setdefault(direction, []).append(course)
+    return [DirectionOut(code=code, courses=items) for code, items in courses.items()]
+
+
+@router.get("/time-slots",response_model=list[TimeSlotOut], summary="Сетка звонков")
 def list_time_slots(db: Session = Depends(get_db)) -> list[TimeSlotOut]:
     slots = db.scalars(select(TimeSlot).order_by(TimeSlot.number)).all()
     return [

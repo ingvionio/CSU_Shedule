@@ -35,6 +35,8 @@ class Group(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     course: Mapped[int] = mapped_column(SmallInteger)
+    # Направление подготовки (поток): «ПИ», «ПрИ», «БИ». Заполняется из названия.
+    direction: Mapped[str | None] = mapped_column(String(8), nullable=True, index=True)
     moodle_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     __table_args__ = (CheckConstraint("course BETWEEN 1 AND 6", name="ck_groups_course"),)

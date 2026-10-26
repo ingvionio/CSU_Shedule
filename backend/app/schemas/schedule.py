@@ -17,6 +17,12 @@ class GroupOut(BaseModel):
     id: int
     name: str
     course: int
+    direction: str | None = None
+
+
+class DirectionOut(BaseModel):
+    code: str
+    courses: list[int] = Field(description="Курсы, на которых есть группы этого направления")
 
 
 class TimeSlotOut(BaseModel):
