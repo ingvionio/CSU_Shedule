@@ -12,6 +12,7 @@
 | [04-current-state.md](04-current-state.md) | что сделано на текущий момент |
 | [05-feedback.md](05-feedback.md) | обращения студентов: папки, почта, ответы, планы |
 | [06-messages.md](06-messages.md) | сообщения студентам: рассылка, «Ознакомлен», напоминания, push |
+| [07-messages-overview.md](07-messages-overview.md) | сообщения студентам простыми словами: как пользоваться студенту, методисту и как настроить |
 | [backend/README.md](backend/README.md) | бэкенд: CLI, API, правила временных изменений |
 | [frontend/README.md](frontend/README.md) | фронтенд: экраны, админка |
 
