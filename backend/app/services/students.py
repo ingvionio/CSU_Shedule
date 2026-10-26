@@ -64,6 +64,13 @@ def register(
     user.last_seen_at = now
     db.flush()
     db.refresh(user, ["group"])
+
+    if group_changed:
+        # Импорт здесь, чтобы не было цикла: сервис сообщений знает о студентах.
+        from app.services.messages import attach_recent_messages
+
+        attach_recent_messages(db, user, now)
+
     db.commit()
     return user, group_changed
 

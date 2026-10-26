@@ -10,6 +10,7 @@ from app.core.db import get_db
 from app.core.security import require_student
 from app.models import User
 from app.schemas.student import MeOut
+from app.services import messages as messages_service
 from app.services import students as students_service
 
 router = APIRouter(prefix="/me")
@@ -23,5 +24,5 @@ def current_student(user_id: int = Depends(require_student), db: Session = Depen
 
 
 @router.get("", response_model=MeOut, summary="Профиль и число непрочитанных")
-def me(user: User = Depends(current_student)) -> MeOut:
-    return MeOut(**profile_out(user).model_dump(), unread_count=0)
+def me(user: User = Depends(current_student), db: Session = Depends(get_db)) -> MeOut:
+    return MeOut(**profile_out(user).model_dump(), unread_count=messages_service.unread_count(db, user.id))
