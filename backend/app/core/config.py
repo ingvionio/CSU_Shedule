@@ -44,6 +44,13 @@ class Settings(BaseSettings):
     # Не чаще одного напоминания по сообщению за столько часов.
     remind_cooldown_hours: int = 6
 
+    # Web Push (VAPID). Ключи: python -m app.cli generate-vapid. Пустые — push
+    # выключен, сообщения всё равно видны в приложении.
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+    # Контакт для push-сервисов: mailto:... или https://...
+    vapid_subject: str = "mailto:admin@example.com"
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

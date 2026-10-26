@@ -19,6 +19,9 @@ from app.schemas.schedule import (
     TimeSlotOut,
     WeekScheduleOut,
 )
+from app.core.config import get_settings
+from app.schemas.student import PushConfigOut
+from app.services import push as push_service
 from app.services import schedule as schedule_service
 from app.services import weeks as weeks_service
 
@@ -48,7 +51,12 @@ def list_directions(db: Session = Depends(get_db)) -> list[DirectionOut]:
     return [DirectionOut(code=code, courses=items) for code, items in courses.items()]
 
 
-@router.get("/time-slots",response_model=list[TimeSlotOut], summary="Сетка звонков")
+@router.get("/push/config", response_model=PushConfigOut, summary="Публичный VAPID-ключ для подписки на push")
+def push_config() -> PushConfigOut:
+    return PushConfigOut(public_key=get_settings().vapid_public_key if push_service.is_configured() else None)
+
+
+@router.get("/time-slots", response_model=list[TimeSlotOut], summary="Сетка звонков")
 def list_time_slots(db: Session = Depends(get_db)) -> list[TimeSlotOut]:
     slots = db.scalars(select(TimeSlot).order_by(TimeSlot.number)).all()
     return [

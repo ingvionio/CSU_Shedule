@@ -6,6 +6,7 @@
     python -m app.cli stats                        # что лежит в базе
     python -m app.cli send-emails                  # дослать неотправленные письма
     python -m app.cli send-emails --test <email>   # проверить настройки почты
+    python -m app.cli generate-vapid               # ключи для push-уведомлений
 """
 
 from __future__ import annotations
@@ -127,6 +128,26 @@ def send_emails(test_to: str | None) -> None:
         print(f"Попыток отправки: {deliver_pending(session)}")
 
 
+def generate_vapid() -> None:
+    """Ключи для Web Push: публичный отдаётся браузеру, приватный остаётся на сервере."""
+    import base64
+
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+    from py_vapid import Vapid
+
+    def b64(data: bytes) -> str:
+        return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+    vapid = Vapid()
+    vapid.generate_keys()
+    public = vapid.public_key.public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
+    private = vapid.private_key.private_numbers().private_value.to_bytes(32, "big")
+    print("Добавьте в .env в корне репозитория:\n")
+    print(f"VAPID_PUBLIC_KEY={b64(public)}")
+    print(f"VAPID_PRIVATE_KEY={b64(private)}")
+    print("VAPID_SUBJECT=mailto:<почта для связи>")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="app.cli", description="Команды бэкенда расписания")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -147,6 +168,8 @@ def main() -> None:
     mail = sub.add_parser("send-emails", help="дослать письма из очереди")
     mail.add_argument("--test", metavar="EMAIL", help="отправить проверочное письмо")
 
+    sub.add_parser("generate-vapid", help="сгенерировать ключи для push-уведомлений")
+
     args = parser.parse_args()
 
     if args.command == "init-db":
@@ -159,6 +182,8 @@ def main() -> None:
         stats()
     elif args.command == "send-emails":
         send_emails(args.test)
+    elif args.command == "generate-vapid":
+        generate_vapid()
 
 
 if __name__ == "__main__":

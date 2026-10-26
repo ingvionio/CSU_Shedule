@@ -31,3 +31,24 @@ class StudentTokenOut(BaseModel):
 
 class MeOut(StudentProfileOut):
     unread_count: int
+
+
+class PushKeysIn(BaseModel):
+    p256dh: str = Field(min_length=1, max_length=200)
+    auth: str = Field(min_length=1, max_length=100)
+
+
+class PushSubscriptionIn(BaseModel):
+    """Ровно то, что отдаёт `PushSubscription.toJSON()` в браузере."""
+
+    endpoint: str = Field(min_length=10, max_length=2000, pattern=r"^https://")
+    keys: PushKeysIn
+
+
+class PushSubscriptionOut(BaseModel):
+    id: int
+
+
+class PushConfigOut(BaseModel):
+    # null — push на сервере не настроен.
+    public_key: str | None
