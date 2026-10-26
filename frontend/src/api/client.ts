@@ -1,7 +1,16 @@
 import type {
   AdminFeedback,
+  AdminMessage,
+  AdminMessageDetail,
   Catalog,
   CurrentWeek,
+  Direction,
+  Inbox,
+  InboxMessage,
+  MessageInput,
+  Student,
+  StudentProfile,
+  StudentTokenResponse,
   FeedbackFolder,
   FeedbackInput,
   FeedbackRecipient,
@@ -51,6 +60,8 @@ async function request<T>(path: string, { method = 'GET', body, token, feedbackT
     throw new ApiError('Нет связи с сервером расписания', 0)
   }
 
+  if (response.status === 204) return undefined as T
+
   if (!response.ok) {
     // Бэкенд присылает причину в detail, её можно показать как есть.
     // У ошибок валидации (422 от FastAPI) detail — список, берём первое сообщение.
@@ -94,4 +105,28 @@ export const api = {
   feedbackRecipients: (token: string) => request<FeedbackRecipient[]>('/admin/feedback/recipients', { token }),
   updateRecipient: (token: string, id: number, body: RecipientUpdate) =>
     request<FeedbackRecipient>(`/admin/feedback/recipients/${id}`, { method: 'PATCH', body, token }),
+
+  directions: () => request<Direction[]>('/directions'),
+
+  studentRegister: (full_name: string, group_id: number, device_key: string) =>
+    request<StudentTokenResponse>('/auth/student/register', { method: 'POST', body: { full_name, group_id, device_key } }),
+  me: (token: string) => request<StudentProfile & { unread_count: number }>('/me', { token }),
+  inbox: (token: string) => request<Inbox>('/me/messages', { token }),
+  openMessage: (token: string, id: number) => request<InboxMessage>(`/me/messages/${id}`, { token }),
+  acknowledgeMessage: (token: string, id: number) =>
+    request<InboxMessage>(`/me/messages/${id}/acknowledge`, { method: 'POST', token }),
+
+  students: (token: string, params: { q?: string; course?: number; group_id?: number }) => {
+    const query = new URLSearchParams(
+      Object.entries(params).filter(([, value]) => value !== undefined && value !== '').map(([key, value]) => [key, String(value)]),
+    )
+    return request<Student[]>(`/admin/users?${query}`, { token })
+  },
+  adminMessages: (token: string) => request<AdminMessage[]>('/admin/messages', { token }),
+  adminMessage: (token: string, id: number) => request<AdminMessageDetail>(`/admin/messages/${id}`, { token }),
+  sendMessage: (token: string, body: MessageInput) =>
+    request<AdminMessage>('/admin/messages', { method: 'POST', body, token }),
+  remindMessage: (token: string, id: number) =>
+    request<{ reminded: number }>(`/admin/messages/${id}/remind`, { method: 'POST', token }),
+  deleteMessage: (token: string, id: number) => request<void>(`/admin/messages/${id}`, { method: 'DELETE', token }),
 }

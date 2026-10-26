@@ -2,13 +2,17 @@ import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tan
 
 import { api } from './client'
 import { feedbackToken, readCache, writeCache } from './cache'
+import { asStudent } from './student'
 import type {
   Catalog,
   CurrentWeek,
+  Direction,
   FeedbackInput,
   FeedbackUpdate,
   Group,
+  Inbox,
   LessonType,
+  MessageInput,
   OverrideInput,
   RecipientUpdate,
   TimeSlot,
@@ -167,4 +171,92 @@ export function useFeedbackMutations(token: string) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-feedback-recipients'] }),
   })
   return { update, reply, updateRecipient }
+}
+
+/* --- Рассылка: студент --- */
+
+/** Направления (потоки) — для выбора группы и адресации. */
+export function useDirections(): UseQueryResult<Direction[]> {
+  return useQuery({
+    queryKey: ['directions'],
+    queryFn: async () => writeCache('directions', await api.directions()),
+    initialData: () => readCache<Direction[]>('directions') ?? undefined,
+    staleTime: 60 * 60 * 1000,
+  })
+}
+
+/** Инбокс студента. Сохраняется на устройстве, чтобы сообщения открывались без сети. */
+export function useInbox(enabled: boolean): UseQueryResult<Inbox> {
+  return useQuery({
+    queryKey: ['inbox'],
+    queryFn: async () => writeCache('inbox', await asStudent(api.inbox)),
+    initialData: () => readCache<Inbox>('inbox') ?? undefined,
+    // Сохранённая копия — только чтобы было что показать: при открытии всегда спрашиваем сервер.
+    initialDataUpdatedAt: 0,
+    enabled,
+    staleTime: 30 * 1000,
+    refetchInterval: 2 * 60 * 1000,
+    refetchOnWindowFocus: true,
+  })
+}
+
+export function useInboxMutations() {
+  const queryClient = useQueryClient()
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['inbox'] })
+
+  const open = useMutation({
+    mutationFn: (id: number) => asStudent((token) => api.openMessage(token, id)),
+    onSuccess: refresh,
+  })
+  const acknowledge = useMutation({
+    mutationFn: (id: number) => asStudent((token) => api.acknowledgeMessage(token, id)),
+    onSuccess: refresh,
+  })
+  return { open, acknowledge }
+}
+
+/* --- Рассылка: методист --- */
+
+export function useAdminMessages(token: string) {
+  return useQuery({
+    queryKey: ['admin-messages'],
+    queryFn: () => api.adminMessages(token),
+    refetchInterval: 60 * 1000,
+  })
+}
+
+export function useAdminMessage(token: string, id: number | null) {
+  return useQuery({
+    queryKey: ['admin-messages', id],
+    queryFn: () => api.adminMessage(token, id!),
+    enabled: id !== null,
+  })
+}
+
+export function useStudents(token: string, params: { q?: string; course?: number; group_id?: number }, enabled: boolean) {
+  return useQuery({
+    queryKey: ['admin-students', params],
+    queryFn: () => api.students(token, params),
+    enabled,
+    staleTime: 30 * 1000,
+  })
+}
+
+export function useMessageMutations(token: string) {
+  const queryClient = useQueryClient()
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['admin-messages'] })
+
+  const send = useMutation({
+    mutationFn: (body: MessageInput) => api.sendMessage(token, body),
+    onSuccess: refresh,
+  })
+  const remind = useMutation({
+    mutationFn: (id: number) => api.remindMessage(token, id),
+    onSuccess: refresh,
+  })
+  const remove = useMutation({
+    mutationFn: (id: number) => api.deleteMessage(token, id),
+    onSuccess: refresh,
+  })
+  return { send, remind, remove }
 }
