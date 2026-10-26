@@ -10,6 +10,11 @@
 разработчикам, обращение приходит в папку админки и дублируется на почту
 адресата, ответ студент видит в приложении. Подробно — `05-feedback.md`.
 
+И раздел **«Сообщения»**: методист пишет всем, курсу, потоку, группам или
+отдельным студентам, у важных студент нажимает «Ознакомлен», методист видит
+прочтения и напоминает остальным; приходит push (PWA). Профиль студента —
+ФИО + группа, привязан к устройству. Подробно — `06-messages.md`.
+
 ## Как это работает
 
 ```
@@ -99,7 +104,12 @@ npm run dev        # http://localhost:5173
 | `app/services/mailer.py` | отправка писем из `email_outbox` через SMTP Яндекса |
 | `app/api/v1/feedback.py` | эндпоинты обращений: студент и папки админки |
 | `app/models/feedback.py` | `feedback_recipients`, `feedback_messages`, `feedback_replies`, `email_outbox` |
-| `app/core/security.py` | вход админа (логин/пароль из `.env`) и JWT |
+| `app/core/security.py` | вход админа (логин/пароль из `.env`), JWT админа и студента |
+| `app/services/students.py` | профиль студента: регистрация по ФИО и группе, ключ устройства |
+| `app/services/messages.py` | рассылка: адресация, досылка, прочтение, «Ознакомлен», напоминания |
+| `app/services/push.py` | подписки и отправка Web Push (pywebpush) |
+| `app/services/groups.py` | направление (поток) из названия группы |
+| `app/api/v1/me.py`, `app/api/v1/messages.py` | `/me` студента, инбокс и раздел методиста |
 | `app/api/v1/public.py` | эндпоинты для студента |
 | `app/api/v1/auth.py`, `app/api/v1/admin.py` | вход админа и админские эндпоинты |
 | `app/api/v1/router.py` | сборка роутеров |
@@ -110,9 +120,9 @@ npm run dev        # http://localhost:5173
 | `app/core/config.py` | настройки из `.env` (строка подключения, CORS) |
 | `app/core/db.py` | движок SQLAlchemy и сессии |
 | `app/main.py` | приложение FastAPI, CORS, `/health` |
-| `app/cli.py` | команды: `init-db`, `seed-semester`, `import-excel`, `stats`, `send-emails` |
-| `migrations/` | Alembic: начальная схема, `lesson_overrides`, обращения |
-| `tests/` | 91 тест: разбор ячеек, календарь недель, сквозной путь Excel → БД → API, временные изменения, вход админа, обращения и письма |
+| `app/cli.py` | команды: `init-db`, `seed-semester`, `import-excel`, `stats`, `send-emails`, `generate-vapid` |
+| `migrations/` | Alembic: начальная схема, `lesson_overrides`, обращения, `groups.direction`, `users`, сообщения, push-подписки |
+| `tests/` | 126 тестов (54 из них нужен Excel): разбор ячеек, календарь недель, сквозной путь Excel → БД → API, временные изменения, вход админа, обращения и письма, профиль студента, рассылка, push |
 
 ## Файлы фронтенда
 
@@ -121,7 +131,12 @@ npm run dev        # http://localhost:5173
 | `src/api/types.ts` | типы контракта с бэкендом |
 | `src/api/client.ts` | запросы, разбор ошибок |
 | `src/api/queries.ts` | хуки TanStack Query |
-| `src/api/cache.ts` | последний ответ, выбранная группа и сессия админа в `localStorage` |
+| `src/api/cache.ts` | последний ответ, выбранная группа, сессии админа и студента в `localStorage` |
+| `src/api/student.ts` | профиль студента: регистрация, автообновление токена |
+| `src/api/push.ts` | подписка устройства на push |
+| `src/sw.ts` | service worker: прекэш статики, push-уведомления |
+| `src/pages/messages/StudentMessages.tsx` | «Сообщения» у студента: профиль, инбокс, «Ознакомлен», уведомления |
+| `src/pages/admin/AdminMessages.tsx` | рассылка в админке: форма, прогресс прочтения, напоминания |
 | `src/App.tsx` | экраны и всё состояние |
 | `src/ScheduleComponents.tsx` | шапка, карточка пары, день, сетка недели, нижняя навигация |
 | `src/types.ts` | тип экрана + реэкспорт типов контракта |
@@ -149,6 +164,10 @@ npm run dev        # http://localhost:5173
 | DELETE | `/api/v1/admin/overrides/{id}?batch=true` | откат изменения (`batch` — для всего потока) |
 | POST / GET | `/api/v1/feedback`, `/api/v1/feedback/mine` | отправить обращение / мои обращения по токену устройства |
 | GET / PATCH / POST | `/api/v1/admin/feedback…` | папки, обращения, ответы, адресаты — см. `05-feedback.md` |
+| GET | `/api/v1/directions`, `/api/v1/push/config` | направления (потоки); публичный ключ push |
+| POST | `/api/v1/auth/student/register` | профиль студента → студенческий JWT |
+| GET / POST / DELETE | `/api/v1/me…` | профиль, инбокс, «Ознакомлен», push-подписки — см. `06-messages.md` |
+| GET / POST / DELETE | `/api/v1/admin/messages…`, `/api/v1/admin/users` | рассылка и прочтения — см. `06-messages.md` |
 
 Правила изменений подробно — в `backend/README.md`, раздел «Временные изменения».
 
@@ -208,8 +227,8 @@ npm run dev        # http://localhost:5173
 * постоянные изменения пар (с даты по дату) из админки;
 * черновики и предпросмотр перед публикацией;
 * загрузка Excel через API — пока только команда в консоли;
-* пользователи и роли, вход через Moodle;
-* PWA: манифест и service worker (офлайн сейчас держится на `localStorage`);
+* вход через Moodle (сейчас студент — профиль ФИО + группа на устройстве);
+* продакшен-сборка фронтенда на HTTPS — без неё push в бою не заработает;
 * React Router — экраны переключаются состоянием;
 * фронтенд в Docker;
 * база ответов (FAQ), темы обращений, вопросы другим студентам — задел
