@@ -12,6 +12,7 @@ from app.models.enums import (
 )
 from app.models.feedback import EmailOutbox, FeedbackMessage, FeedbackRecipient, FeedbackReply
 from app.models.lesson import Lesson, LessonOverride, ScheduleImport
+from app.models.user import User
 
 __all__ = [
     "Base",
@@ -36,5 +37,6 @@ __all__ = [
     "Subject",
     "Teacher",
     "TimeSlot",
+    "User",
     "WeekParity",
 ]

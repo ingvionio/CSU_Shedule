@@ -59,6 +59,34 @@ def bare_client(db_schema) -> TestClient:
     return TestClient(app)
 
 
+TEST_GROUPS = [
+    ("ТЕСТ ПИ 991", 1, "ПИ"),
+    ("ТЕСТ ПИ 992", 2, "ПИ"),
+    ("ТЕСТ БИ 991", 1, "БИ"),
+]
+
+
+@pytest.fixture
+def test_groups(db_schema) -> dict[str, int]:
+    """Свои группы с префиксом «ТЕСТ»; после теста удаляются вместе со студентами."""
+    from sqlalchemy import delete
+
+    from app.models import Group, User
+
+    with SessionLocal() as session:
+        groups = [Group(name=name, course=course, direction=direction) for name, course, direction in TEST_GROUPS]
+        session.add_all(groups)
+        session.commit()
+        ids = {group.name: group.id for group in groups}
+
+    yield ids
+
+    with SessionLocal() as session:
+        session.execute(delete(User))
+        session.execute(delete(Group).where(Group.name.like("ТЕСТ %")))
+        session.commit()
+
+
 @pytest.fixture
 def bare_admin_headers(bare_client) -> dict[str, str]:
     response = bare_client.post("/api/v1/auth/admin/login", json={"login": "admin", "password": "secret"})
