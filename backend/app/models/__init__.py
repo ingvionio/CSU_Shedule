@@ -1,10 +1,27 @@
 from app.models.base import Base
 from app.models.catalog import Group, LessonType, Room, Semester, Subject, Teacher, TimeSlot
-from app.models.enums import ImportStatus, LessonStatus, OverrideKind, PublishStatus, WeekParity
+from app.models.enums import (
+    EmailStatus,
+    FeedbackKind,
+    FeedbackStatus,
+    ImportStatus,
+    LessonStatus,
+    OverrideKind,
+    PublishStatus,
+    WeekParity,
+)
+from app.models.feedback import EmailOutbox, FeedbackMessage, FeedbackRecipient, FeedbackReply
 from app.models.lesson import Lesson, LessonOverride, ScheduleImport
 
 __all__ = [
     "Base",
+    "EmailOutbox",
+    "EmailStatus",
+    "FeedbackKind",
+    "FeedbackMessage",
+    "FeedbackRecipient",
+    "FeedbackReply",
+    "FeedbackStatus",
     "Group",
     "ImportStatus",
     "Lesson",

@@ -63,3 +63,22 @@ export function writeAdminSession(session: AdminSession): void {
 export function clearAdminSession(): void {
   removeCache(ADMIN_KEY)
 }
+
+const FEEDBACK_TOKEN_KEY = 'feedback-token'
+let memoryFeedbackToken: string | null = null
+
+/**
+ * Случайный токен устройства: по нему студент без входа видит свои обращения
+ * и ответы. Если хранилище недоступно, токен живёт до перезагрузки страницы.
+ */
+export function feedbackToken(): string {
+  const saved = readCache<string>(FEEDBACK_TOKEN_KEY)
+  if (saved) return saved
+  if (!memoryFeedbackToken) {
+    memoryFeedbackToken = typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('')
+  }
+  writeCache(FEEDBACK_TOKEN_KEY, memoryFeedbackToken)
+  return memoryFeedbackToken
+}

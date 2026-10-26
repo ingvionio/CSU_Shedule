@@ -1,13 +1,19 @@
 /** Основные экраны приложения. */
-export type View = 'group' | 'day' | 'week' | 'admin'
+export type View = 'group' | 'day' | 'week' | 'feedback' | 'admin'
 
 export type {
+  AdminFeedback,
   AdminSession,
   Day,
+  FeedbackFolder,
+  FeedbackKind,
+  FeedbackRecipient,
+  FeedbackStatus,
   Group,
   Lesson,
   LessonStatus,
   LessonType,
+  MyFeedback,
   MovePoint,
   OverrideInput,
   OverrideKind,

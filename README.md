@@ -10,6 +10,7 @@
 | [02-architecture.md](02-architecture.md) | архитектура, схема БД, API |
 | [03-schedule-json.md](03-schedule-json.md) | контракт JSON недели бэкенд → фронтенд |
 | [04-current-state.md](04-current-state.md) | что сделано на текущий момент |
+| [05-feedback.md](05-feedback.md) | обращения студентов: папки, почта, ответы, планы |
 | [backend/README.md](backend/README.md) | бэкенд: CLI, API, правила временных изменений |
 | [frontend/README.md](frontend/README.md) | фронтенд: экраны, админка |
 
@@ -84,11 +85,34 @@ Postgres снаружи доступен на `localhost:5433` (не 5432 — ч
 
 | Где | Когда нужен |
 |---|---|
-| `.env` в корне | чтобы поменять пароль админа или секрет JWT для Docker: `ADMIN_LOGIN`, `ADMIN_PASSWORD`, `JWT_SECRET`, `BACKEND_PORT` — compose подхватит их сам |
+| `.env` в корне | чтобы поменять пароль админа или секрет JWT для Docker: `ADMIN_LOGIN`, `ADMIN_PASSWORD`, `JWT_SECRET`, `BACKEND_PORT` — compose подхватит их сам. Почта для обращений: `SMTP_USER`, `SMTP_PASSWORD`, `PUBLIC_APP_URL` (см. ниже) |
 | `backend/.env` | только при запуске бэкенда **без Docker**: `cp backend/.env.example backend/.env` и поправить `DATABASE_URL`. Без `ADMIN_PASSWORD` вход в админку выключен |
 | `frontend/.env.local` | только если бэкенд не на `localhost:8000`: `VITE_API_URL=...` |
 
 Перед выкладкой на сервер обязательно задать свои `ADMIN_PASSWORD` и `JWT_SECRET`.
+
+## Почта для обращений (Яндекс)
+
+Без настроек обращения работают, но письма не уходят — их текст пишется
+в лог бэкенда.
+
+1. Завести ящик на Яндексе (например, `csu-schedule@yandex.ru`).
+2. id.yandex.ru → «Безопасность» → «Пароли приложений» → создать пароль
+   для почты. Обычный пароль от ящика SMTP не принимает.
+3. В Яндекс Почте: «Настройки» → «Почтовые программы» → включить доступ
+   по протоколу IMAP «С сервера imap.yandex.ru» (без этого SMTP отклоняет вход).
+4. В `.env` в корне:
+   ```
+   SMTP_USER=csu-schedule@yandex.ru
+   SMTP_PASSWORD=<пароль приложения>
+   ```
+5. `docker compose up -d` и проверка:
+   `docker compose exec backend python -m app.cli send-emails --test you@example.com`
+6. В админке → «Обращения» → «Адресаты и почта» вписать email разработчиков,
+   методиста и деканата.
+
+Неотправленные письма (SMTP был недоступен) досылаются командой
+`docker compose exec backend python -m app.cli send-emails`.
 
 ## Тесты бэкенда
 

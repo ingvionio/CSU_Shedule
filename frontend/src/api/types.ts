@@ -140,3 +140,72 @@ export type Catalog = {
   teachers: string[]
   rooms: string[]
 }
+
+/* --- Обращения --- */
+
+/** Кому адресовано обращение. `unknown` — студент не знает, админ распределит. */
+export type FeedbackKind = 'dev' | 'methodist' | 'deanery' | 'unknown'
+export type FeedbackStatus = 'new' | 'in_progress' | 'answered' | 'archived'
+
+export type FeedbackInput = {
+  kind: FeedbackKind
+  text: string
+  group_id?: number | null
+  author_name?: string | null
+  contact?: string | null
+  /** Ловушка для ботов, человек оставляет пустым. */
+  website?: string
+}
+
+export type FeedbackReply = {
+  id: number
+  author_kind: 'staff' | 'student'
+  /** От кого: «Деканат», «Методист», «Вы». */
+  author_title: string
+  text: string
+  created_at: string
+}
+
+export type MyFeedback = {
+  id: number
+  kind: FeedbackKind
+  kind_title: string
+  text: string
+  status: FeedbackStatus
+  created_at: string
+  replies: FeedbackReply[]
+}
+
+export type AdminFeedback = Omit<MyFeedback, 'replies'> & {
+  recipient_title: string | null
+  group_id: number | null
+  group_name: string | null
+  author_name: string | null
+  contact: string | null
+  contact_is_email: boolean
+  admin_note: string | null
+  replies: (FeedbackReply & { author_name: string | null })[]
+}
+
+export type FeedbackFolder = {
+  kind: FeedbackKind
+  title: string
+  total: number
+  new: number
+}
+
+export type FeedbackUpdate = {
+  status?: FeedbackStatus
+  kind?: FeedbackKind
+  admin_note?: string
+}
+
+export type FeedbackRecipient = {
+  id: number
+  kind: Exclude<FeedbackKind, 'unknown'>
+  title: string
+  emails: string[]
+  is_active: boolean
+}
+
+export type RecipientUpdate = Partial<Pick<FeedbackRecipient, 'title' | 'emails' | 'is_active'>>

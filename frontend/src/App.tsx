@@ -5,7 +5,9 @@ import { clearAdminSession, readAdminSession, readSelectedGroup, writeAdminSessi
 import { useCurrentWeek, useGroups, useSchedule, useTimeSlots } from './api/queries'
 import { BottomNav, DaySchedule, Header, WeekGrid, dayNumber, weekRangeLabel } from './ScheduleComponents'
 import { AdminLogin } from './pages/admin/AdminLogin'
+import { AdminFeedback } from './pages/admin/AdminFeedback'
 import { AdminSchedule } from './pages/admin/AdminSchedule'
+import { StudentFeedback } from './pages/feedback/StudentFeedback'
 import type { AdminSession, Group, View } from './types'
 
 const WEEKDAY_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
@@ -26,6 +28,7 @@ export function App() {
   const [now, setNow] = useState(() => new Date())
   const [menuOpen, setMenuOpen] = useState(false)
   const [adminSession, setAdminSession] = useState<AdminSession | null>(() => readAdminSession())
+  const [adminSection, setAdminSection] = useState<'schedule' | 'feedback'>('schedule')
 
   // Выбор группы на экране настройки.
   const [course, setCourse] = useState(1)
@@ -173,10 +176,14 @@ export function App() {
 
   return <div className="app-shell">
     <Header
-      title={view === 'group' ? 'Выберите группу' : view === 'admin' ? 'Администрирование' : 'Расписание'}
+      title={view === 'group'
+        ? 'Выберите группу'
+        : view === 'admin' ? 'Администрирование' : view === 'feedback' ? 'Вопросы' : 'Расписание'}
       subtitle={view === 'group'
         ? 'Группа сохранится на этом устройстве'
-        : view === 'admin' ? 'Управление расписанием' : `Институт ИТ · ${selectedGroup?.name ?? ''}`}
+        : view === 'admin'
+          ? adminSection === 'feedback' ? 'Обращения студентов' : 'Управление расписанием'
+          : `Институт ИТ · ${selectedGroup?.name ?? ''}`}
       onBack={view === 'group' && groupId !== null ? () => nav('day') : undefined}
       onMenu={() => setMenuOpen((open) => !open)}
     />
@@ -234,7 +241,9 @@ export function App() {
           : <div className="empty-day">На этом направлении групп нет</div>}
       </section>}
 
-      {groupId === null && view !== 'group' && (
+      {view === 'feedback' && <StudentFeedback groupId={groupId} />}
+
+      {groupId === null && view !== 'group' && view !== 'feedback' && view !== 'admin' && (
         <div className="state-note">Выберите группу, чтобы увидеть расписание.</div>
       )}
 
@@ -319,6 +328,23 @@ export function App() {
       {view === 'admin' && !adminSession && <AdminLogin onLogin={loginAdmin} />}
 
       {view === 'admin' && adminSession && (
+        <div className="admin-target-tabs admin-sections" aria-label="Раздел админки">
+          <button
+            className={adminSection === 'schedule' ? 'active' : ''}
+            onClick={() => setAdminSection('schedule')}
+          >Расписание</button>
+          <button
+            className={adminSection === 'feedback' ? 'active' : ''}
+            onClick={() => setAdminSection('feedback')}
+          >Обращения</button>
+        </div>
+      )}
+
+      {view === 'admin' && adminSession && adminSection === 'feedback' && (
+        <AdminFeedback token={adminSession.token} onUnauthorized={logoutAdmin} />
+      )}
+
+      {view === 'admin' && adminSession && adminSection === 'schedule' && (
         <AdminSchedule
           groups={groups.data ?? []}
           groupId={adminGroupId}
