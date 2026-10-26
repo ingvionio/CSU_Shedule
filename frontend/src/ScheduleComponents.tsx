@@ -1,4 +1,4 @@
-import { ArrowLeft, CalendarDays, Clock3, Map as MapIcon, MapPin, Menu, UserRound } from 'lucide-react'
+import { ArrowLeft, CalendarDays, Clock3, Map as MapIcon, MapPin, Menu, MessageCircleQuestion, UserRound } from 'lucide-react'
 
 import type { Day, Lesson, MovePoint, TimeSlot, View } from './types'
 
@@ -310,6 +310,7 @@ export function BottomNav({ view, onNavigate }: { view: View; onNavigate: (view:
   const items = [
     { label: 'Расписание', icon: CalendarDays, target: 'day' as View },
     { label: 'Карта', icon: MapIcon, target: 'map' as View },
+    { label: 'Вопросы', icon: MessageCircleQuestion, target: 'feedback' as View },
     { label: 'Группа', icon: UserRound, target: 'group' as View },
   ]
 

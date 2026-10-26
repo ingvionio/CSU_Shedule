@@ -4,6 +4,8 @@
     python -m app.cli seed-semester                # завести активный семестр и справочники
     python -m app.cli import-excel <путь к .xlsx>  # разобрать файл и залить расписание
     python -m app.cli stats                        # что лежит в базе
+    python -m app.cli send-emails                  # дослать неотправленные письма
+    python -m app.cli send-emails --test <email>   # проверить настройки почты
 """
 
 from __future__ import annotations
@@ -103,6 +105,28 @@ def stats() -> None:
             print(f"  {name:18}{course:^6}{count:4}")
 
 
+def send_emails(test_to: str | None) -> None:
+    from app.models import EmailOutbox, EmailStatus
+    from app.services.mailer import deliver, deliver_pending
+
+    with SessionLocal() as session:
+        if test_to:
+            item = EmailOutbox(
+                to_address=test_to,
+                subject="Проверка почты расписания",
+                body="Если вы читаете это письмо, отправка обращений настроена.",
+            )
+            session.add(item)
+            session.commit()
+            deliver(session, [item])
+            if item.status != EmailStatus.SENT.value:
+                sys.exit(f"Не отправлено ({item.status}): {item.last_error or 'SMTP_USER не задан'}")
+            print(f"Отправлено на {test_to}")
+            return
+
+        print(f"Попыток отправки: {deliver_pending(session)}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="app.cli", description="Команды бэкенда расписания")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -120,6 +144,9 @@ def main() -> None:
 
     sub.add_parser("stats", help="показать содержимое базы")
 
+    mail = sub.add_parser("send-emails", help="дослать письма из очереди")
+    mail.add_argument("--test", metavar="EMAIL", help="отправить проверочное письмо")
+
     args = parser.parse_args()
 
     if args.command == "init-db":
@@ -130,6 +157,8 @@ def main() -> None:
         import_excel(args.path)
     elif args.command == "stats":
         stats()
+    elif args.command == "send-emails":
+        send_emails(args.test)
 
 
 if __name__ == "__main__":

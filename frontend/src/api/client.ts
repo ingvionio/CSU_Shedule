@@ -1,7 +1,14 @@
 import type {
+  AdminFeedback,
   Catalog,
   CurrentWeek,
+  FeedbackFolder,
+  FeedbackInput,
+  FeedbackRecipient,
+  FeedbackUpdate,
   Group,
+  MyFeedback,
+  RecipientUpdate,
   LessonType,
   OverrideCreated,
   OverrideInput,
@@ -19,16 +26,19 @@ export class ApiError extends Error {
 }
 
 type RequestOptions = {
-  method?: 'GET' | 'POST' | 'DELETE'
+  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'
   body?: unknown
   /** JWT администратора для эндпоинтов /admin. */
   token?: string
+  /** Токен устройства для обращений студента. */
+  feedbackToken?: string
 }
 
-async function request<T>(path: string, { method = 'GET', body, token }: RequestOptions = {}): Promise<T> {
+async function request<T>(path: string, { method = 'GET', body, token, feedbackToken }: RequestOptions = {}): Promise<T> {
   const headers: Record<string, string> = {}
   if (body !== undefined) headers['Content-Type'] = 'application/json'
   if (token) headers.Authorization = `Bearer ${token}`
+  if (feedbackToken) headers['X-Feedback-Token'] = feedbackToken
 
   let response: Response
   try {
@@ -67,4 +77,21 @@ export const api = {
     request<OverrideCreated>('/admin/overrides', { method: 'POST', body, token }),
   deleteOverride: (token: string, id: number, batch: boolean) =>
     request<{ deleted: number }>(`/admin/overrides/${id}${batch ? '?batch=true' : ''}`, { method: 'DELETE', token }),
+
+  sendFeedback: (feedbackToken: string, body: FeedbackInput) =>
+    request<{ id: number; kind_title: string }>('/feedback', { method: 'POST', body, feedbackToken }),
+  myFeedback: (feedbackToken: string) => request<MyFeedback[]>('/feedback/mine', { feedbackToken }),
+
+  feedbackFolders: (token: string) => request<FeedbackFolder[]>('/admin/feedback/folders', { token }),
+  adminFeedback: (token: string, kind: string, status: string) => {
+    const params = new URLSearchParams({ kind, ...(status ? { status } : {}) })
+    return request<AdminFeedback[]>(`/admin/feedback?${params}`, { token })
+  },
+  updateFeedback: (token: string, id: number, body: FeedbackUpdate) =>
+    request<AdminFeedback>(`/admin/feedback/${id}`, { method: 'PATCH', body, token }),
+  replyFeedback: (token: string, id: number, text: string) =>
+    request<AdminFeedback>(`/admin/feedback/${id}/replies`, { method: 'POST', body: { text }, token }),
+  feedbackRecipients: (token: string) => request<FeedbackRecipient[]>('/admin/feedback/recipients', { token }),
+  updateRecipient: (token: string, id: number, body: RecipientUpdate) =>
+    request<FeedbackRecipient>(`/admin/feedback/recipients/${id}`, { method: 'PATCH', body, token }),
 }

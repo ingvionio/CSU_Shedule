@@ -1,8 +1,19 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 
 import { api } from './client'
-import { readCache, writeCache } from './cache'
-import type { Catalog, CurrentWeek, Group, LessonType, OverrideInput, TimeSlot, WeekSchedule } from './types'
+import { feedbackToken, readCache, writeCache } from './cache'
+import type {
+  Catalog,
+  CurrentWeek,
+  FeedbackInput,
+  FeedbackUpdate,
+  Group,
+  LessonType,
+  OverrideInput,
+  RecipientUpdate,
+  TimeSlot,
+  WeekSchedule,
+} from './types'
 
 export function useGroups(): UseQueryResult<Group[]> {
   return useQuery({
@@ -91,4 +102,69 @@ export function useOverrideMutations(token: string) {
     onSuccess: refresh,
   })
   return { create, remove }
+}
+
+/* --- Обращения --- */
+
+/** Обращения студента с этого устройства. Ответы подтягиваются при каждом открытии раздела. */
+export function useMyFeedback(enabled: boolean) {
+  return useQuery({
+    queryKey: ['my-feedback'],
+    queryFn: () => api.myFeedback(feedbackToken()),
+    enabled,
+    staleTime: 30 * 1000,
+  })
+}
+
+export function useSendFeedback() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: FeedbackInput) => api.sendFeedback(feedbackToken(), body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['my-feedback'] }),
+  })
+}
+
+export function useFeedbackFolders(token: string) {
+  return useQuery({
+    queryKey: ['admin-feedback-folders'],
+    queryFn: () => api.feedbackFolders(token),
+    refetchInterval: 60 * 1000,
+  })
+}
+
+export function useAdminFeedback(token: string, kind: string, status: string) {
+  return useQuery({
+    queryKey: ['admin-feedback', kind, status],
+    queryFn: () => api.adminFeedback(token, kind, status),
+  })
+}
+
+export function useFeedbackRecipients(token: string) {
+  return useQuery({
+    queryKey: ['admin-feedback-recipients'],
+    queryFn: () => api.feedbackRecipients(token),
+  })
+}
+
+/** Статус, перенос в папку, заметка, ответ. После ответа сервера обновляются список и счётчики папок. */
+export function useFeedbackMutations(token: string) {
+  const queryClient = useQueryClient()
+  const refresh = () => Promise.all([
+    queryClient.invalidateQueries({ queryKey: ['admin-feedback'] }),
+    queryClient.invalidateQueries({ queryKey: ['admin-feedback-folders'] }),
+  ])
+
+  const update = useMutation({
+    mutationFn: ({ id, body }: { id: number; body: FeedbackUpdate }) => api.updateFeedback(token, id, body),
+    onSuccess: refresh,
+  })
+  const reply = useMutation({
+    mutationFn: ({ id, text }: { id: number; text: string }) => api.replyFeedback(token, id, text),
+    onSuccess: refresh,
+  })
+  const updateRecipient = useMutation({
+    mutationFn: ({ id, body }: { id: number; body: RecipientUpdate }) => api.updateRecipient(token, id, body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-feedback-recipients'] }),
+  })
+  return { update, reply, updateRecipient }
 }
