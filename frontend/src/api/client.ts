@@ -107,6 +107,11 @@ export const api = {
     request<FeedbackRecipient>(`/admin/feedback/recipients/${id}`, { method: 'PATCH', body, token }),
 
   directions: () => request<Direction[]>('/directions'),
+  pushConfig: () => request<{ public_key: string | null }>('/push/config'),
+  subscribePush: (token: string, body: { endpoint: string; keys: { p256dh: string; auth: string } }) =>
+    request<{ id: number }>('/me/push-subscriptions', { method: 'POST', body, token }),
+  unsubscribePush: (token: string, id: number) =>
+    request<void>(`/me/push-subscriptions/${id}`, { method: 'DELETE', token }),
 
   studentRegister: (full_name: string, group_id: number, device_key: string) =>
     request<StudentTokenResponse>('/auth/student/register', { method: 'POST', body: { full_name, group_id, device_key } }),

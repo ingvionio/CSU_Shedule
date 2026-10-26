@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { CheckCircle2, RefreshCw, UserRound, X } from 'lucide-react'
+import { BellOff, BellRing, CheckCircle2, RefreshCw, UserRound, X } from 'lucide-react'
 
+import { usePush, type PushState } from '../../api/push'
 import { useInbox, useInboxMutations } from '../../api/queries'
 import { registerStudent, useStudentSession } from '../../api/student'
 import type { Group, InboxMessage } from '../../types'
@@ -10,13 +11,19 @@ type StudentMessagesProps = {
   group: Group | undefined
   /** Группа не выбрана — отправить на экран выбора. */
   onChooseGroup: () => void
+  /** Сообщение, которое нужно открыть сразу (нажали на push-уведомление). */
+  requestedId: number | null
 }
 
-export function StudentMessages({ group, onChooseGroup }: StudentMessagesProps) {
+export function StudentMessages({ group, onChooseGroup, requestedId }: StudentMessagesProps) {
   const session = useStudentSession()
   const inbox = useInbox(session !== null)
-  const [openId, setOpenId] = useState<number | null>(null)
+  const [openId, setOpenId] = useState<number | null>(requestedId)
   const opened = inbox.data?.messages.find((item) => item.id === openId) ?? null
+
+  useEffect(() => {
+    if (requestedId !== null) setOpenId(requestedId)
+  }, [requestedId])
 
   if (!session) return <ProfileForm group={group} onChooseGroup={onChooseGroup} />
 
@@ -26,6 +33,8 @@ export function StudentMessages({ group, onChooseGroup }: StudentMessagesProps) 
         <UserRound size={16} />
         <span>{session.profile.full_name} · {session.profile.group_name ?? 'без группы'}</span>
       </div>
+
+      <PushToggle />
 
       {inbox.isError && !inbox.data && (
         <div className="state-note error-note">
@@ -57,6 +66,39 @@ export function StudentMessages({ group, onChooseGroup }: StudentMessagesProps) 
 
       {opened && <MessageDialog item={opened} onClose={() => setOpenId(null)} />}
     </section>
+  )
+}
+
+const PUSH_NOTES: Partial<Record<PushState, string>> = {
+  'ios-install': 'Чтобы получать уведомления на iPhone, добавьте приложение на экран «Домой»: «Поделиться» → «На экран Домой», и откройте его оттуда.',
+  unsupported: 'Этот браузер не поддерживает уведомления. Новые сообщения появятся здесь.',
+  denied: 'Уведомления запрещены в настройках браузера для этого сайта. Разрешите их, чтобы не пропустить важное.',
+}
+
+function PushToggle() {
+  const push = usePush()
+  if (push.state === 'checking' || push.state === 'unconfigured') return null
+
+  const note = PUSH_NOTES[push.state]
+  return (
+    <div className="push-card">
+      <div>
+        {push.state === 'on' ? <BellRing size={18} /> : <BellOff size={18} />}
+        <span>
+          <strong>{push.state === 'on' ? 'Уведомления включены' : 'Уведомления выключены'}</strong>
+          <small>{note ?? (push.state === 'on'
+            ? 'Пришлём уведомление о новом сообщении на это устройство.'
+            : 'Включите, чтобы узнавать о новых сообщениях сразу.')}</small>
+        </span>
+      </div>
+      {push.state === 'off' && (
+        <button className="button button-primary" disabled={push.busy} onClick={push.enable}>Включить</button>
+      )}
+      {push.state === 'on' && (
+        <button className="button button-secondary" disabled={push.busy} onClick={push.disable}>Выключить</button>
+      )}
+      {push.error && <p className="form-error" role="alert">{push.error}</p>}
+    </div>
   )
 }
 

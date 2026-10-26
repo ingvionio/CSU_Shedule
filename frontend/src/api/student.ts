@@ -9,16 +9,15 @@
 import { useSyncExternalStore } from 'react'
 
 import { ApiError, api } from './client'
-import { clearStudentSession, feedbackToken, readStudentSession, writeStudentSession } from './cache'
+import { feedbackToken, readStudentSession, writeStudentSession } from './cache'
 import type { StudentSession } from './types'
 
 const listeners = new Set<() => void>()
 let current = readStudentSession()
 
-function publish(session: StudentSession | null) {
+function publish(session: StudentSession) {
   current = session
-  if (session) writeStudentSession(session)
-  else clearStudentSession()
+  writeStudentSession(session)
   listeners.forEach((listener) => listener())
 }
 
@@ -27,10 +26,6 @@ export async function registerStudent(fullName: string, groupId: number): Promis
   const session = { token: response.access_token, expires_at: response.expires_at, profile: response.profile }
   publish(session)
   return session
-}
-
-export function forgetStudent(): void {
-  publish(null)
 }
 
 const isExpired = (session: StudentSession) => new Date(session.expires_at).getTime() <= Date.now() + 60_000

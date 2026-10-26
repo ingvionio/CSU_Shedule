@@ -31,8 +31,15 @@ function directionOf(group: Group): string {
   return group.direction ?? group.name.match(/(ПрИ|ПИ|БИ)/)?.[1] ?? group.name
 }
 
+/** `/?message=12` — ссылка из push-уведомления. */
+function messageFromUrl(url: string): number | null {
+  const value = Number(new URL(url, window.location.origin).searchParams.get('message'))
+  return Number.isInteger(value) && value > 0 ? value : null
+}
+
 export function App() {
-  const [view, setView] = useState<View>('day')
+  const [requestedMessage, setRequestedMessage] = useState(() => messageFromUrl(window.location.href))
+  const [view, setView] = useState<View>(() => requestedMessage !== null ? 'messages' : 'day')
   const [groupId, setGroupId] = useState<number | null>(() => readSelectedGroup())
   const [adminGroupId, setAdminGroupId] = useState<number | null>(null)
   const [weekNumber, setWeekNumber] = useState<number | null>(null)
@@ -67,6 +74,26 @@ export function App() {
     const timer = window.setInterval(() => setNow(new Date()), 60_000)
     return () => window.clearInterval(timer)
   }, [])
+
+  // Ссылку из уведомления открыли — убираем параметр, чтобы обновление страницы не открывало его снова.
+  useEffect(() => {
+    if (messageFromUrl(window.location.href) !== null) window.history.replaceState(null, '', window.location.pathname)
+  }, [])
+
+  // Service worker сообщает о новом push и о нажатии на уведомление в уже открытом приложении.
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return
+    const handle = (event: MessageEvent) => {
+      if (event.data?.type === 'messages-updated') queryClient.invalidateQueries({ queryKey: ['inbox'] })
+      if (event.data?.type === 'open-message') {
+        queryClient.invalidateQueries({ queryKey: ['inbox'] })
+        setRequestedMessage(messageFromUrl(event.data.url))
+        setView('messages')
+      }
+    }
+    navigator.serviceWorker.addEventListener('message', handle)
+    return () => navigator.serviceWorker.removeEventListener('message', handle)
+  }, [queryClient])
 
   // По умолчанию открывается текущая неделя.
   useEffect(() => {
@@ -262,7 +289,9 @@ export function App() {
 
       {view === 'feedback' && <StudentFeedback groupId={groupId} />}
 
-      {view === 'messages' && <StudentMessages group={selectedGroup} onChooseGroup={() => nav('group')} />}
+      {view === 'messages' && (
+        <StudentMessages group={selectedGroup} onChooseGroup={() => nav('group')} requestedId={requestedMessage} />
+      )}
 
       {groupId === null && (view === 'day' || view === 'week') && !groups.isLoading && !groups.isError && (
         <div className="state-note">Выберите группу, чтобы увидеть расписание.</div>

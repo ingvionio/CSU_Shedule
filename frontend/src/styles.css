@@ -448,3 +448,11 @@ h1 { margin-top: 7px; font-size: 24px; line-height: 1.16; letter-spacing: -.045e
 .recipient-status-list small.done { color: var(--green); text-align: right; }
 .feedback-dialog .segmented { margin-top: 4px; }
 .confirm-modal .feedback-text { color: var(--text); }
+.push-card { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 13px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.push-card > div { display: flex; min-width: 0; flex: 1 1 200px; align-items: flex-start; gap: 9px; }
+.push-card > div > svg { flex: 0 0 auto; margin-top: 1px; color: var(--purple); }
+.push-card > div > span { display: flex; flex-direction: column; gap: 3px; }
+.push-card strong { font-size: 12px; }
+.push-card small { color: var(--muted); font-size: 11px; line-height: 1.45; }
+.push-card .button { min-height: 38px; }
+.push-card .form-error { width: 100%; }
