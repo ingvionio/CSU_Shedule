@@ -14,6 +14,8 @@ export type Group = {
   id: number
   name: string
   course: number
+  /** Направление (поток): «ПИ», «ПрИ», «БИ». null — не распознано по названию. */
+  direction: string | null
 }
 
 export type TimeSlot = {
@@ -209,3 +211,100 @@ export type FeedbackRecipient = {
 }
 
 export type RecipientUpdate = Partial<Pick<FeedbackRecipient, 'title' | 'emails' | 'is_active'>>
+
+/* --- Профиль студента и рассылка --- */
+
+export type Direction = {
+  code: string
+  /** Курсы, на которых есть группы этого направления. */
+  courses: number[]
+}
+
+export type StudentProfile = {
+  id: number
+  /** Персональные данные: собираем только ФИО и группу. */
+  full_name: string
+  group_id: number | null
+  group_name: string | null
+}
+
+export type StudentSession = {
+  token: string
+  expires_at: string
+  profile: StudentProfile
+}
+
+export type StudentTokenResponse = TokenResponse & { profile: StudentProfile }
+
+export type Importance = 'low' | 'normal' | 'high'
+
+export type InboxMessage = {
+  id: number
+  title: string
+  body: string
+  importance: Importance
+  sent_at: string
+  read_at: string | null
+  acknowledged_at: string | null
+  /** Важное сообщение: нужно нажать «Ознакомлен». */
+  requires_ack: boolean
+  /** Не прочитано, а у важных — не подтверждено. */
+  is_unread: boolean
+}
+
+export type Inbox = {
+  unread_count: number
+  messages: InboxMessage[]
+}
+
+export type MessageTargetType = 'all' | 'course' | 'direction' | 'group' | 'students'
+
+export type MessageTarget = {
+  type: MessageTargetType
+  courses?: number[]
+  directions?: string[]
+  group_ids?: number[]
+  user_ids?: number[]
+}
+
+export type MessageInput = {
+  title: string
+  body: string
+  importance: Importance
+  target: MessageTarget
+}
+
+export type AdminMessage = {
+  id: number
+  title: string
+  body: string
+  importance: Importance
+  target: MessageTarget
+  /** Адресация словами: «Курс 1», «Поток ПИ». */
+  target_title: string
+  created_by: string | null
+  sent_at: string
+  last_reminded_at: string | null
+  recipients_total: number
+  read_count: number
+  acknowledged_count: number
+}
+
+export type RecipientStatus = {
+  user_id: number
+  full_name: string
+  group_name: string | null
+  read_at: string | null
+  acknowledged_at: string | null
+  reminded_at: string | null
+}
+
+export type AdminMessageDetail = AdminMessage & { recipients: RecipientStatus[] }
+
+export type Student = {
+  id: number
+  full_name: string
+  group_id: number | null
+  group_name: string | null
+  course: number | null
+}

@@ -1,4 +1,4 @@
-import { ArrowLeft, CalendarDays, Clock3, Map as MapIcon, MapPin, Menu, MessageCircleQuestion, UserRound } from 'lucide-react'
+import { ArrowLeft, Bell, CalendarDays, Clock3, Map as MapIcon, MapPin, Menu, MessageCircleQuestion, UserRound } from 'lucide-react'
 
 import type { Day, Lesson, MovePoint, TimeSlot, View } from './types'
 
@@ -306,9 +306,10 @@ export function WeekGrid({
   )
 }
 
-export function BottomNav({ view, onNavigate }: { view: View; onNavigate: (view: View) => void }) {
+export function BottomNav({ view, onNavigate, unread = 0 }: { view: View; onNavigate: (view: View) => void; unread?: number }) {
   const items = [
     { label: 'Расписание', icon: CalendarDays, target: 'day' as View },
+    { label: 'Сообщения', icon: Bell, target: 'messages' as View, badge: unread },
     { label: 'Карта', icon: MapIcon, target: 'map' as View },
     { label: 'Вопросы', icon: MessageCircleQuestion, target: 'feedback' as View },
     { label: 'Группа', icon: UserRound, target: 'group' as View },
@@ -316,14 +317,17 @@ export function BottomNav({ view, onNavigate }: { view: View; onNavigate: (view:
 
   return (
     <nav className="bottom-nav student-nav" aria-label="Разделы приложения">
-      {items.map(({ label, icon: Icon, target }) => (
+      {items.map(({ label, icon: Icon, target, badge }) => (
         <button
           key={label}
           className={`nav-item ${view === target || (target === 'day' && view === 'week') ? 'active' : ''}`}
           aria-current={view === target || (target === 'day' && view === 'week') ? 'page' : undefined}
           onClick={() => onNavigate(target)}
         >
-          <Icon size={18} />
+          <span className="nav-icon">
+            <Icon size={18} />
+            {badge ? <b className="nav-badge" aria-label={`непрочитанных: ${badge}`}>{badge > 99 ? '99+' : badge}</b> : null}
+          </span>
           <span>{label}</span>
         </button>
       ))}

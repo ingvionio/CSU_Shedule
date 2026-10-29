@@ -21,13 +21,22 @@ EXCEL = Path(__file__).resolve().parents[2] / "Расписание_ИИТ_1_с�
 
 
 @pytest.fixture(scope="session")
-def filled_db():
-    """Разворачивает базу и заливает в неё расписание из реального файла."""
-    if not EXCEL.exists():
-        pytest.skip(f"нет файла расписания: {EXCEL}")
-
+def db_schema():
+    """Пустая база со схемой. Нужна тестам, которым не нужен файл расписания."""
     TEST_DB.unlink(missing_ok=True)
     Base.metadata.create_all(engine)
+
+    yield
+
+    engine.dispose()
+    TEST_DB.unlink(missing_ok=True)
+
+
+@pytest.fixture(scope="session")
+def filled_db(db_schema):
+    """Заливает в базу расписание из реального файла."""
+    if not EXCEL.exists():
+        pytest.skip(f"нет файла расписания: {EXCEL}")
 
     from app.cli import seed_semester
     from datetime import date
@@ -38,15 +47,50 @@ def filled_db():
         semester = session.scalar(select(Semester).where(Semester.is_active.is_(True)))
         import_workbook(session, str(EXCEL), semester, file_name=EXCEL.name)
 
-    yield
-
-    engine.dispose()
-    TEST_DB.unlink(missing_ok=True)
-
 
 @pytest.fixture
 def client(filled_db) -> TestClient:
     return TestClient(app)
+
+
+@pytest.fixture
+def bare_client(db_schema) -> TestClient:
+    """Клиент без расписания из Excel: группы тесты заводят сами."""
+    return TestClient(app)
+
+
+TEST_GROUPS = [
+    ("ТЕСТ ПИ 991", 1, "ПИ"),
+    ("ТЕСТ ПИ 992", 2, "ПИ"),
+    ("ТЕСТ БИ 991", 1, "БИ"),
+]
+
+
+@pytest.fixture
+def test_groups(db_schema) -> dict[str, int]:
+    """Свои группы с префиксом «ТЕСТ»; после теста удаляются вместе со студентами."""
+    from sqlalchemy import delete
+
+    from app.models import Group, User
+
+    with SessionLocal() as session:
+        groups = [Group(name=name, course=course, direction=direction) for name, course, direction in TEST_GROUPS]
+        session.add_all(groups)
+        session.commit()
+        ids = {group.name: group.id for group in groups}
+
+    yield ids
+
+    with SessionLocal() as session:
+        session.execute(delete(User))
+        session.execute(delete(Group).where(Group.name.like("ТЕСТ %")))
+        session.commit()
+
+
+@pytest.fixture
+def bare_admin_headers(bare_client) -> dict[str, str]:
+    response = bare_client.post("/api/v1/auth/admin/login", json={"login": "admin", "password": "secret"})
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
 @pytest.fixture

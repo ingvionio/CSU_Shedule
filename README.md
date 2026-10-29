@@ -11,6 +11,8 @@
 | [03-schedule-json.md](03-schedule-json.md) | контракт JSON недели бэкенд → фронтенд |
 | [04-current-state.md](04-current-state.md) | что сделано на текущий момент |
 | [05-feedback.md](05-feedback.md) | обращения студентов: папки, почта, ответы, планы |
+| [06-messages.md](06-messages.md) | сообщения студентам: рассылка, «Ознакомлен», напоминания, push |
+| [07-messages-overview.md](07-messages-overview.md) | сообщения студентам простыми словами: как пользоваться студенту, методисту и как настроить |
 | [backend/README.md](backend/README.md) | бэкенд: CLI, API, правила временных изменений |
 | [frontend/README.md](frontend/README.md) | фронтенд: экраны, админка |
 
@@ -85,7 +87,7 @@ Postgres снаружи доступен на `localhost:5433` (не 5432 — ч
 
 | Где | Когда нужен |
 |---|---|
-| `.env` в корне | чтобы поменять пароль админа или секрет JWT для Docker: `ADMIN_LOGIN`, `ADMIN_PASSWORD`, `JWT_SECRET`, `BACKEND_PORT` — compose подхватит их сам. Почта для обращений: `SMTP_USER`, `SMTP_PASSWORD`, `PUBLIC_APP_URL` (см. ниже) |
+| `.env` в корне | чтобы поменять пароль админа или секрет JWT для Docker: `ADMIN_LOGIN`, `ADMIN_PASSWORD`, `JWT_SECRET`, `BACKEND_PORT` — compose подхватит их сам. Почта для обращений: `SMTP_USER`, `SMTP_PASSWORD`, `PUBLIC_APP_URL`; push: `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` (см. ниже) |
 | `backend/.env` | только при запуске бэкенда **без Docker**: `cp backend/.env.example backend/.env` и поправить `DATABASE_URL`. Без `ADMIN_PASSWORD` вход в админку выключен |
 | `frontend/.env.local` | только если бэкенд не на `localhost:8000`: `VITE_API_URL=...` |
 
@@ -113,6 +115,20 @@ Postgres снаружи доступен на `localhost:5433` (не 5432 — ч
 
 Неотправленные письма (SMTP был недоступен) досылаются командой
 `docker compose exec backend python -m app.cli send-emails`.
+
+## Push-уведомления о сообщениях
+
+Без ключей сообщения работают, но push не уходят — студент видит их в
+разделе «Сообщения».
+
+1. `docker compose exec backend python -m app.cli generate-vapid`
+2. Вывод вставить в `.env` в корне (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`,
+   `VAPID_SUBJECT=mailto:<почта для связи>`), затем `docker compose up -d`.
+3. Push работает только по **HTTPS** (локально — на `localhost`). На iPhone —
+   только у приложения, добавленного на экран «Домой».
+
+Ключи генерируются один раз: новые ключи отключают все подписки.
+Подробно — [06-messages.md](06-messages.md).
 
 ## Тесты бэкенда
 

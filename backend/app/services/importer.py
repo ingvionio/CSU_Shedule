@@ -27,6 +27,7 @@ from app.models import (
 )
 from app.services import weeks
 from app.services.excel_parser import ParsedLesson, ParseResult, parse_workbook
+from app.services.groups import direction_of
 
 # Форматы пар. Таблица, а не enum — список расширяется без миграции.
 DEFAULT_LESSON_TYPES: list[tuple[str, str]] = [
@@ -154,6 +155,8 @@ def import_workbook(
             session.add(group)
             session.flush()
             groups_created += 1
+        if group.direction is None:
+            group.direction = direction_of(group.name)
         group_ids[parsed_group.name] = group.id
 
     if replace:

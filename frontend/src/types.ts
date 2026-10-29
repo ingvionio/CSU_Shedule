@@ -1,10 +1,20 @@
 /** Основные экраны приложения. */
-export type View = 'group' | 'day' | 'week' | 'feedback' | 'admin' | 'map'
+export type View = 'group' | 'day' | 'week' | 'messages' | 'feedback' | 'admin' | 'map'
 
 export type {
   AdminFeedback,
+  AdminMessage,
+  AdminMessageDetail,
   AdminSession,
   Day,
+  Direction,
+  Importance,
+  InboxMessage,
+  MessageTarget,
+  MessageTargetType,
+  RecipientStatus,
+  Student,
+  StudentSession,
   FeedbackFolder,
   FeedbackKind,
   FeedbackRecipient,

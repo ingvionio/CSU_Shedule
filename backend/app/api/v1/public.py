@@ -12,12 +12,16 @@ from app.core.db import get_db
 from app.models import Group, LessonType, TimeSlot
 from app.schemas.schedule import (
     CurrentWeekOut,
+    DirectionOut,
     GroupOut,
     LessonTypeOut,
     SemesterOut,
     TimeSlotOut,
     WeekScheduleOut,
 )
+from app.core.config import get_settings
+from app.schemas.student import PushConfigOut
+from app.services import push as push_service
 from app.services import schedule as schedule_service
 from app.services import weeks as weeks_service
 
@@ -31,6 +35,25 @@ def _today():
 @router.get("/groups", response_model=list[GroupOut], summary="Список групп")
 def list_groups(db: Session = Depends(get_db)) -> list[Group]:
     return list(db.scalars(select(Group).order_by(Group.course, Group.name)).all())
+
+
+@router.get("/directions", response_model=list[DirectionOut], summary="Направления подготовки (потоки)")
+def list_directions(db: Session = Depends(get_db)) -> list[DirectionOut]:
+    rows = db.execute(
+        select(Group.direction, Group.course)
+        .where(Group.direction.is_not(None))
+        .distinct()
+        .order_by(Group.direction, Group.course)
+    ).all()
+    courses: dict[str, list[int]] = {}
+    for direction, course in rows:
+        courses.setdefault(direction, []).append(course)
+    return [DirectionOut(code=code, courses=items) for code, items in courses.items()]
+
+
+@router.get("/push/config", response_model=PushConfigOut, summary="Публичный VAPID-ключ для подписки на push")
+def push_config() -> PushConfigOut:
+    return PushConfigOut(public_key=get_settings().vapid_public_key if push_service.is_configured() else None)
 
 
 @router.get("/time-slots", response_model=list[TimeSlotOut], summary="Сетка звонков")

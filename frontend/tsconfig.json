@@ -15,5 +15,7 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  // Service worker живёт в другом окружении (WebWorker) — у него свой tsconfig.sw.json.
+  "exclude": ["src/sw.ts"]
 }

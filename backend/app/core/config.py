@@ -33,6 +33,24 @@ class Settings(BaseSettings):
     feedback_rate_limit_per_hour: int = 5
     feedback_ip_rate_limit_per_hour: int = 40
 
+    # Студенты: профиль ФИО + группа. Токен живёт долго; истёк — фронт
+    # регистрируется заново тем же ключом устройства и получает того же пользователя.
+    student_jwt_ttl_hours: int = 24 * 60
+    # Новых профилей с одного IP за час (общий Wi-Fi вуза — лимит мягкий).
+    student_register_ip_limit_per_hour: int = 60
+    # Сообщения группе/курсу/потоку за столько дней достаются и тем,
+    # кто зарегистрировался или сменил группу после отправки.
+    messages_late_join_days: int = 14
+    # Не чаще одного напоминания по сообщению за столько часов.
+    remind_cooldown_hours: int = 6
+
+    # Web Push (VAPID). Ключи: python -m app.cli generate-vapid. Пустые — push
+    # выключен, сообщения всё равно видны в приложении.
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+    # Контакт для push-сервисов: mailto:... или https://...
+    vapid_subject: str = "mailto:admin@example.com"
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

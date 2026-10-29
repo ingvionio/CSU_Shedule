@@ -1,4 +1,4 @@
-"""Авторизация администратора: логин/пароль из настроек и JWT."""
+"""Авторизация: администратор (логин/пароль из настроек) и студент (профиль), JWT."""
 
 from __future__ import annotations
 
@@ -13,12 +13,19 @@ from app.core.config import get_settings
 
 ALGORITHM = "HS256"
 ROLE_ADMIN = "admin"
+ROLE_STUDENT = "student"
 
 _bearer = HTTPBearer(auto_error=False)
 
 
 class AuthError(Exception):
     """Вход невозможен: неверные данные или вход не настроен."""
+
+
+def issue_token(subject: str, role: str, ttl_hours: int) -> tuple[str, datetime]:
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=ttl_hours)
+    token = jwt.encode({"sub": subject, "role": role, "exp": expires_at}, get_settings().jwt_secret, algorithm=ALGORITHM)
+    return token, expires_at
 
 
 def authenticate_admin(login: str, password: str) -> tuple[str, datetime]:
@@ -32,27 +39,32 @@ def authenticate_admin(login: str, password: str) -> tuple[str, datetime]:
     if not (login_ok and password_ok):
         raise AuthError("неверный логин или пароль")
 
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=settings.jwt_ttl_hours)
-    token = jwt.encode(
-        {"sub": login, "role": ROLE_ADMIN, "exp": expires_at},
-        settings.jwt_secret,
-        algorithm=ALGORITHM,
-    )
-    return token, expires_at
+    return issue_token(login, ROLE_ADMIN, settings.jwt_ttl_hours)
 
 
-def require_admin(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> str:
-    """Зависимость для админских эндпоинтов. Возвращает логин админа."""
+def _payload(credentials: HTTPAuthorizationCredentials | None, missing: str) -> dict:
     if credentials is None:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "нужен вход администратора")
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, missing)
 
     try:
-        payload = jwt.decode(credentials.credentials, get_settings().jwt_secret, algorithms=[ALGORITHM])
+        return jwt.decode(credentials.credentials, get_settings().jwt_secret, algorithms=[ALGORITHM])
     except jwt.ExpiredSignatureError as error:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "сессия истекла, войдите снова") from error
     except jwt.InvalidTokenError as error:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "недействительный токен") from error
 
+
+def require_admin(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> str:
+    """Зависимость для админских эндпоинтов. Возвращает логин админа."""
+    payload = _payload(credentials, "нужен вход администратора")
     if payload.get("role") != ROLE_ADMIN:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "нет прав администратора")
     return payload["sub"]
+
+
+def require_student(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> int:
+    """Зависимость для эндпоинтов /me. Возвращает id студента."""
+    payload = _payload(credentials, "нужен профиль студента")
+    if payload.get("role") != ROLE_STUDENT:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "доступно только студенту")
+    return int(payload["sub"])

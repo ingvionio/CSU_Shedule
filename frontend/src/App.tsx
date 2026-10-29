@@ -1,27 +1,45 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { ChevronDown, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
 
 import { clearAdminSession, readAdminSession, readSelectedGroup, writeAdminSession, writeSelectedGroup } from './api/cache'
-import { useCurrentWeek, useGroups, useSchedule, useTimeSlots } from './api/queries'
+import { useCurrentWeek, useGroups, useInbox, useSchedule, useTimeSlots } from './api/queries'
+import { registerStudent, useStudentSession } from './api/student'
 import { BottomNav, DaySchedule, Header, WeekGrid, dayNumber, weekRangeLabel } from './ScheduleComponents'
 import { AdminLogin } from './pages/admin/AdminLogin'
 import { AdminFeedback } from './pages/admin/AdminFeedback'
 import { AdminSchedule } from './pages/admin/AdminSchedule'
+import { AdminMessages } from './pages/admin/AdminMessages'
 import { CampusMap } from './pages/CampusMap'
 import { StudentFeedback } from './pages/feedback/StudentFeedback'
+import { StudentMessages } from './pages/messages/StudentMessages'
 import type { AdminSession, Group, View } from './types'
 
 const WEEKDAY_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
 const COURSES = [1, 2, 3, 4]
+const ADMIN_SUBTITLES = {
+  schedule: 'Управление расписанием',
+  messages: 'Сообщения студентам',
+  feedback: 'Обращения студентов',
+}
 
-/** Направление подготовки из названия группы: «ИТ1-ПрИб-11» -> «ПрИ», «ПИ 201» -> «ПИ». */
-function directionOf(name: string): string {
-  const match = name.match(/(ПрИ|ПИ|БИ)/)
-  return match ? match[1] : name
+/**
+ * Направление подготовки приходит с бэкенда. Разбор названия остался запасным
+ * вариантом для списка групп, сохранённого до появления поля.
+ */
+function directionOf(group: Group): string {
+  return group.direction ?? group.name.match(/(ПрИ|ПИ|БИ)/)?.[1] ?? group.name
+}
+
+/** `/?message=12` — ссылка из push-уведомления. */
+function messageFromUrl(url: string): number | null {
+  const value = Number(new URL(url, window.location.origin).searchParams.get('message'))
+  return Number.isInteger(value) && value > 0 ? value : null
 }
 
 export function App() {
-  const [view, setView] = useState<View>('day')
+  const [requestedMessage, setRequestedMessage] = useState(() => messageFromUrl(window.location.href))
+  const [view, setView] = useState<View>(() => requestedMessage !== null ? 'messages' : 'day')
   const [groupId, setGroupId] = useState<number | null>(() => readSelectedGroup())
   const [adminGroupId, setAdminGroupId] = useState<number | null>(null)
   const [weekNumber, setWeekNumber] = useState<number | null>(null)
@@ -29,7 +47,7 @@ export function App() {
   const [now, setNow] = useState(() => new Date())
   const [menuOpen, setMenuOpen] = useState(false)
   const [adminSession, setAdminSession] = useState<AdminSession | null>(() => readAdminSession())
-  const [adminSection, setAdminSection] = useState<'schedule' | 'feedback'>('schedule')
+  const [adminSection, setAdminSection] = useState<'schedule' | 'messages' | 'feedback'>('schedule')
 
   // Выбор группы на экране настройки.
   const [course, setCourse] = useState(1)
@@ -48,11 +66,34 @@ export function App() {
   const currentWeek = useCurrentWeek()
   const schedule = useSchedule(groupId, weekNumber)
   const adminSchedule = useSchedule(adminGroupId, weekNumber)
+  const studentSession = useStudentSession()
+  const inbox = useInbox(studentSession !== null)
+  const queryClient = useQueryClient()
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 60_000)
     return () => window.clearInterval(timer)
   }, [])
+
+  // Ссылку из уведомления открыли — убираем параметр, чтобы обновление страницы не открывало его снова.
+  useEffect(() => {
+    if (messageFromUrl(window.location.href) !== null) window.history.replaceState(null, '', window.location.pathname)
+  }, [])
+
+  // Service worker сообщает о новом push и о нажатии на уведомление в уже открытом приложении.
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return
+    const handle = (event: MessageEvent) => {
+      if (event.data?.type === 'messages-updated') queryClient.invalidateQueries({ queryKey: ['inbox'] })
+      if (event.data?.type === 'open-message') {
+        queryClient.invalidateQueries({ queryKey: ['inbox'] })
+        setRequestedMessage(messageFromUrl(event.data.url))
+        setView('messages')
+      }
+    }
+    navigator.serviceWorker.addEventListener('message', handle)
+    return () => navigator.serviceWorker.removeEventListener('message', handle)
+  }, [queryClient])
 
   // По умолчанию открывается текущая неделя.
   useEffect(() => {
@@ -94,13 +135,13 @@ export function App() {
   }, [week?.number, days.length])
 
   const groupOptions = useMemo(
-    () => (groups.data ?? []).filter((group) => group.course === course && directionOf(group.name) === direction),
+    () => (groups.data ?? []).filter((group) => group.course === course && directionOf(group) === direction),
     [groups.data, course, direction],
   )
 
   const directions = useMemo(() => {
     const available = (groups.data ?? []).filter((group) => group.course === course)
-    return [...new Set(available.map((group) => directionOf(group.name)))]
+    return [...new Set(available.map(directionOf))]
   }, [groups.data, course])
 
   const selectedGroup: Group | undefined = (groups.data ?? []).find((group) => group.id === groupId)
@@ -109,6 +150,12 @@ export function App() {
   const chooseGroup = (group: Group) => {
     setGroupId(group.id)
     writeSelectedGroup(group.id)
+    // Профиль переезжает в новую группу; сообщения новой группе бэкенд дошлёт сам.
+    if (studentSession && studentSession.profile.group_id !== group.id) {
+      registerStudent(studentSession.profile.full_name, group.id)
+        .then(() => queryClient.invalidateQueries({ queryKey: ['inbox'] }))
+        .catch(() => undefined)
+    }
     setWeekNumber(currentWeek.data?.number ?? null)
     setView('day')
   }
@@ -168,11 +215,13 @@ export function App() {
     <Header
       title={view === 'group'
         ? 'Выберите группу'
-        : view === 'admin' ? 'Администрирование' : view === 'feedback' ? 'Вопросы' : 'Расписание'}
+        : view === 'admin'
+          ? 'Администрирование'
+          : view === 'feedback' ? 'Вопросы' : view === 'messages' ? 'Сообщения' : 'Расписание'}
       subtitle={view === 'group'
         ? 'Группа сохранится на этом устройстве'
         : view === 'admin'
-          ? adminSection === 'feedback' ? 'Обращения студентов' : 'Управление расписанием'
+          ? ADMIN_SUBTITLES[adminSection]
           : `Институт ИТ · ${selectedGroup?.name ?? ''}`}
       onBack={view === 'group' && groupId !== null ? () => nav('day') : undefined}
       onMenu={() => setMenuOpen((open) => !open)}
@@ -239,6 +288,10 @@ export function App() {
       </section>}
 
       {view === 'feedback' && <StudentFeedback groupId={groupId} />}
+
+      {view === 'messages' && (
+        <StudentMessages group={selectedGroup} onChooseGroup={() => nav('group')} requestedId={requestedMessage} />
+      )}
 
       {groupId === null && (view === 'day' || view === 'week') && !groups.isLoading && !groups.isError && (
         <div className="state-note">Выберите группу, чтобы увидеть расписание.</div>
@@ -331,10 +384,18 @@ export function App() {
             onClick={() => setAdminSection('schedule')}
           >Расписание</button>
           <button
+            className={adminSection === 'messages' ? 'active' : ''}
+            onClick={() => setAdminSection('messages')}
+          >Сообщения</button>
+          <button
             className={adminSection === 'feedback' ? 'active' : ''}
             onClick={() => setAdminSection('feedback')}
           >Обращения</button>
         </div>
+      )}
+
+      {view === 'admin' && adminSession && adminSection === 'messages' && (
+        <AdminMessages token={adminSession.token} groups={groups.data ?? []} onUnauthorized={logoutAdmin} />
       )}
 
       {view === 'admin' && adminSession && adminSection === 'feedback' && (
@@ -357,7 +418,7 @@ export function App() {
       )}
     </main>
 
-    <BottomNav view={view} onNavigate={nav} />
+    <BottomNav view={view} onNavigate={nav} unread={inbox.data?.unread_count ?? 0} />
     </div>
   </>
 }

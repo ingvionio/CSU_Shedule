@@ -6,7 +6,7 @@
  * поэтому каждое обращение защищено try/catch.
  */
 
-import type { AdminSession } from './types'
+import type { AdminSession, StudentSession } from './types'
 
 const PREFIX = 'csu-schedule:'
 
@@ -81,4 +81,19 @@ export function feedbackToken(): string {
   }
   writeCache(FEEDBACK_TOKEN_KEY, memoryFeedbackToken)
   return memoryFeedbackToken
+}
+
+const STUDENT_KEY = 'student-session'
+
+/**
+ * Профиль студента на устройстве. Возвращается и с истёкшим токеном:
+ * по профилю фронт сам зарегистрируется заново (см. `studentToken`).
+ */
+export function readStudentSession(): StudentSession | null {
+  const session = readCache<StudentSession>(STUDENT_KEY)
+  return session?.token && session.profile ? session : null
+}
+
+export function writeStudentSession(session: StudentSession): void {
+  writeCache(STUDENT_KEY, session)
 }
