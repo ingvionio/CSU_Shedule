@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { LockKeyhole, X } from 'lucide-react'
 
 import { usePersonalNoteMutations } from '../../api/queries'
-import type { PersonalNote } from '../../api/types'
+import type { GroupHomework, PersonalNote } from '../../api/types'
 import type { Day, Lesson } from '../../types'
 import { dayLabel } from '../../ScheduleComponents'
 
-export function PersonalNoteDialog({ groupId, day, lesson, note, onClose }: {
+export function PersonalNoteDialog({ groupId, day, lesson, note, homework, homeworkLoading, homeworkError, onRetryHomework, onClose }: {
   groupId: number; day: Day; lesson: Lesson; note?: PersonalNote; onClose: () => void
+  homework: GroupHomework[]; homeworkLoading: boolean; homeworkError?: string; onRetryHomework: () => void
 }) {
   const [body, setBody] = useState(note?.body ?? '')
   const [error, setError] = useState('')
@@ -29,7 +30,7 @@ export function PersonalNoteDialog({ groupId, day, lesson, note, onClose }: {
     const previous = document.activeElement as HTMLElement | null
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    if (note) closeButton.current?.focus()
+    if (note || homework.length > 0 || homeworkLoading) closeButton.current?.focus()
     else textarea.current?.focus()
     return () => {
       document.body.style.overflow = previousOverflow
@@ -67,9 +68,21 @@ export function PersonalNoteDialog({ groupId, day, lesson, note, onClose }: {
         }
       }}>
       <button ref={closeButton} className="modal-close" aria-label="Закрыть" disabled={busy || closing} onClick={close}><X size={18} /></button>
-      <h2 id="personal-note-title">Моя заметка</h2>
-      <p className="private-note-caption"><LockKeyhole size={16} />Видна только вам</p>
-      <div className="admin-selected-lesson"><strong>{lesson.subject}</strong><span>{dayLabel(day.date)} · {lesson.start_time}–{lesson.end_time}</span><span>{[lesson.type.name, lesson.teacher, lesson.room ? `Ауд. ${lesson.room}` : null].filter(Boolean).join(' · ')}</span></div>
+      <h2 id="personal-note-title">{lesson.subject}</h2>
+      <div className="admin-selected-lesson"><span>{dayLabel(day.date)} · {lesson.start_time}–{lesson.end_time}</span><span>{[lesson.type.name, lesson.teacher, lesson.room ? `Ауд. ${lesson.room}` : null].filter(Boolean).join(' · ')}</span></div>
+      <section className="lesson-homework-section" aria-label="Домашка к паре">
+        <h3>Домашка к паре</h3>
+        {homeworkLoading && <p className="muted">Загружаем задания…</p>}
+        {homeworkError && <div className="form-error" role="alert"><span>Не удалось обновить домашку: {homeworkError}</span><button className="button button-secondary" onClick={onRetryHomework}>Повторить</button></div>}
+        {!homeworkLoading && !homeworkError && homework.length === 0 && <p className="muted">К этой паре пока нет заданий.</p>}
+        {homework.map((item) => <article className="lesson-homework-detail" key={item.id}>
+          <strong>{item.title}</strong>
+          {item.due_date && <span className="homework-due">Срок сдачи: {new Date(`${item.due_date}T00:00:00`).toLocaleDateString('ru-RU')}</span>}
+          {item.body && <p>{item.body}</p>}
+          <small className="muted">Добавил(а): {item.created_by_name}{item.completed_by_me ? ' · Выполнено вами' : ''}</small>
+        </article>)}
+      </section>
+      <p className="private-note-caption"><LockKeyhole size={16} />Моя заметка · видна только вам</p>
       <label className="admin-field"><span>Текст заметки</span><textarea ref={textarea} className="text-field" rows={6} maxLength={5000} value={body} onChange={(event) => setBody(event.target.value)} placeholder="Что повторить, о чём спросить, что взять с собой…" /></label>
       {error && <p className="form-error" role="alert">{error}</p>}
       <button className="button button-primary full" disabled={busy || closing || !body.trim()} onClick={save}>{busy ? 'Сохраняем…' : 'Сохранить заметку'}</button>

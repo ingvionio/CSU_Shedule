@@ -16,7 +16,7 @@ import { StudentFeedback } from './pages/feedback/StudentFeedback'
 import { StudentMessages } from './pages/messages/StudentMessages'
 import { GroupHomeworkPanel } from './pages/homework/GroupHomeworkPanel'
 import { PersonalNoteDialog } from './pages/homework/PersonalNoteDialog'
-import type { PersonalNote } from './api/types'
+import type { GroupHomework, PersonalNote } from './api/types'
 import type { AdminSession, Day, Group, Lesson, View } from './types'
 
 const WEEKDAY_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
@@ -83,14 +83,15 @@ export function App() {
     schedule.data?.week.start_date,
     schedule.data?.week.end_date,
   )
-  const homeworkCounts = new Map<string, number>()
+  const homeworkByLesson = new Map<string, GroupHomework[]>()
   if (studentSession?.profile.group_id === groupId) {
     for (const item of homework.data?.items ?? []) {
       if (item.group_id !== groupId || item.lesson_id === null || item.lesson_date === null || item.status === 'archived') continue
       const key = `${item.lesson_date}:l-${item.lesson_id}`
-      homeworkCounts.set(key, (homeworkCounts.get(key) ?? 0) + 1)
+      homeworkByLesson.set(key, [...(homeworkByLesson.get(key) ?? []), item])
     }
   }
+  const homeworkCounts = new Map([...homeworkByLesson].map(([key, items]) => [key, items.length]))
   const personalNotes = usePersonalNotes()
   const [noteSelection, setNoteSelection] = useState<{ groupId: number; day: Day; lesson: Lesson; note?: PersonalNote } | null>(null)
   const notesByKey = new Map((personalNotes.data ?? []).map((note) => [note.occurrence_key, note]))
@@ -479,7 +480,12 @@ export function App() {
     </main>
 
     <BottomNav view={view} onNavigate={nav} unread={inbox.data?.unread_count ?? 0} />
-    {noteSelection && studentSession && <PersonalNoteDialog {...noteSelection} onClose={() => setNoteSelection(null)} />}
+    {noteSelection && studentSession && <PersonalNoteDialog {...noteSelection}
+      homework={homeworkByLesson.get(`${noteSelection.day.date}:${noteSelection.lesson.id}`) ?? []}
+      homeworkLoading={homework.isPending}
+      homeworkError={homework.isError ? homework.error.message : undefined}
+      onRetryHomework={() => homework.refetch()}
+      onClose={() => setNoteSelection(null)} />}
     </div>
   </>
 }
