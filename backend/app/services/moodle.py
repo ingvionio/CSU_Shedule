@@ -218,7 +218,7 @@ class MoodleClient:
         if not full_name:
             raise MoodleError("Не удалось определить ФИО пользователя из профиля Moodle", 502)
 
-        return full_name, moodle_id or "unknown", sesskey
+        return full_name, moodle_id or "unknown", sesskey, html
 
     def call_ajax(self, sesskey: str, method_name: str, args: dict[str, Any]) -> Any:
         """Вызывает внутренний AJAX-метод Moodle (/lib/ajax/service.php)."""
@@ -270,6 +270,33 @@ class MoodleClient:
         except Exception:
             pass
         return False
+
+
+def extract_group_from_profile_html(profile_html: str) -> str | None:
+    """Извлекает название академической группы из HTML профиля Moodle (/user/profile.php)."""
+    if not profile_html:
+        return None
+    soup = BeautifulSoup(profile_html, "html.parser")
+    # Ищем блок <dt>Учебная группа</dt><dd>ПрИ-401</dd>
+    dt = soup.find(
+        lambda e: e.name in ("dt", "th")
+        and any(k in e.get_text(strip=True).lower() for k in ["учебная группа", "академическая группа", "группа"])
+    )
+    if dt:
+        dd = dt.find_next_sibling(["dd", "td"])
+        if dd:
+            val = _clean_text(dd.get_text())
+            if val:
+                return val
+
+    # Также проверяем текстовые ноды дерева профиля
+    for node in soup.select(".profile_tree li, .userprofile li, .node_category li"):
+        text = node.get_text(" ", strip=True)
+        m = re.search(r"(?:учебная\s+группа|академическая\s+группа)\s*[:—–-]?\s*([А-Яа-яA-Za-z0-9\-]+)", text, re.IGNORECASE)
+        if m:
+            return m.group(1).strip()
+
+    return None
 
 
 def extract_student_group_info(
@@ -368,10 +395,18 @@ def match_student_group(
 ) -> Group | None:
     """
     Автоматически сопоставляет студента с одной из академических групп из БД.
-    Анализирует названия курсов текущего и прошлых семестров, а также HTML профиля.
+    Анализирует профиль студента Moodle (/user/profile.php) и названия курсов.
     """
-    if not known_groups and not courses:
+    if not known_groups and not courses and not profile_html:
         return None
+
+    # 0. Первоочередная проверка: прямое поле «Учебная группа» со страницы профиля Moodle
+    explicit_group_name = extract_group_from_profile_html(profile_html)
+    if explicit_group_name:
+        norm_explicit = normalize_group_key(explicit_group_name)
+        for g in known_groups:
+            if normalize_group_key(g.name) == norm_explicit:
+                return g
 
     # Сначала пытаемся извлечь семантическую информацию: направление, курс и индекс группы
     direction, course_num, group_idx = extract_student_group_info(courses, profile_html)
@@ -489,8 +524,8 @@ def authenticate_and_detect_student(
         )
 
     client = MoodleClient()
-    profile_html, initial_sesskey = client.execute_login(username, password)
-    full_name, moodle_id, profile_sesskey = client.get_profile_info()
+    dashboard_html, initial_sesskey = client.execute_login(username, password)
+    full_name, moodle_id, profile_sesskey, profile_html = client.get_profile_info()
     sesskey = profile_sesskey or initial_sesskey
 
     # Получаем курсы через AJAX для определения группы
@@ -498,8 +533,27 @@ def authenticate_and_detect_student(
     detected_group = match_student_group(courses, profile_html, groups)
 
     if detected_group is None:
-        # Если группа не была найдена среди существующих в БД, но мы смогли однозначно определить
-        # каноническое направление и курс студента, находим или создаем группу автоматически
+        # 1. Если группа была явно указана в профиле (например "ПрИ-401"), но отсутствует в known_groups
+        explicit_name = extract_group_from_profile_html(profile_html)
+        if explicit_name:
+            existing = db.scalar(select(Group).where(Group.name == explicit_name))
+            if existing is not None:
+                detected_group = existing
+            else:
+                from app.services.groups import direction_of
+
+                c_match = re.search(r"(\d)", explicit_name)
+                c_num = int(c_match.group(1)) if c_match else 1
+                detected_group = Group(
+                    name=explicit_name,
+                    course=c_num,
+                    direction=direction_of(explicit_name),
+                )
+                db.add(detected_group)
+                db.flush()
+
+    if detected_group is None:
+        # 2. Если группы нет в профиле — определяем по учебным курсам Moodle
         direction, course_num, group_idx = extract_student_group_info(courses, profile_html)
         if direction and course_num:
             canonical_name = f"{direction}-{course_num}{group_idx:02d}"

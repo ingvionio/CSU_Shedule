@@ -104,3 +104,27 @@ def test_moodle_mock_login(bare_client, monkeypatch):
     forget_resp = bare_client.post("/api/v1/auth/moodle/forget", headers={"Authorization": f"Bearer {token}"})
     assert forget_resp.status_code == 200
     assert forget_resp.json() == {"status": "ok"}
+
+
+def test_extract_group_from_profile_html():
+    from app.services.moodle import extract_group_from_profile_html
+
+    profile_html = """
+    <div class="userprofile">
+      <section class="node_category card mb-3">
+        <div class="card-body">
+          <ul class="list-unstyled">
+            <li class="contentnode">
+              <dt>Учебная группа</dt>
+              <dd>ПрИ-401</dd>
+            </li>
+          </ul>
+        </div>
+      </section>
+    </div>
+    """
+    assert extract_group_from_profile_html(profile_html) == "ПрИ-401"
+
+    # Проверка работы match_student_group напрямую из HTML профиля
+    g = Group(id=50, name="ПрИ-401", course=4, direction="ПрИ")
+    assert match_student_group([], profile_html, [g]) == g
