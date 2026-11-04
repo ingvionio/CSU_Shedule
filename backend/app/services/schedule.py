@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 from datetime import date, time, timedelta
+import hashlib
+import json
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -132,6 +134,23 @@ def _assemble_days(
                 day_lessons.append(_serialize_moved_in(override))
 
         day_lessons.sort(key=lambda item: (item["start_time"], item["subject"]))
+
+        # Identity uses the original occurrence, so moves keep the same private note.
+        # A repeated Excel import with unchanged content also retains this identity.
+        for item in day_lessons:
+            if item["id"].startswith("l-"):
+                source = next(lesson for lesson in lessons if item["id"] == f"l-{lesson.id}")
+                origin_date = day_date
+            else:
+                override = next(value for value in overrides if item["id"] == f"o-{value.id}")
+                source = override.lesson
+                origin_date = override.date
+            if source is not None:
+                identity = [semester.id, group.id, origin_date.isoformat(), source.start_time.isoformat(),
+                            source.end_time.isoformat(), source.subject.name, source.lesson_type, source.subgroup]
+            else:
+                identity = [semester.id, group.id, "added", override.id]
+            item["note_key"] = hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode()).hexdigest()
 
         days.append(
             {

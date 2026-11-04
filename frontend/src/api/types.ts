@@ -46,6 +46,7 @@ export type LessonChange = {
 
 export type Lesson = {
   id: string
+  note_key?: string | null
   /** HH:MM, заполнено всегда. */
   start_time: string
   end_time: string
@@ -308,3 +309,57 @@ export type Student = {
   group_name: string | null
   course: number | null
 }
+
+export type HomeworkSource = 'from_class' | 'moodle' | 'chat' | 'unknown'
+export type HomeworkStatus = 'published' | 'completed' | 'archived'
+
+export type GroupHomework = {
+  id: number
+  group_id: number
+  group_name: string
+  lesson_id: number | null
+  lesson_date: string | null
+  subject: string | null
+  title: string
+  body: string
+  due_date: string | null
+  source: HomeworkSource
+  status: HomeworkStatus
+  version: number
+  created_by: number
+  created_by_name: string
+  updated_by: number
+  updated_by_name: string
+  created_at: string
+  updated_at: string
+  completed_by_me: boolean
+}
+
+export type HomeworkList = { can_edit: boolean; items: GroupHomework[] }
+
+export type HomeworkInput = {
+  title: string
+  body: string
+  lesson_date?: string | null
+  lesson_id?: number | null
+  subject?: string | null
+  due_date?: string | null
+  source: HomeworkSource
+}
+
+export type HomeworkPatch = Partial<HomeworkInput> & { version: number; status?: HomeworkStatus }
+
+export type GroupEditor = { user_id: number; full_name: string; group_id: number; is_primary: boolean; active: boolean }
+
+export type PersonalNote = {
+  id: number
+  occurrence_key: string
+  group_id: number
+  lesson_date: string
+  subject: string
+  body: string
+  version: number
+  updated_at: string
+}
+
+export type NoteInput = { group_id: number; lesson_date: string; lesson_ref: string; body: string; version: number }

@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tan
 
 import { api } from './client'
 import { feedbackToken, readCache, writeCache } from './cache'
-import { asStudent } from './student'
+import { asStudent, useStudentSession } from './student'
 import type {
   Catalog,
   CurrentWeek,
@@ -17,6 +17,9 @@ import type {
   RecipientUpdate,
   TimeSlot,
   WeekSchedule,
+  HomeworkInput,
+  HomeworkPatch,
+  NoteInput,
 } from './types'
 
 export function useGroups(): UseQueryResult<Group[]> {
@@ -68,8 +71,13 @@ export function useSchedule(groupId: number | null, week: number | null): UseQue
     queryKey: ['schedule', groupId, week],
     queryFn: async () => writeCache(key!, await api.schedule(groupId!, week!)),
     initialData: () => (key ? readCache<WeekSchedule>(key) ?? undefined : undefined),
+    // Сохранённая неделя показывается сразу, но не считается свежим ответом сервера.
+    initialDataUpdatedAt: 0,
     enabled: groupId !== null && week !== null,
     staleTime: 5 * 60 * 1000,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: 'always',
+    refetchInterval: 60 * 1000,
   })
 }
 
@@ -215,6 +223,48 @@ export function useInboxMutations() {
   return { open, acknowledge }
 }
 
+export function useHomework(enabled: boolean, start?: string, end?: string) {
+  const session = useStudentSession()
+  return useQuery({
+    queryKey: ['homework', session?.profile.id, session?.profile.group_id, start, end],
+    queryFn: () => asStudent((token) => api.homework(token, start, end)),
+    enabled: enabled && session !== null,
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+    refetchInterval: 15 * 1000,
+  })
+}
+
+export function useHomeworkMutations() {
+  const queryClient = useQueryClient()
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['homework'] })
+  const create = useMutation({ mutationFn: (body: HomeworkInput) => asStudent((token) => api.createHomework(token, body)), onSuccess: refresh })
+  const update = useMutation({ mutationFn: ({ id, body }: { id: number; body: HomeworkPatch }) => asStudent((token) => api.updateHomework(token, id, body)), onSuccess: refresh })
+  const complete = useMutation({ mutationFn: ({ id, completed }: { id: number; completed: boolean }) => asStudent((token) => api.completeHomework(token, id, completed)), onSuccess: refresh })
+  return { create, update, complete }
+}
+
+export function usePersonalNotes() {
+  const session = useStudentSession()
+  return useQuery({
+    queryKey: ['personal-notes', session?.profile.id],
+    queryFn: () => asStudent(api.notes),
+    enabled: session !== null,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  })
+}
+
+export function usePersonalNoteMutations() {
+  const queryClient = useQueryClient()
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['personal-notes'] })
+  return {
+    save: useMutation({ mutationFn: (body: NoteInput) => asStudent((token) => api.saveNote(token, body)), onSuccess: refresh }),
+    remove: useMutation({ mutationFn: ({ id, version }: { id: number; version: number }) => asStudent((token) => api.deleteNote(token, id, version)), onSuccess: refresh }),
+  }
+}
+
 /* --- Рассылка: методист --- */
 
 export function useAdminMessages(token: string) {
@@ -240,6 +290,22 @@ export function useStudents(token: string, params: { q?: string; course?: number
     enabled,
     staleTime: 30 * 1000,
   })
+}
+
+export function useHomeworkEditors(token: string, groupId: number | null) {
+  return useQuery({
+    queryKey: ['homework-editors', groupId],
+    queryFn: () => api.homeworkEditors(token, groupId!),
+    enabled: groupId !== null,
+  })
+}
+
+export function useHomeworkEditorMutations(token: string, groupId: number) {
+  const queryClient = useQueryClient()
+  const refresh = () => Promise.all([queryClient.invalidateQueries({ queryKey: ['homework-editors', groupId] }), queryClient.invalidateQueries({ queryKey: ['homework'] })])
+  const assign = useMutation({ mutationFn: ({ userId, isPrimary }: { userId: number; isPrimary: boolean }) => api.assignHomeworkEditor(token, groupId, userId, isPrimary), onSuccess: refresh })
+  const remove = useMutation({ mutationFn: (userId: number) => api.removeHomeworkEditor(token, groupId, userId), onSuccess: refresh })
+  return { assign, remove }
 }
 
 export function useMessageMutations(token: string) {

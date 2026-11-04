@@ -24,6 +24,13 @@ import type {
   TimeSlot,
   TokenResponse,
   WeekSchedule,
+  GroupHomework,
+  HomeworkInput,
+  HomeworkList,
+  HomeworkPatch,
+  GroupEditor,
+  PersonalNote,
+  NoteInput,
 } from './types'
 
 const BASE_URL = (import.meta.env.VITE_API_URL ?? '') + '/api/v1'
@@ -74,6 +81,9 @@ async function request<T>(path: string, { method = 'GET', body, token, feedbackT
 }
 
 export const api = {
+  notes: (token: string) => request<PersonalNote[]>('/me/notes', { token }),
+  saveNote: (token: string, body: NoteInput) => request<PersonalNote>('/me/notes', { method: 'POST', token, body }),
+  deleteNote: (token: string, id: number, version: number) => request<void>(`/me/notes/${id}?version=${version}`, { method: 'DELETE', token }),
   groups: () => request<Group[]>('/groups'),
   timeSlots: () => request<TimeSlot[]>('/time-slots'),
   lessonTypes: () => request<LessonType[]>('/lesson-types'),
@@ -134,4 +144,22 @@ export const api = {
   remindMessage: (token: string, id: number) =>
     request<{ reminded: number }>(`/admin/messages/${id}/remind`, { method: 'POST', token }),
   deleteMessage: (token: string, id: number) => request<void>(`/admin/messages/${id}`, { method: 'DELETE', token }),
+
+  homework: (token: string, start?: string, end?: string) => {
+    const params = new URLSearchParams()
+    if (start) params.set('start', start)
+    if (end) params.set('end', end)
+    return request<HomeworkList>(`/me/homework${params.size ? `?${params}` : ''}`, { token })
+  },
+  createHomework: (token: string, body: HomeworkInput) =>
+    request<GroupHomework>('/me/homework', { method: 'POST', body, token }),
+  updateHomework: (token: string, id: number, body: HomeworkPatch) =>
+    request<GroupHomework>(`/me/homework/${id}`, { method: 'PATCH', body, token }),
+  completeHomework: (token: string, id: number, completed: boolean) =>
+    request<GroupHomework>(`/me/homework/${id}/complete?completed=${completed}`, { method: 'POST', token }),
+  homeworkEditors: (token: string, groupId: number) => request<GroupEditor[]>(`/admin/groups/${groupId}/editors`, { token }),
+  assignHomeworkEditor: (token: string, groupId: number, userId: number, isPrimary: boolean) =>
+    request<GroupEditor>(`/admin/groups/${groupId}/editors`, { method: 'POST', body: { user_id: userId, is_primary: isPrimary }, token }),
+  removeHomeworkEditor: (token: string, groupId: number, userId: number) =>
+    request<void>(`/admin/groups/${groupId}/editors/${userId}`, { method: 'DELETE', token }),
 }

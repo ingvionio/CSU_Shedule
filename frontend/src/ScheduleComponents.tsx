@@ -1,6 +1,14 @@
 import { ArrowLeft, Bell, CalendarDays, Clock3, Map as MapIcon, MapPin, Menu, MessageCircleQuestion, UserRound } from 'lucide-react'
 
 import type { Day, Lesson, MovePoint, TimeSlot, View } from './types'
+import type { ReactNode } from 'react'
+
+export function PersonalNotePreview({ body, onOpen }: { body: string; onOpen?: () => void }) {
+  const text = <span className="private-note-text">{body.replace(/\s+/g, ' ').trim()}</span>
+  return onOpen
+    ? <button type="button" className="private-note-preview" aria-haspopup="dialog" aria-label="Открыть мою заметку к паре" onClick={onOpen}>{text}</button>
+    : <div className="private-note-preview">{text}</div>
+}
 
 const WEEKDAY_NAMES = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота']
 const WEEKDAY_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
@@ -136,11 +144,18 @@ function LessonTime({ lesson }: { lesson: Lesson }) {
   )
 }
 
-export function LessonCard({ lesson }: { lesson: Lesson }) {
+export function LessonCard({ lesson, children, onOpen }: { lesson: Lesson; children?: ReactNode; onOpen?: () => void }) {
   const label = STATUS_LABELS[lesson.status]
 
   return (
-    <article className={`lesson-card ${statusClass(lesson.status)}`}>
+    <article className={`lesson-card ${statusClass(lesson.status)}${onOpen ? ' lesson-card-selectable' : ''}`}
+      role={onOpen ? 'button' : undefined}
+      tabIndex={onOpen ? 0 : undefined}
+      aria-haspopup={onOpen ? 'dialog' : undefined}
+      onClick={onOpen}
+      onKeyDown={onOpen ? (event) => {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpen() }
+      } : undefined}>
       <LessonTime lesson={lesson} />
       <div className="lesson-main">
         <div className="lesson-heading">
@@ -159,6 +174,7 @@ export function LessonCard({ lesson }: { lesson: Lesson }) {
           {lesson.room && <span><MapPin size={13} />{lesson.room === 'ФОК' ? 'ФОК' : `Ауд. ${lesson.room}`}</span>}
         </div>
       </div>
+      {children && <div className="lesson-extras">{children}</div>}
     </article>
   )
 }
@@ -173,7 +189,11 @@ function lessonsCount(count: number): string {
   return `${count} пар`
 }
 
-export function DaySchedule({ day }: { day: Day }) {
+export function DaySchedule({ day, renderLessonExtras, onLessonClick }: {
+  day: Day
+  renderLessonExtras?: (lesson: Lesson, day: Day) => ReactNode
+  onLessonClick?: (lesson: Lesson, day: Day) => void
+}) {
   return (
     <section className="day-section">
       <div className="day-heading">
@@ -185,7 +205,9 @@ export function DaySchedule({ day }: { day: Day }) {
       </div>
       {day.lessons.length
         ? <div className="lesson-list">
-          {day.lessons.map((lesson) => <LessonCard key={lesson.id} lesson={lesson} />)}
+          {day.lessons.map((lesson) => <LessonCard key={lesson.id} lesson={lesson}
+            onOpen={onLessonClick && lesson.note_key ? () => onLessonClick(lesson, day) : undefined}
+          >{renderLessonExtras?.(lesson, day)}</LessonCard>)}
         </div>
         : <div className="empty-day">Занятий нет</div>}
     </section>
@@ -198,12 +220,16 @@ export function WeekGrid({
   currentMinutes,
   onLessonClick,
   onEmptySlotClick,
+  notedKeys,
+  homeworkCounts,
 }: {
   days: Day[]
   slots: TimeSlot[]
   currentMinutes: number
   onLessonClick?: (lesson: Lesson, day: Day) => void
   onEmptySlotClick?: (day: Day, slot: TimeSlot) => void
+  notedKeys?: Set<string>
+  homeworkCounts?: Map<string, number>
 }) {
   const todayIndex = days.findIndex((day) => day.is_today)
   const gridStart = slots.length ? minutesOf(slots[0].start_time) : 0
@@ -286,6 +312,8 @@ export function WeekGrid({
                 <small>{lesson.type.name}{lesson.subgroup !== null ? ` · ${lesson.subgroup} п/гр` : ''}</small>
                 <small>{[lesson.teacher, lesson.room].filter(Boolean).join(' · ')}</small>
                 {STATUS_LABELS[lesson.status] && <em>{STATUS_LABELS[lesson.status]}</em>}
+                {lesson.note_key && notedKeys?.has(lesson.note_key) && <small className="private-note-mark">Моя заметка</small>}
+                {homeworkCounts?.has(`${day.date}:${lesson.id}`) && <small className="lesson-homework-badge">Домашка · {homeworkCounts.get(`${day.date}:${lesson.id}`)}</small>}
               </div>
             ))}
           </div>

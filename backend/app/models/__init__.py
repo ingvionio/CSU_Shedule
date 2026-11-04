@@ -13,8 +13,10 @@ from app.models.enums import (
 from app.models.feedback import EmailOutbox, FeedbackMessage, FeedbackRecipient, FeedbackReply
 from app.models.lesson import Lesson, LessonOverride, ScheduleImport
 from app.models.message import Message, MessageRecipient
+from app.models.homework import GroupEditor, GroupHomework, HomeworkCompletion, HomeworkRevision
 from app.models.push import PushSubscription
 from app.models.user import User
+from app.models.note import PersonalNote
 
 __all__ = [
     "Base",
@@ -32,6 +34,10 @@ __all__ = [
     "LessonStatus",
     "Message",
     "MessageRecipient",
+    "GroupEditor",
+    "GroupHomework",
+    "HomeworkCompletion",
+    "HomeworkRevision",
     "OverrideKind",
     "LessonType",
     "PublishStatus",
@@ -43,5 +49,6 @@ __all__ = [
     "Teacher",
     "TimeSlot",
     "User",
+    "PersonalNote",
     "WeekParity",
 ]
