@@ -427,7 +427,7 @@ h1 { margin-top: 7px; font-size: 24px; line-height: 1.16; letter-spacing: -.045e
 .importance-high { background: #fdf0ee; color: var(--red-dark); }
 .importance-normal { background: var(--purple-soft); color: var(--purple); }
 .importance-low { background: #e7e8eb; color: #767a83; }
-.admin-sections { grid-template-columns: repeat(3, 1fr); }
+.admin-sections { grid-template-columns: repeat(4, 1fr); }
 .message-composer { display: flex; flex-direction: column; gap: 9px; }
 .message-composer .admin-field { width: 100%; }
 .choice-row.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -456,3 +456,51 @@ h1 { margin-top: 7px; font-size: 24px; line-height: 1.16; letter-spacing: -.045e
 .push-card small { color: var(--muted); font-size: 11px; line-height: 1.45; }
 .push-card .button { min-height: 38px; }
 .push-card .form-error { width: 100%; }
+
+/* Групповая домашка */
+.homework-panel { display: flex; flex-direction: column; gap: 16px; margin-top: 24px; padding: 20px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+.homework-panel .admin-field { min-width: 0; width: 100%; margin: 0; }
+.homework-panel .text-field, .homework-panel .select-field { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
+.homework-panel .admin-time-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.homework-profile { margin: 0; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.homework-heading > div { min-width: 0; }
+.homework-heading > .button { flex-shrink: 0; min-height: 44px; }
+.homework-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.homework-heading h2 { margin: 3px 0 4px; font-size: 18px; }
+.homework-heading p { margin: 0; font-size: 11px; line-height: 1.45; }
+.homework-form { display: flex; flex-direction: column; gap: 16px; padding: 16px; border-radius: 13px; background: #faf9fc; }
+.homework-form > .button { margin-top: 4px; min-height: 44px; white-space: normal; }
+.homework-form textarea { resize: vertical; }
+.homework-list { display: flex; flex-direction: column; gap: 8px; }
+.homework-item { display: flex; gap: 10px; padding: 11px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.homework-item.completed { opacity: .62; }
+.homework-check { display: grid; width: 24px; height: 24px; flex: 0 0 auto; place-items: center; padding: 0; border: 1px solid #c9cbd3; border-radius: 7px; background: transparent; color: var(--green); cursor: pointer; }
+.homework-check span { width: 8px; height: 8px; border-radius: 50%; background: #d9dbe1; }
+.homework-main { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 4px; }
+.homework-title-row { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
+.homework-title-row strong { font-size: 13px; line-height: 1.35; }
+.homework-due { color: var(--amber); font-size: 10px; font-weight: 700; }
+.homework-main p { margin: 2px 0; white-space: pre-wrap; font-size: 12px; line-height: 1.45; }
+.homework-main small { font-size: 10px; }
+.homework-editor-note { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 10px; }
+.admin-homework-editors { display: flex; flex-direction: column; gap: 12px; }
+.admin-homework-editors h1 { margin: 3px 0 0; font-size: 22px; }
+.admin-homework-editors > p { margin: 0; font-size: 12px; line-height: 1.45; }
+.admin-editor-add { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.editor-list { display: flex; flex-direction: column; gap: 8px; }
+.editor-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 11px; }
+.editor-row > span { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.editor-row small { color: var(--purple); font-size: 10px; }
+.homework-main { overflow-wrap: anywhere; }
+.homework-editor-note { align-items: flex-start; line-height: 1.5; }
+.homework-editor-note svg { flex-shrink: 0; margin-top: 1px; }
+@media (max-width: 480px) {
+  .homework-panel { padding: 16px; margin-top: 20px; }
+  .homework-heading { flex-direction: column; gap: 14px; }
+  .homework-heading > .button { width: 100%; }
+  .homework-panel .admin-time-row, .admin-editor-add { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .homework-form { padding: 12px; }
+  .homework-form .text-field, .homework-form .select-field { font-size: 16px; }
+  .admin-sections { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .editor-row > span { min-width: 0; overflow-wrap: anywhere; }
+}

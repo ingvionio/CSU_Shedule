@@ -308,3 +308,44 @@ export type Student = {
   group_name: string | null
   course: number | null
 }
+
+export type HomeworkSource = 'from_class' | 'moodle' | 'chat' | 'unknown'
+export type HomeworkStatus = 'published' | 'completed' | 'archived'
+
+export type GroupHomework = {
+  id: number
+  group_id: number
+  group_name: string
+  lesson_id: number | null
+  lesson_date: string | null
+  subject: string | null
+  title: string
+  body: string
+  due_date: string | null
+  source: HomeworkSource
+  status: HomeworkStatus
+  version: number
+  created_by: number
+  created_by_name: string
+  updated_by: number
+  updated_by_name: string
+  created_at: string
+  updated_at: string
+  completed_by_me: boolean
+}
+
+export type HomeworkList = { can_edit: boolean; items: GroupHomework[] }
+
+export type HomeworkInput = {
+  title: string
+  body: string
+  lesson_date?: string | null
+  lesson_id?: number | null
+  subject?: string | null
+  due_date?: string | null
+  source: HomeworkSource
+}
+
+export type HomeworkPatch = Partial<HomeworkInput> & { version: number; status?: HomeworkStatus }
+
+export type GroupEditor = { user_id: number; full_name: string; group_id: number; is_primary: boolean; active: boolean }

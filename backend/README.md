@@ -75,6 +75,10 @@ DATABASE_URL="sqlite+pysqlite:///./schedule.db" python -m app.cli init-db
 | GET | `/api/v1/admin/catalog` | предметы, преподаватели, аудитории для подсказок |
 | POST | `/api/v1/admin/overrides` | временное изменение для группы или потока |
 | DELETE | `/api/v1/admin/overrides/{id}?batch=true` | откатить изменение (`batch` — для всех групп потока) |
+| GET | `/api/v1/me/homework?start=&end=` | домашка своей группы |
+| POST/PATCH | `/api/v1/me/homework[/{id}]` | добавить или изменить домашку; только редактор группы |
+| POST | `/api/v1/me/homework/{id}/complete` | личная отметка выполнения |
+| GET/POST/DELETE | `/api/v1/admin/groups/{id}/editors` | назначить или отозвать редакторов |
 
 `/admin/*` требуют заголовок `Authorization: Bearer <token>`. Логин и пароль
 админа — `ADMIN_LOGIN` / `ADMIN_PASSWORD` в `.env` (в docker-compose по
@@ -177,5 +181,15 @@ python -m app.cli send-emails --test you@example.com   # проверить SMTP
 
 ## Чего ещё нет
 
-Загрузка Excel через API, черновики и публикация, пользователи и роли
-(сейчас один админ из `.env`), вход через Moodle.
+Загрузка Excel через API, черновики и публикация расписания, вход через Moodle.
+
+## Групповая домашка
+
+У каждой группы может быть несколько редакторов (староста и заместитель).
+Администратор назначает их через `/api/v1/admin/groups/{id}/editors`. Редактор
+публикует домашку для своей группы через `/api/v1/me/homework`; остальные
+студенты только смотрят её и ставят личную отметку «выполнено». Изменения
+защищены версионностью (`version`) и записываются в `homework_revisions`,
+поэтому параллельные правки не затирают друг друга. Домашка имеет источник
+(`from_class`, `moodle`, `chat`, `unknown`) и может быть привязана к дате или
+конкретной паре.

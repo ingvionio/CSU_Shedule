@@ -31,7 +31,7 @@ export function StudentMessages({ group, onChooseGroup, requestedId }: StudentMe
     <section className="feedback-screen">
       <div className="profile-line">
         <UserRound size={16} />
-        <span>{session.profile.full_name} · {session.profile.group_name ?? 'без группы'}</span>
+        <span>{session.profile.full_name} · {session.profile.group_name ?? 'без группы'} · профиль №{session.profile.id}</span>
       </div>
 
       <PushToggle />

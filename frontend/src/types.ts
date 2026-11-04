@@ -30,4 +30,11 @@ export type {
   TimeSlot,
   Week,
   WeekSchedule,
+  GroupHomework,
+  HomeworkSource,
+  HomeworkStatus,
+  HomeworkInput,
+  HomeworkPatch,
+  HomeworkList,
+  GroupEditor,
 } from './api/types'

@@ -10,9 +10,11 @@ import { AdminLogin } from './pages/admin/AdminLogin'
 import { AdminFeedback } from './pages/admin/AdminFeedback'
 import { AdminSchedule } from './pages/admin/AdminSchedule'
 import { AdminMessages } from './pages/admin/AdminMessages'
+import { AdminHomeworkEditors } from './pages/admin/AdminHomeworkEditors'
 import { CampusMap } from './pages/CampusMap'
 import { StudentFeedback } from './pages/feedback/StudentFeedback'
 import { StudentMessages } from './pages/messages/StudentMessages'
+import { GroupHomeworkPanel } from './pages/homework/GroupHomeworkPanel'
 import type { AdminSession, Group, View } from './types'
 
 const WEEKDAY_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
@@ -21,6 +23,7 @@ const ADMIN_SUBTITLES = {
   schedule: 'Управление расписанием',
   messages: 'Сообщения студентам',
   feedback: 'Обращения студентов',
+  homework: 'Редакторы групповой домашки',
 }
 
 /**
@@ -47,7 +50,7 @@ export function App() {
   const [now, setNow] = useState(() => new Date())
   const [menuOpen, setMenuOpen] = useState(false)
   const [adminSession, setAdminSession] = useState<AdminSession | null>(() => readAdminSession())
-  const [adminSection, setAdminSection] = useState<'schedule' | 'messages' | 'feedback'>('schedule')
+  const [adminSection, setAdminSection] = useState<'schedule' | 'messages' | 'feedback' | 'homework'>('schedule')
 
   // Выбор группы на экране настройки.
   const [course, setCourse] = useState(1)
@@ -373,6 +376,15 @@ export function App() {
             {new Date(schedule.data.generated_at).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}
           </div>
         )}
+        {schedule.data && studentSession && (
+          <GroupHomeworkPanel
+            groupId={groupId}
+            weekStart={schedule.data.week.start_date}
+            weekEnd={schedule.data.week.end_date}
+            days={days}
+            selectedDay={selectedDay}
+          />
+        )}
       </>}
 
       {view === 'admin' && !adminSession && <AdminLogin onLogin={loginAdmin} />}
@@ -391,6 +403,10 @@ export function App() {
             className={adminSection === 'feedback' ? 'active' : ''}
             onClick={() => setAdminSection('feedback')}
           >Обращения</button>
+          <button
+            className={adminSection === 'homework' ? 'active' : ''}
+            onClick={() => setAdminSection('homework')}
+          >Домашка</button>
         </div>
       )}
 
@@ -400,6 +416,10 @@ export function App() {
 
       {view === 'admin' && adminSession && adminSection === 'feedback' && (
         <AdminFeedback token={adminSession.token} onUnauthorized={logoutAdmin} />
+      )}
+
+      {view === 'admin' && adminSession && adminSection === 'homework' && (
+        <AdminHomeworkEditors token={adminSession.token} groups={groups.data ?? []} groupId={adminGroupId} onGroupChange={setAdminGroupId} />
       )}
 
       {view === 'admin' && adminSession && adminSection === 'schedule' && (
