@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     # Контакт для push-сервисов: mailto:... или https://...
     vapid_subject: str = "mailto:admin@example.com"
 
+    # Интеграция с Moodle ИИТ ЧелГУ (eu.iit.csu.ru)
+    moodle_base_url: str = "https://eu.iit.csu.ru"
+    moodle_encryption_key: str = ""
+    moodle_mock: bool = False
+    moodle_session_ttl_hours: int = 3
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

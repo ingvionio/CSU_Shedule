@@ -1,4 +1,4 @@
-"""Схемы профиля студента."""
+"""Схемы профиля студента и авторизации через Moodle."""
 
 from __future__ import annotations
 
@@ -15,11 +15,21 @@ class StudentRegisterIn(BaseModel):
     device_key: str = Field(min_length=16, max_length=128)
 
 
+class MoodleLoginIn(BaseModel):
+    """Вход через учетную запись Moodle ИИТ ЧелГУ."""
+
+    username: str = Field(min_length=1, max_length=100, description="Логин в Moodle ЧелГУ")
+    password: str = Field(min_length=1, max_length=200, description="Пароль в Moodle ЧелГУ")
+    device_key: str | None = Field(default=None, max_length=128, description="Случайный ключ устройства")
+
+
 class StudentProfileOut(BaseModel):
     id: int
     full_name: str
     group_id: int | None
     group_name: str | None
+    moodle_username: str | None = None
+    moodle_auth_error: bool = False
 
 
 class StudentTokenOut(BaseModel):
@@ -50,5 +60,4 @@ class PushSubscriptionOut(BaseModel):
 
 
 class PushConfigOut(BaseModel):
-    # null — push на сервере не настроен.
     public_key: str | None

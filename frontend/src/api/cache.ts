@@ -97,3 +97,7 @@ export function readStudentSession(): StudentSession | null {
 export function writeStudentSession(session: StudentSession): void {
   writeCache(STUDENT_KEY, session)
 }
+
+export function clearStudentSession(): void {
+  removeCache(STUDENT_KEY)
+}

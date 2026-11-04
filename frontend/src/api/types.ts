@@ -227,6 +227,8 @@ export type StudentProfile = {
   full_name: string
   group_id: number | null
   group_name: string | null
+  moodle_username?: string | null
+  moodle_auth_error?: boolean
 }
 
 export type StudentSession = {

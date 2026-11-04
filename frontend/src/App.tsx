@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 
 import { clearAdminSession, readAdminSession, readSelectedGroup, writeAdminSession, writeSelectedGroup } from './api/cache'
 import { useCurrentWeek, useGroups, useHomework, useInbox, usePersonalNotes, useSchedule, useTimeSlots } from './api/queries'
-import { registerStudent, useStudentSession } from './api/student'
+import { forgetMoodle, logoutStudent, registerStudent, useStudentSession } from './api/student'
 import { BottomNav, DaySchedule, Header, PersonalNotePreview, WeekGrid, dayNumber, weekRangeLabel } from './ScheduleComponents'
 import { AdminLogin } from './pages/admin/AdminLogin'
 import { AdminFeedback } from './pages/admin/AdminFeedback'
@@ -12,12 +12,13 @@ import { AdminSchedule } from './pages/admin/AdminSchedule'
 import { AdminMessages } from './pages/admin/AdminMessages'
 import { AdminHomeworkEditors } from './pages/admin/AdminHomeworkEditors'
 import { CampusMap } from './pages/CampusMap'
+import { MoodleLogin } from './pages/MoodleLogin'
 import { StudentFeedback } from './pages/feedback/StudentFeedback'
 import { StudentMessages } from './pages/messages/StudentMessages'
 import { GroupHomeworkPanel } from './pages/homework/GroupHomeworkPanel'
 import { PersonalNoteDialog } from './pages/homework/PersonalNoteDialog'
 import type { GroupHomework, PersonalNote } from './api/types'
-import type { AdminSession, Day, Group, Lesson, View } from './types'
+import type { AdminSession, Day, Group, Lesson, StudentSession, View } from './types'
 
 const WEEKDAY_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
 const COURSES = [1, 2, 3, 4]
@@ -49,9 +50,10 @@ function messageFromUrl(url: string): number | null {
 
 export function App() {
   const mobileCards = useSyncExternalStore(subscribeMobileCards, () => mobileCardsQuery.matches)
+  const studentSession = useStudentSession()
   const [requestedMessage, setRequestedMessage] = useState(() => messageFromUrl(window.location.href))
-  const [view, setView] = useState<View>(() => requestedMessage !== null ? 'messages' : 'day')
-  const [groupId, setGroupId] = useState<number | null>(() => readSelectedGroup())
+  const [view, setView] = useState<View>(() => (requestedMessage !== null ? 'messages' : 'day'))
+  const [groupId, setGroupId] = useState<number | null>(() => readSelectedGroup() ?? studentSession?.profile.group_id ?? null)
   const [adminGroupId, setAdminGroupId] = useState<number | null>(null)
   const [weekNumber, setWeekNumber] = useState<number | null>(null)
   const [selectedDay, setSelectedDay] = useState(0)
@@ -77,7 +79,7 @@ export function App() {
   const currentWeek = useCurrentWeek()
   const schedule = useSchedule(groupId, weekNumber)
   const adminSchedule = useSchedule(adminGroupId, weekNumber)
-  const studentSession = useStudentSession()
+
   const homework = useHomework(
     studentSession !== null && groupId !== null && studentSession.profile.group_id === groupId,
     schedule.data?.week.start_date,
@@ -100,6 +102,7 @@ export function App() {
       setNoteSelection({ groupId, lesson, day, note: notesByKey.get(lesson.note_key) })
     }
   }
+
   const inbox = useInbox(studentSession !== null)
   const queryClient = useQueryClient()
 
@@ -112,6 +115,14 @@ export function App() {
   useEffect(() => {
     if (messageFromUrl(window.location.href) !== null) window.history.replaceState(null, '', window.location.pathname)
   }, [])
+
+  // При наличии сессии студента восстанавливаем его группу
+  useEffect(() => {
+    if (groupId === null && studentSession?.profile.group_id) {
+      setGroupId(studentSession.profile.group_id)
+      writeSelectedGroup(studentSession.profile.group_id)
+    }
+  }, [studentSession?.profile.group_id, groupId])
 
   // Service worker сообщает о новом push и о нажатии на уведомление в уже открытом приложении.
   useEffect(() => {
@@ -133,13 +144,6 @@ export function App() {
     if (weekNumber === null && currentWeek.data) setWeekNumber(currentWeek.data.number)
   }, [currentWeek.data, weekNumber])
 
-  // Пока группа не выбрана, показываем экран выбора.
-  useEffect(() => {
-    if (groupId === null && groups.data?.length) {
-      setView((current) => current === 'day' || current === 'week' ? 'group' : current)
-    }
-  }, [groupId, groups.data])
-
   useEffect(() => {
     if (view === 'admin' && adminGroupId === null && groups.data?.length) {
       setAdminGroupId(groupId ?? groups.data[0].id)
@@ -158,6 +162,35 @@ export function App() {
   const logoutAdmin = () => {
     clearAdminSession()
     setAdminSession(null)
+    setMenuOpen(false)
+  }
+
+  const handleMoodleLogin = (session: StudentSession) => {
+    if (session.profile.group_id) {
+      setGroupId(session.profile.group_id)
+      writeSelectedGroup(session.profile.group_id)
+      const matchedGroup = (groups.data ?? []).find((g) => g.id === session.profile.group_id)
+      if (matchedGroup) {
+        setCourse(matchedGroup.course)
+        setDirection(directionOf(matchedGroup))
+      }
+    }
+    setWeekNumber(currentWeek.data?.number ?? null)
+    setView('day')
+    queryClient.invalidateQueries({ queryKey: ['inbox'] })
+  }
+
+  const handleStudentLogout = () => {
+    logoutStudent()
+    setGroupId(null)
+    setView('day')
+    setMenuOpen(false)
+  }
+
+  const handleForgetMoodle = async () => {
+    await forgetMoodle()
+    setGroupId(null)
+    setView('day')
     setMenuOpen(false)
   }
 
@@ -183,7 +216,6 @@ export function App() {
   const chooseGroup = (group: Group) => {
     setGroupId(group.id)
     writeSelectedGroup(group.id)
-    // Профиль переезжает в новую группу; сообщения новой группе бэкенд дошлёт сам.
     if (studentSession && studentSession.profile.group_id !== group.id) {
       registerStudent(studentSession.profile.full_name, group.id)
         .then(() => queryClient.invalidateQueries({ queryKey: ['inbox'] }))
@@ -211,9 +243,9 @@ export function App() {
     const dy = event.clientY - dragStart.current.y
     if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 8) {
       event.preventDefault()
-      if (!dragging) event.currentTarget.setPointerCapture(event.pointerId)
       setDragging(true)
-      setDragX(dx)
+      const clamped = Math.sign(dx) * Math.min(Math.abs(dx), 140)
+      setDragX(clamped)
     }
   }
 
@@ -221,20 +253,20 @@ export function App() {
     if (!dragStart.current) return
     const dx = event.clientX - dragStart.current.x
     const dy = event.clientY - dragStart.current.y
-    if (Math.abs(dx) > 65 && Math.abs(dx) > Math.abs(dy) * 1.2) {
-      ignoreDateClick.current = true
-      moveWeek(dx < 0 ? 1 : -1)
-      window.setTimeout(() => { ignoreDateClick.current = false }, 0)
-    }
+    const wasDragging = dragging || Math.abs(dx) > 8
     dragStart.current = null
     setDragging(false)
     setDragX(0)
-  }
 
-  const nav = (next: View) => {
-    if (next === 'map' && view !== 'map') mapReturnView.current = view
-    setView(next)
-    setMenuOpen(false)
+    if (wasDragging) {
+      ignoreDateClick.current = true
+      window.setTimeout(() => (ignoreDateClick.current = false), 80)
+    }
+
+    if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy)) {
+      if (dx < 0 && week?.next != null) moveWeek(1)
+      else if (dx > 0 && week?.prev != null) moveWeek(-1)
+    }
   }
 
   const moveAdminWeek = (delta: number) => {
@@ -242,250 +274,378 @@ export function App() {
     if (target != null) setWeekNumber(target)
   }
 
-  return <>
-    <CampusMap active={view === 'map'} onBack={() => nav(mapReturnView.current)} />
-    <div className="app-shell" hidden={view === 'map'}>
-    <Header
-      title={view === 'group'
-        ? 'Выберите группу'
-        : view === 'admin'
-          ? 'Администрирование'
-          : view === 'feedback' ? 'Вопросы' : view === 'messages' ? 'Сообщения' : 'Расписание'}
-      subtitle={view === 'group'
-        ? 'Группа сохранится на этом устройстве'
-        : view === 'admin'
-          ? ADMIN_SUBTITLES[adminSection]
-          : `Институт ИТ · ${selectedGroup?.name ?? ''}`}
-      onBack={view === 'group' && groupId !== null ? () => nav('day') : undefined}
-      onMenu={() => setMenuOpen((open) => !open)}
-    />
-    {menuOpen && <div className="role-switch-menu">
-      <span>РЕЖИМ</span>
-      <button onClick={() => nav('day')}>Студенческое расписание</button>
-      <button onClick={() => nav('admin')}>Администрирование расписания</button>
-      {adminSession && <button onClick={logoutAdmin}>Выйти из админки</button>}
-    </div>}
+  const nav = (next: View) => {
+    if (next === 'map') mapReturnView.current = view === 'map' ? 'day' : view
+    setView(next)
+    setMenuOpen(false)
+  }
 
-    <main className="content">
-      {groups.isLoading && !groups.data && <div className="state-note">Загружаем расписание…</div>}
-      {groups.isError && !groups.data && <div className="state-note error-note">
-        <span>{(groups.error as Error).message}</span>
-        <button className="button button-secondary" onClick={() => groups.refetch()}>
-          <RefreshCw size={16} />Повторить
-        </button>
-      </div>}
-      {view === 'group' && <section className="screen-card selection-screen">
-        <div className="eyebrow">ПЕРВЫЙ ШАГ</div>
-        <h1>Выберите свою группу</h1>
-        <p className="muted">Группа сохранится на этом устройстве.</p>
-
-        <label className="field-label">Институт</label>
-        <button className="select-field" disabled>
-          Институт информационных технологий <ChevronDown size={17} />
-        </button>
-
-        <label className="field-label">Курс</label>
-        <div className="choice-row">
-          {COURSES.map((item) => (
-            <button
-              key={item}
-              className={`choice ${course === item ? 'selected' : ''}`}
-              onClick={() => setCourse(item)}
-            >{item}</button>
-          ))}
-        </div>
-
-        <label className="field-label">Направление</label>
-        <div className="choice-row">
-          {directions.map((item) => (
-            <button
-              key={item}
-              className={`choice ${direction === item ? 'selected' : ''}`}
-              onClick={() => setDirection(item)}
-            >{item}</button>
-          ))}
-        </div>
-
-        <label className="field-label">Группа</label>
-        {groupOptions.length
-          ? <div className="group-grid">
-            {groupOptions.map((group) => (
-              <button
-                key={group.id}
-                className={`group-option ${groupId === group.id ? 'selected' : ''}`}
-                onClick={() => chooseGroup(group)}
-              >{group.name}</button>
-            ))}
-          </div>
-          : <div className="empty-day">На этом направлении групп нет</div>}
-      </section>}
-
-      {view === 'feedback' && <StudentFeedback groupId={groupId} />}
-
-      {view === 'messages' && (
-        <StudentMessages group={selectedGroup} onChooseGroup={() => nav('group')} requestedId={requestedMessage} />
-      )}
-
-      {groupId === null && (view === 'day' || view === 'week') && !groups.isLoading && !groups.isError && (
-        <div className="state-note">Выберите группу, чтобы увидеть расписание.</div>
-      )}
-
-      {groupId !== null && (view === 'day' || view === 'week') && <>
-        <section className="schedule-intro">
-          <div className="week-line">
-            <div>
-              <span className="eyebrow">
-                {week ? weekRangeLabel(week.start_date, week.end_date) : ' '}
-              </span>
-              <h1>
-                Неделя {week?.number ?? '—'}{' '}
-                <span className="parity">{week?.parity === 'odd' ? 'нечётная' : week?.parity === 'even' ? 'чётная' : ''}</span>
-              </h1>
-            </div>
-            <button
-              className="icon-button outlined"
-              aria-label="Предыдущая неделя"
-              disabled={week?.prev == null}
-              onClick={() => moveWeek(-1)}
-            ><ChevronLeft size={18} /></button>
-            <button
-              className="icon-button outlined"
-              aria-label="Следующая неделя"
-              disabled={week?.next == null}
-              onClick={() => moveWeek(1)}
-            ><ChevronRight size={18} /></button>
-          </div>
-          <div className="segmented">
-            <button className={view === 'day' ? 'active' : ''} onClick={() => setView('day')}>На день</button>
-            <button className={view === 'week' ? 'active' : ''} onClick={() => setView('week')}>На неделю</button>
-          </div>
-        </section>
-
-        {schedule.isError && (
-          <div className="state-note error-note">
-            <span>{(schedule.error as Error).message}</span>
-            <button className="button button-secondary" onClick={() => schedule.refetch()}>
-              <RefreshCw size={16} />Повторить
-            </button>
-          </div>
-        )}
-
-        {!schedule.data && schedule.isLoading && <div className="state-note">Загружаем неделю…</div>}
-
-        {schedule.data && (view === 'week'
-          ? <WeekGrid days={days} slots={timeSlots.data ?? []} currentMinutes={currentMinutes}
-              onLessonClick={studentSession && personalNotes.isSuccess ? openNote : undefined} notedKeys={new Set(notesByKey.keys())} homeworkCounts={homeworkCounts} />
-          : <>
-            <div className="week-picker-clip">
-              <div
-                key={week?.number}
-                className={`date-strip week-picker ${dragging ? 'dragging' : `slide-${slideDirection}`}`}
-                style={dragging ? { transform: `translateX(${dragX}px)` } : undefined}
-                onPointerDown={handleDragStart}
-                onPointerMove={handleDragMove}
-                onPointerUp={handleDragEnd}
-                onPointerCancel={handleDragEnd}
-              >
-                {days.map((day, index) => (
-                  <button
-                    className={`date-cell ${selectedDay === index ? 'active' : ''} ${day.is_today ? 'today' : ''}`}
-                    key={day.date}
-                    onClick={() => { if (!ignoreDateClick.current) setSelectedDay(index) }}
-                  >
-                    <span>{WEEKDAY_SHORT[index]}</span>
-                    <strong>{dayNumber(day.date)}</strong>
-                  </button>
-                ))}
+  return (
+    <>
+      <CampusMap active={view === 'map'} onBack={() => nav(mapReturnView.current)} />
+      <div className="app-shell" hidden={view === 'map'}>
+        <Header
+          title={
+            view === 'group'
+              ? 'Выберите группу'
+              : view === 'admin'
+                ? 'Администрирование'
+                : view === 'feedback'
+                  ? 'Вопросы'
+                  : view === 'messages'
+                    ? 'Сообщения'
+                    : !studentSession
+                      ? 'Авторизация'
+                      : 'Расписание'
+          }
+          subtitle={
+            view === 'group'
+              ? 'Группа сохранится на этом устройстве'
+              : view === 'admin'
+                ? ADMIN_SUBTITLES[adminSection]
+                : !studentSession
+                  ? 'Институт ИТ ЧелГУ · Вход через Moodle'
+                  : `Институт ИТ · ${selectedGroup?.name ?? studentSession.profile.group_name ?? ''}`
+          }
+          onBack={view === 'group' && groupId !== null ? () => nav('day') : undefined}
+          onMenu={() => setMenuOpen((open) => !open)}
+        />
+        {menuOpen && (
+          <div className="role-switch-menu">
+            <span>МЕНЮ</span>
+            {studentSession && (
+              <div style={{ padding: '6px 12px', fontSize: '12px', color: '#666', borderBottom: '1px solid #eee' }}>
+                <div style={{ fontWeight: 600, color: '#212529' }}>{studentSession.profile.full_name}</div>
+                <div>Группа: {studentSession.profile.group_name ?? 'не определена'}</div>
               </div>
-            </div>
-            {days[selectedDay] && <DaySchedule day={days[selectedDay]}
-              onLessonClick={mobileCards && studentSession && personalNotes.isSuccess ? openNote : undefined}
-              renderLessonExtras={studentSession ? (lesson, day) => <>
-              {homeworkCounts.has(`${day.date}:${lesson.id}`) && <span className="lesson-homework-badge">Домашка · {homeworkCounts.get(`${day.date}:${lesson.id}`)}</span>}
-              {lesson.note_key && notesByKey.get(lesson.note_key) && <PersonalNotePreview key={notesByKey.get(lesson.note_key)!.id} body={notesByKey.get(lesson.note_key)!.body} onOpen={mobileCards ? undefined : () => openNote(lesson, day)} />}
-              {!mobileCards && <button className="button button-secondary personal-note-button" disabled={!personalNotes.isSuccess || !lesson.note_key} onClick={() => openNote(lesson, day)}>
-                {lesson.note_key && notesByKey.has(lesson.note_key) ? 'Изменить мою заметку' : 'Моя заметка'}
-              </button>}
-            </> : undefined} />}
-          </>)}
-
-        {schedule.data && schedule.isStale && !navigator.onLine && (
-          <div className="state-note muted">
-            Показано сохранённое расписание · обновлено{' '}
-            {new Date(schedule.data.generated_at).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}
+            )}
+            {studentSession && <button onClick={() => nav('day')}>Студенческое расписание</button>}
+            <button onClick={() => nav('admin')}>Администрирование расписания</button>
+            {studentSession && <button onClick={handleStudentLogout}>Выйти из аккаунта</button>}
+            {studentSession && (
+              <button onClick={handleForgetMoodle} style={{ color: '#c92a2a' }}>
+                Сбросить пароль Moodle
+              </button>
+            )}
+            {adminSession && <button onClick={logoutAdmin}>Выйти из админки</button>}
           </div>
         )}
-        {schedule.data && studentSession && (
-          <GroupHomeworkPanel
-            groupId={groupId}
-            weekStart={schedule.data.week.start_date}
-            weekEnd={schedule.data.week.end_date}
-            days={days}
-            selectedDay={selectedDay}
+
+        <main className="content">
+          {/* Если пользователь не авторизован через Moodle и не в админке — строгий экран входа */}
+          {!studentSession && view !== 'admin' ? (
+            <MoodleLogin onLogin={handleMoodleLogin} onGoToAdmin={() => nav('admin')} />
+          ) : (
+            <>
+              {groups.isLoading && !groups.data && <div className="state-note">Загружаем расписание…</div>}
+              {groups.isError && !groups.data && (
+                <div className="state-note error-note">
+                  <span>{(groups.error as Error).message}</span>
+                  <button className="button button-secondary" onClick={() => groups.refetch()}>
+                    <RefreshCw size={16} />Повторить
+                  </button>
+                </div>
+              )}
+
+              {view === 'group' && (
+                <section className="screen-card selection-screen">
+                  <div className="eyebrow">ПЕРВЫЙ ШАГ</div>
+                  <h1>Выберите свою группу</h1>
+                  <p className="muted">Группа сохранится на этом устройстве.</p>
+
+                  <label className="field-label">Институт</label>
+                  <button className="select-field" disabled>
+                    Институт информационных технологий <ChevronDown size={17} />
+                  </button>
+
+                  <label className="field-label">Курс</label>
+                  <div className="choice-row">
+                    {COURSES.map((item) => (
+                      <button
+                        key={item}
+                        className={`choice ${course === item ? 'selected' : ''}`}
+                        onClick={() => setCourse(item)}
+                      >
+                        {item}
+                      </button>
+                    ))}
+                  </div>
+
+                  <label className="field-label">Направление</label>
+                  <div className="choice-row">
+                    {directions.map((item) => (
+                      <button
+                        key={item}
+                        className={`choice ${direction === item ? 'selected' : ''}`}
+                        onClick={() => setDirection(item)}
+                      >
+                        {item}
+                      </button>
+                    ))}
+                  </div>
+
+                  <label className="field-label">Группа</label>
+                  {groupOptions.length ? (
+                    <div className="group-grid">
+                      {groupOptions.map((group) => (
+                        <button
+                          key={group.id}
+                          className={`group-option ${groupId === group.id ? 'selected' : ''}`}
+                          onClick={() => chooseGroup(group)}
+                        >
+                          {group.name}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="empty-day">На этом направлении групп нет</div>
+                  )}
+                </section>
+              )}
+
+              {view === 'feedback' && <StudentFeedback groupId={groupId} />}
+
+              {view === 'messages' && (
+                <StudentMessages group={selectedGroup} onChooseGroup={() => nav('group')} requestedId={requestedMessage} />
+              )}
+
+              {groupId === null && (view === 'day' || view === 'week') && !groups.isLoading && !groups.isError && (
+                <div className="state-note">Ваша группа определяется через Moodle…</div>
+              )}
+
+              {groupId !== null && (view === 'day' || view === 'week') && (
+                <>
+                  <section className="schedule-intro">
+                    <div className="week-line">
+                      <div>
+                        <span className="eyebrow">{week ? weekRangeLabel(week.start_date, week.end_date) : ' '}</span>
+                        <h1>
+                          Неделя {week?.number ?? '—'}{' '}
+                          <span className="parity">
+                            {week?.parity === 'odd' ? 'нечётная' : week?.parity === 'even' ? 'чётная' : ''}
+                          </span>
+                        </h1>
+                      </div>
+                      <button
+                        className="icon-button outlined"
+                        aria-label="Предыдущая неделя"
+                        disabled={week?.prev == null}
+                        onClick={() => moveWeek(-1)}
+                      >
+                        <ChevronLeft size={18} />
+                      </button>
+                      <button
+                        className="icon-button outlined"
+                        aria-label="Следующая неделя"
+                        disabled={week?.next == null}
+                        onClick={() => moveWeek(1)}
+                      >
+                        <ChevronRight size={18} />
+                      </button>
+                    </div>
+                    <div className="segmented">
+                      <button className={view === 'day' ? 'active' : ''} onClick={() => setView('day')}>
+                        На день
+                      </button>
+                      <button className={view === 'week' ? 'active' : ''} onClick={() => setView('week')}>
+                        На неделю
+                      </button>
+                    </div>
+                  </section>
+
+                  {schedule.isError && (
+                    <div className="state-note error-note">
+                      <span>{(schedule.error as Error).message}</span>
+                      <button className="button button-secondary" onClick={() => schedule.refetch()}>
+                        <RefreshCw size={16} />Повторить
+                      </button>
+                    </div>
+                  )}
+
+                  {!schedule.data && schedule.isLoading && <div className="state-note">Загружаем неделю…</div>}
+
+                  {schedule.data &&
+                    (view === 'week' ? (
+                      <WeekGrid days={days} slots={timeSlots.data ?? []} currentMinutes={currentMinutes} />
+                    ) : (
+                      <>
+                        <div className="week-picker-clip">
+                          <div
+                            key={week?.number}
+                            className={`date-strip week-picker ${dragging ? 'dragging' : `slide-${slideDirection}`}`}
+                            style={dragging ? { transform: `translateX(${dragX}px)` } : undefined}
+                            onPointerDown={handleDragStart}
+                            onPointerMove={handleDragMove}
+                            onPointerUp={handleDragEnd}
+                            onPointerCancel={handleDragEnd}
+                          >
+                            {days.map((day, index) => (
+                              <button
+                                className={`date-cell ${selectedDay === index ? 'active' : ''} ${day.is_today ? 'today' : ''}`}
+                                key={day.date}
+                                onClick={() => {
+                                  if (!ignoreDateClick.current) setSelectedDay(index)
+                                }}
+                              >
+                                <span>{WEEKDAY_SHORT[index]}</span>
+                                <strong>{dayNumber(day.date)}</strong>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        {days[selectedDay] && (
+                          <DaySchedule
+                            day={days[selectedDay]}
+                            onLessonClick={mobileCards && studentSession && personalNotes.isSuccess ? openNote : undefined}
+                            renderLessonExtras={
+                              studentSession
+                                ? (lesson, day) => (
+                                    <>
+                                      {homeworkCounts.has(`${day.date}:${lesson.id}`) && (
+                                        <span className="lesson-homework-badge">
+                                          Домашка · {homeworkCounts.get(`${day.date}:${lesson.id}`)}
+                                        </span>
+                                      )}
+                                      {lesson.note_key && notesByKey.get(lesson.note_key) && (
+                                        <PersonalNotePreview
+                                          key={notesByKey.get(lesson.note_key)!.id}
+                                          body={notesByKey.get(lesson.note_key)!.body}
+                                          onOpen={mobileCards ? undefined : () => openNote(lesson, day)}
+                                        />
+                                      )}
+                                      {!mobileCards && (
+                                        <button
+                                          className="button button-secondary personal-note-button"
+                                          disabled={!personalNotes.isSuccess || !lesson.note_key}
+                                          onClick={() => openNote(lesson, day)}
+                                        >
+                                          {lesson.note_key && notesByKey.has(lesson.note_key)
+                                            ? 'Изменить мою заметку'
+                                            : 'Моя заметка'}
+                                        </button>
+                                      )}
+                                    </>
+                                  )
+                                : undefined
+                            }
+                          />
+                        )}
+                      </>
+                    ))}
+
+                  {schedule.data && schedule.isStale && !navigator.onLine && (
+                    <div className="state-note muted">
+                      Показано сохранённое расписание · обновлено{' '}
+                      {new Date(schedule.data.generated_at).toLocaleString('ru-RU', {
+                        day: 'numeric',
+                        month: 'long',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </div>
+                  )}
+
+                  {schedule.data && studentSession && (
+                    <GroupHomeworkPanel
+                      groupId={groupId}
+                      weekStart={schedule.data.week.start_date}
+                      weekEnd={schedule.data.week.end_date}
+                      days={days}
+                      selectedDay={selectedDay}
+                    />
+                  )}
+
+                  {personalNotes.isError && studentSession && (
+                    <div className="state-note error-note">
+                      <span>Не удалось загрузить личные заметки: {personalNotes.error.message}</span>
+                      <button className="button button-secondary" onClick={() => personalNotes.refetch()}>
+                        Повторить
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {view === 'admin' && !adminSession && <AdminLogin onLogin={loginAdmin} />}
+
+              {view === 'admin' && adminSession && (
+                <div className="admin-target-tabs admin-sections" aria-label="Раздел админки">
+                  <button
+                    className={adminSection === 'schedule' ? 'active' : ''}
+                    onClick={() => setAdminSection('schedule')}
+                  >
+                    Расписание
+                  </button>
+                  <button
+                    className={adminSection === 'messages' ? 'active' : ''}
+                    onClick={() => setAdminSection('messages')}
+                  >
+                    Сообщения
+                  </button>
+                  <button
+                    className={adminSection === 'feedback' ? 'active' : ''}
+                    onClick={() => setAdminSection('feedback')}
+                  >
+                    Обращения
+                  </button>
+                  <button
+                    className={adminSection === 'homework' ? 'active' : ''}
+                    onClick={() => setAdminSection('homework')}
+                  >
+                    Домашка
+                  </button>
+                </div>
+              )}
+
+              {view === 'admin' && adminSession && adminSection === 'messages' && (
+                <AdminMessages token={adminSession.token} groups={groups.data ?? []} onUnauthorized={logoutAdmin} />
+              )}
+
+              {view === 'admin' && adminSession && adminSection === 'feedback' && (
+                <AdminFeedback token={adminSession.token} onUnauthorized={logoutAdmin} />
+              )}
+
+              {view === 'admin' && adminSession && adminSection === 'homework' && (
+                <AdminHomeworkEditors
+                  token={adminSession.token}
+                  groups={groups.data ?? []}
+                  groupId={adminGroupId}
+                  onGroupChange={setAdminGroupId}
+                />
+              )}
+
+              {view === 'admin' && adminSession && adminSection === 'schedule' && (
+                <AdminSchedule
+                  groups={groups.data ?? []}
+                  groupId={adminGroupId}
+                  schedule={adminSchedule.data}
+                  days={adminDays}
+                  slots={timeSlots.data ?? []}
+                  currentMinutes={currentMinutes}
+                  token={adminSession.token}
+                  onGroupChange={setAdminGroupId}
+                  onWeekMove={moveAdminWeek}
+                  onUnauthorized={logoutAdmin}
+                />
+              )}
+            </>
+          )}
+        </main>
+
+        {studentSession && view !== 'admin' && (
+          <BottomNav view={view} onNavigate={nav} unread={inbox.data?.unread_count ?? 0} />
+        )}
+        {noteSelection && studentSession && (
+          <PersonalNoteDialog
+            {...noteSelection}
+            homework={homeworkByLesson.get(`${noteSelection.day.date}:${noteSelection.lesson.id}`) ?? []}
+            homeworkLoading={homework.isPending}
+            homeworkError={homework.isError ? homework.error.message : undefined}
+            onRetryHomework={() => homework.refetch()}
+            onClose={() => setNoteSelection(null)}
           />
         )}
-        {personalNotes.isError && studentSession && <div className="state-note error-note"><span>Не удалось загрузить личные заметки: {personalNotes.error.message}</span><button className="button button-secondary" onClick={() => personalNotes.refetch()}>Повторить</button></div>}
-        {!studentSession && <p className="state-note">Чтобы оставлять личные заметки к парам, заполните профиль в разделе «Сообщения».</p>}
-      </>}
-
-      {view === 'admin' && !adminSession && <AdminLogin onLogin={loginAdmin} />}
-
-      {view === 'admin' && adminSession && (
-        <div className="admin-target-tabs admin-sections" aria-label="Раздел админки">
-          <button
-            className={adminSection === 'schedule' ? 'active' : ''}
-            onClick={() => setAdminSection('schedule')}
-          >Расписание</button>
-          <button
-            className={adminSection === 'messages' ? 'active' : ''}
-            onClick={() => setAdminSection('messages')}
-          >Сообщения</button>
-          <button
-            className={adminSection === 'feedback' ? 'active' : ''}
-            onClick={() => setAdminSection('feedback')}
-          >Обращения</button>
-          <button
-            className={adminSection === 'homework' ? 'active' : ''}
-            onClick={() => setAdminSection('homework')}
-          >Домашка</button>
-        </div>
-      )}
-
-      {view === 'admin' && adminSession && adminSection === 'messages' && (
-        <AdminMessages token={adminSession.token} groups={groups.data ?? []} onUnauthorized={logoutAdmin} />
-      )}
-
-      {view === 'admin' && adminSession && adminSection === 'feedback' && (
-        <AdminFeedback token={adminSession.token} onUnauthorized={logoutAdmin} />
-      )}
-
-      {view === 'admin' && adminSession && adminSection === 'homework' && (
-        <AdminHomeworkEditors token={adminSession.token} groups={groups.data ?? []} groupId={adminGroupId} onGroupChange={setAdminGroupId} />
-      )}
-
-      {view === 'admin' && adminSession && adminSection === 'schedule' && (
-        <AdminSchedule
-          groups={groups.data ?? []}
-          groupId={adminGroupId}
-          schedule={adminSchedule.data}
-          days={adminDays}
-          slots={timeSlots.data ?? []}
-          currentMinutes={currentMinutes}
-          token={adminSession.token}
-          onGroupChange={setAdminGroupId}
-          onWeekMove={moveAdminWeek}
-          onUnauthorized={logoutAdmin}
-        />
-      )}
-    </main>
-
-    <BottomNav view={view} onNavigate={nav} unread={inbox.data?.unread_count ?? 0} />
-    {noteSelection && studentSession && <PersonalNoteDialog {...noteSelection}
-      homework={homeworkByLesson.get(`${noteSelection.day.date}:${noteSelection.lesson.id}`) ?? []}
-      homeworkLoading={homework.isPending}
-      homeworkError={homework.isError ? homework.error.message : undefined}
-      onRetryHomework={() => homework.refetch()}
-      onClose={() => setNoteSelection(null)} />}
-    </div>
-  </>
+      </div>
+    </>
+  )
 }

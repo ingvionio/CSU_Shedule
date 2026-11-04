@@ -123,6 +123,10 @@ export const api = {
   unsubscribePush: (token: string, id: number) =>
     request<void>(`/me/push-subscriptions/${id}`, { method: 'DELETE', token }),
 
+  moodleLogin: (username: string, password: string, device_key?: string) =>
+    request<StudentTokenResponse>('/auth/moodle/login', { method: 'POST', body: { username, password, device_key } }),
+  moodleForget: (token: string) =>
+    request<{ status: string }>('/auth/moodle/forget', { method: 'POST', token }),
   studentRegister: (full_name: string, group_id: number, device_key: string) =>
     request<StudentTokenResponse>('/auth/student/register', { method: 'POST', body: { full_name, group_id, device_key } }),
   me: (token: string) => request<StudentProfile & { unread_count: number }>('/me', { token }),
