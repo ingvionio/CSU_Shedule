@@ -272,6 +272,95 @@ class MoodleClient:
         return False
 
 
+def extract_student_group_info(
+    courses: list[dict[str, Any]],
+    profile_html: str = "",
+) -> tuple[str, int, int]:
+    """
+    Анализирует курсы и профиль студента Moodle и определяет:
+    (направление, номер курса, номер группы), например ('ПрИ', 4, 1).
+    """
+    year_pattern = re.compile(r"(\d{4})\s*[-–—]\s*(\d{4})")
+    years_found: list[int] = []
+    course_items: list[tuple[int, str]] = []
+
+    for c in courses:
+        title = c.get("fullname", "") or ""
+        short = c.get("shortname", "") or ""
+        text = f"{title} {short}"
+        m = year_pattern.search(text)
+        if m:
+            start_y = int(m.group(1))
+            years_found.append(start_y)
+            course_items.append((start_y, text))
+        else:
+            course_items.append((0, text))
+
+    latest_year = max(years_found, default=0)
+
+    # Приоритет курсам последнего учебного года (если указан)
+    if latest_year > 0:
+        current_courses = [t for y, t in course_items if y == latest_year]
+    else:
+        current_courses = [t for _, t in course_items]
+
+    # Ищем теги направлений: ПрИ, ПИ, БИ, КБ с цифрой курса (1-4) или группы (101-402)
+    # Направление ПрИ проверяем раньше ПИ!
+    tag_pattern = re.compile(r"\b(ПрИ|ПИ|БИ|КБ)[-–—]?(\d{1,3})\b", re.IGNORECASE)
+
+    dir_course_scores: Counter[tuple[str, int]] = Counter()
+
+    for text in current_courses:
+        raw_tags = tag_pattern.findall(text)
+        if not raw_tags:
+            continue
+        parsed_tags: list[tuple[str, int, int]] = []
+        for d, num_str in raw_tags:
+            d_norm = d.upper().replace("РИ", "рИ")
+            num = int(num_str)
+            course_digit = num if num < 10 else num // 100
+            parsed_tags.append((d_norm, course_digit, num))
+
+        unique_dirs = set((d, c) for d, c, _ in parsed_tags)
+        is_exclusive = len(unique_dirs) == 1
+
+        for d, c, num in parsed_tags:
+            weight = 5 if is_exclusive else 1
+            dir_course_scores[(d, c)] += weight
+            if num >= 100:
+                dir_course_scores[(d, c)] += 3
+
+    if not dir_course_scores:
+        # Fallback: поиск по всем курсам без учета года
+        all_text = " \n ".join(t for _, t in course_items)
+        raw_tags = tag_pattern.findall(all_text)
+        for d, num_str in raw_tags:
+            d_norm = d.upper().replace("РИ", "рИ")
+            num = int(num_str)
+            course_digit = num if num < 10 else num // 100
+            dir_course_scores[(d, course_digit)] += 1
+
+    if not dir_course_scores:
+        return "", 0, 1
+
+    (best_dir, best_course), _ = dir_course_scores.most_common(1)[0]
+
+    # Определяем номер подгруппы (индекс группы: 1, 2, 3...)
+    all_current_text = " \n ".join(current_courses)
+    curr_sub_matches = re.findall(rf"\b{re.escape(best_dir)}[-–—]?{best_course}(\d{{2}})\b", all_current_text, re.IGNORECASE)
+
+    group_idx = 1
+    if curr_sub_matches:
+        group_idx = Counter(int(m) for m in curr_sub_matches).most_common(1)[0][0]
+    else:
+        all_text = " \n ".join(t for _, t in course_items)
+        hist_sub_matches = re.findall(rf"\b{re.escape(best_dir)}[-–—]?\d(\d{{2}})\b", all_text, re.IGNORECASE)
+        if hist_sub_matches:
+            group_idx = Counter(int(m) for m in hist_sub_matches).most_common(1)[0][0]
+
+    return best_dir, best_course, group_idx
+
+
 def match_student_group(
     courses: list[dict[str, Any]],
     profile_html: str,
@@ -279,12 +368,47 @@ def match_student_group(
 ) -> Group | None:
     """
     Автоматически сопоставляет студента с одной из академических групп из БД.
-    Анализирует названия курсов и HTML профиля.
+    Анализирует названия курсов текущего и прошлых семестров, а также HTML профиля.
     """
+    if not known_groups and not courses:
+        return None
+
+    # Сначала пытаемся извлечь семантическую информацию: направление, курс и индекс группы
+    direction, course_num, group_idx = extract_student_group_info(courses, profile_html)
+
+    if direction and course_num:
+        canonical_short = f"{direction}-{course_num}{group_idx:02d}"
+        canonical_long = f"ИТ{course_num}-{direction}б-{course_num}{group_idx}"
+        candidates_norm = {normalize_group_key(canonical_short), normalize_group_key(canonical_long)}
+
+        # 1. Поиск прямого соответствия каноническому названию группы в known_groups
+        for g in known_groups:
+            norm_name = normalize_group_key(g.name)
+            if norm_name in candidates_norm:
+                return g
+
+        # 2. Поиск по направлению и курсу среди known_groups
+        matched_by_course_and_dir = [
+            g for g in known_groups
+            if g.course == course_num and (
+                (g.direction and g.direction.upper() == direction.upper())
+                or direction.lower() in g.name.lower()
+            )
+        ]
+        if len(matched_by_course_and_dir) == 1:
+            return matched_by_course_and_dir[0]
+        elif len(matched_by_course_and_dir) > 1:
+            idx_str = str(group_idx)
+            two_digit_idx = f"{group_idx:02d}"
+            for g in matched_by_course_and_dir:
+                if g.name.endswith(two_digit_idx) or g.name.endswith(f"{course_num}{idx_str}"):
+                    return g
+            return matched_by_course_and_dir[0]
+
     if not known_groups:
         return None
 
-    # Собираем все текстовые фрагменты, где может упоминаться группа
+    # 3. Общий весовой поиск по текстовым совпадениям (для нестандартных групп вроде КБ-301)
     corpus_items: list[str] = []
     for c in courses:
         for key in ("fullname", "displayname", "shortname"):
@@ -294,7 +418,6 @@ def match_student_group(
 
     if profile_html:
         soup = BeautifulSoup(profile_html, "html.parser")
-        # Очищаем от скриптов и стилей
         for s in soup(["script", "style"]):
             s.decompose()
         corpus_items.append(soup.get_text(" ", strip=True))
@@ -302,26 +425,19 @@ def match_student_group(
     full_text = " \n ".join(corpus_items)
     normalized_full_text = normalize_group_key(full_text)
 
-    # Весовой подсчёт совпадений
     scores: Counter[int] = Counter()
-
     for group in known_groups:
         exact_name = group.name.strip()
         norm_group_name = normalize_group_key(exact_name)
 
-        # 1. Прямое вхождение точного названия группы (например, "ИТ1-ПрИб-11" или "КБ-301")
-        # Ищем совпадения с границами слов/символов
         pattern = re.compile(re.escape(exact_name), re.IGNORECASE)
         exact_matches = len(pattern.findall(full_text))
         if exact_matches > 0:
             scores[group.id] += exact_matches * 10
 
-        # 2. Нормализованное вхождение без пробелов и дефисов
         if norm_group_name and norm_group_name in normalized_full_text:
             scores[group.id] += 5
 
-        # 3. Совпадение по суффиксу/номеру направления (например, "ПрИб-11", "ПИб-21", "201")
-        # Если в группе есть суффикс вроде "ПрИб-11"
         suffix_match = re.search(r"([А-ЯЁа-яё]+б?[-–—]?\d{2,3})$", exact_name)
         if suffix_match:
             suffix = suffix_match.group(1)
@@ -329,12 +445,10 @@ def match_student_group(
             if norm_suffix in normalized_full_text:
                 scores[group.id] += 3
 
-    if not scores:
-        return None
-
-    best_group_id, best_score = scores.most_common(1)[0]
-    if best_score > 0:
-        return next((g for g in known_groups if g.id == best_group_id), None)
+    if scores:
+        best_group_id, best_score = scores.most_common(1)[0]
+        if best_score > 0:
+            return next((g for g in known_groups if g.id == best_group_id), None)
 
     return None
 
@@ -382,6 +496,24 @@ def authenticate_and_detect_student(
     # Получаем курсы через AJAX для определения группы
     courses = client.get_enrolled_courses(sesskey)
     detected_group = match_student_group(courses, profile_html, groups)
+
+    if detected_group is None:
+        # Если группа не была найдена среди существующих в БД, но мы смогли однозначно определить
+        # каноническое направление и курс студента, находим или создаем группу автоматически
+        direction, course_num, group_idx = extract_student_group_info(courses, profile_html)
+        if direction and course_num:
+            canonical_name = f"{direction}-{course_num}{group_idx:02d}"
+            existing = db.scalar(select(Group).where(Group.name == canonical_name))
+            if existing is not None:
+                detected_group = existing
+            else:
+                detected_group = Group(
+                    name=canonical_name,
+                    course=course_num,
+                    direction=direction,
+                )
+                db.add(detected_group)
+                db.flush()
 
     if detected_group is None:
         raise MoodleGroupError()

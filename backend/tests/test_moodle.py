@@ -39,6 +39,36 @@ def test_match_student_group():
     assert match_student_group(courses4, "", groups) is None
 
 
+def test_match_student_group_multiyear_and_stream():
+    g_pri401 = Group(id=10, name="ПрИ-401", course=4, direction="ПрИ")
+    g_pi401 = Group(id=11, name="ПИ-401", course=4, direction="ПИ")
+    g_pri101 = Group(id=12, name="ИТ1-ПрИб-11", course=1, direction="ПрИ")
+    groups = [g_pri401, g_pi401, g_pri101]
+
+    # Студент 4 курса: есть старые курсы 1 курса и новые 4 курса (2026-2027)
+    courses = [
+        {"fullname": "Иностранный язык (ПрИ-101) (1-2 сем.) 2023-2024", "shortname": "ENG"},
+        {"fullname": "Физика (ПрИ-101, ПИ-101) (1 сем.) 2023-2024", "shortname": "PHYS"},
+        {"fullname": "Деловые коммуникации (ПИ-4, ПрИ-4) (1 сем.) 2026-2027", "shortname": "COMM"},
+        {"fullname": "Защита информации (ПрИ-4) (1 сем.) 2026-2027", "shortname": "SEC"},
+        {"fullname": "Программирование микроконтроллеров (ПрИ-4) (1 сем.) 2026-2027", "shortname": "MCU"},
+    ]
+
+    # Должен определить группу ПрИ-401 (текущий год 2026-2027 и исключительное направление ПрИ-4)
+    matched = match_student_group(courses, "", groups)
+    assert matched == g_pri401
+
+
+def test_match_student_group_long_name_alias():
+    # База содержит группу в формате "ИТ4-ПрИб-41"
+    g_long = Group(id=20, name="ИТ4-ПрИб-41", course=4, direction="ПрИ")
+    courses = [
+        {"fullname": "Защита информации (ПрИ-4) (1 сем.) 2026-2027", "shortname": "SEC"},
+    ]
+    matched = match_student_group(courses, "", [g_long])
+    assert matched == g_long
+
+
 def test_moodle_mock_login(bare_client, monkeypatch):
     from app.core.db import SessionLocal
 

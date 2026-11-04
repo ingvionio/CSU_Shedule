@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 
 import { clearAdminSession, readAdminSession, readSelectedGroup, writeAdminSession, writeSelectedGroup } from './api/cache'
 import { useCurrentWeek, useGroups, useHomework, useInbox, usePersonalNotes, useSchedule, useTimeSlots } from './api/queries'
-import { forgetMoodle, logoutStudent, registerStudent, useStudentSession } from './api/student'
+import { forgetMoodle, logoutStudent, useStudentSession } from './api/student'
 import { BottomNav, DaySchedule, Header, PersonalNotePreview, WeekGrid, dayNumber, weekRangeLabel } from './ScheduleComponents'
 import { AdminLogin } from './pages/admin/AdminLogin'
 import { AdminFeedback } from './pages/admin/AdminFeedback'
@@ -214,13 +214,12 @@ export function App() {
   const currentMinutes = now.getHours() * 60 + now.getMinutes()
 
   const chooseGroup = (group: Group) => {
+    if (studentSession) {
+      // Группу авторизованного студента менять нельзя — она строго зафиксирована из Moodle
+      return
+    }
     setGroupId(group.id)
     writeSelectedGroup(group.id)
-    if (studentSession && studentSession.profile.group_id !== group.id) {
-      registerStudent(studentSession.profile.full_name, group.id)
-        .then(() => queryClient.invalidateQueries({ queryKey: ['inbox'] }))
-        .catch(() => undefined)
-    }
     setWeekNumber(currentWeek.data?.number ?? null)
     setView('day')
   }
@@ -287,7 +286,9 @@ export function App() {
         <Header
           title={
             view === 'group'
-              ? 'Выберите группу'
+              ? studentSession
+                ? 'Профиль студента'
+                : 'Выберите группу'
               : view === 'admin'
                 ? 'Администрирование'
                 : view === 'feedback'
@@ -300,7 +301,9 @@ export function App() {
           }
           subtitle={
             view === 'group'
-              ? 'Группа сохранится на этом устройстве'
+              ? studentSession
+                ? 'Данные авторизации Moodle'
+                : 'Группа сохранится на этом устройстве'
               : view === 'admin'
                 ? ADMIN_SUBTITLES[adminSection]
                 : !studentSession
@@ -348,59 +351,97 @@ export function App() {
               )}
 
               {view === 'group' && (
-                <section className="screen-card selection-screen">
-                  <div className="eyebrow">ПЕРВЫЙ ШАГ</div>
-                  <h1>Выберите свою группу</h1>
-                  <p className="muted">Группа сохранится на этом устройстве.</p>
+                studentSession ? (
+                  <section className="screen-card selection-screen">
+                    <div className="eyebrow">МОЙ ПРОФИЛЬ</div>
+                    <h1>Профиль студента</h1>
+                    <p className="muted">Данные синхронизированы с платформой Moodle ЧелГУ.</p>
 
-                  <label className="field-label">Институт</label>
-                  <button className="select-field" disabled>
-                    Институт информационных технологий <ChevronDown size={17} />
-                  </button>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', marginTop: '1.25rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color, #e9ecef)', paddingBottom: '0.6rem' }}>
+                        <span className="field-label" style={{ margin: 0 }}>ФИО</span>
+                        <strong>{studentSession.profile.full_name}</strong>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color, #e9ecef)', paddingBottom: '0.6rem' }}>
+                        <span className="field-label" style={{ margin: 0 }}>Логин Moodle</span>
+                        <span>@{studentSession.profile.moodle_username}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color, #e9ecef)', paddingBottom: '0.6rem' }}>
+                        <span className="field-label" style={{ margin: 0 }}>Академическая группа</span>
+                        <strong style={{ color: 'var(--primary, #1971c2)' }}>
+                          {selectedGroup?.name ?? studentSession.profile.group_name ?? '—'}
+                        </strong>
+                      </div>
+                    </div>
 
-                  <label className="field-label">Курс</label>
-                  <div className="choice-row">
-                    {COURSES.map((item) => (
-                      <button
-                        key={item}
-                        className={`choice ${course === item ? 'selected' : ''}`}
-                        onClick={() => setCourse(item)}
-                      >
-                        {item}
+                    <div className="state-note" style={{ marginTop: '1.25rem', textAlign: 'left', fontSize: '0.85rem' }}>
+                      Группа определена автоматически через Moodle (eu.iit.csu.ru) по курсам текущего семестра и не может быть изменена вручную.
+                    </div>
+
+                    <div style={{ marginTop: '1.5rem', display: 'flex', gap: '0.75rem' }}>
+                      <button className="button button-primary" style={{ flex: 1 }} onClick={() => nav('day')}>
+                        К расписанию
                       </button>
-                    ))}
-                  </div>
-
-                  <label className="field-label">Направление</label>
-                  <div className="choice-row">
-                    {directions.map((item) => (
-                      <button
-                        key={item}
-                        className={`choice ${direction === item ? 'selected' : ''}`}
-                        onClick={() => setDirection(item)}
-                      >
-                        {item}
+                      <button className="button button-secondary" onClick={handleForgetMoodle}>
+                        Выйти из Moodle
                       </button>
-                    ))}
-                  </div>
+                    </div>
+                  </section>
+                ) : (
+                  <section className="screen-card selection-screen">
+                    <div className="eyebrow">ПЕРВЫЙ ШАГ</div>
+                    <h1>Выберите свою группу</h1>
+                    <p className="muted">Группа сохранится на этом устройстве.</p>
 
-                  <label className="field-label">Группа</label>
-                  {groupOptions.length ? (
-                    <div className="group-grid">
-                      {groupOptions.map((group) => (
+                    <label className="field-label">Институт</label>
+                    <button className="select-field" disabled>
+                      Институт информационных технологий <ChevronDown size={17} />
+                    </button>
+
+                    <label className="field-label">Курс</label>
+                    <div className="choice-row">
+                      {COURSES.map((item) => (
                         <button
-                          key={group.id}
-                          className={`group-option ${groupId === group.id ? 'selected' : ''}`}
-                          onClick={() => chooseGroup(group)}
+                          key={item}
+                          className={`choice ${course === item ? 'selected' : ''}`}
+                          onClick={() => setCourse(item)}
                         >
-                          {group.name}
+                          {item}
                         </button>
                       ))}
                     </div>
-                  ) : (
-                    <div className="empty-day">На этом направлении групп нет</div>
-                  )}
-                </section>
+
+                    <label className="field-label">Направление</label>
+                    <div className="choice-row">
+                      {directions.map((item) => (
+                        <button
+                          key={item}
+                          className={`choice ${direction === item ? 'selected' : ''}`}
+                          onClick={() => setDirection(item)}
+                        >
+                          {item}
+                        </button>
+                      ))}
+                    </div>
+
+                    <label className="field-label">Группа</label>
+                    {groupOptions.length ? (
+                      <div className="group-grid">
+                        {groupOptions.map((group) => (
+                          <button
+                            key={group.id}
+                            className={`group-option ${groupId === group.id ? 'selected' : ''}`}
+                            onClick={() => chooseGroup(group)}
+                          >
+                            {group.name}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="empty-day">На этом направлении групп нет</div>
+                    )}
+                  </section>
+                )
               )}
 
               {view === 'feedback' && <StudentFeedback groupId={groupId} />}
@@ -633,7 +674,7 @@ export function App() {
         </main>
 
         {studentSession && view !== 'admin' && (
-          <BottomNav view={view} onNavigate={nav} unread={inbox.data?.unread_count ?? 0} />
+          <BottomNav view={view} onNavigate={nav} unread={inbox.data?.unread_count ?? 0} hasSession={Boolean(studentSession)} />
         )}
         {noteSelection && studentSession && (
           <PersonalNoteDialog

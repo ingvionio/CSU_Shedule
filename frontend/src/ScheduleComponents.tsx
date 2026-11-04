@@ -334,13 +334,23 @@ export function WeekGrid({
   )
 }
 
-export function BottomNav({ view, onNavigate, unread = 0 }: { view: View; onNavigate: (view: View) => void; unread?: number }) {
+export function BottomNav({
+  view,
+  onNavigate,
+  unread = 0,
+  hasSession = false,
+}: {
+  view: View
+  onNavigate: (view: View) => void
+  unread?: number
+  hasSession?: boolean
+}) {
   const items = [
     { label: 'Расписание', icon: CalendarDays, target: 'day' as View },
     { label: 'Сообщения', icon: Bell, target: 'messages' as View, badge: unread },
     { label: 'Карта', icon: MapIcon, target: 'map' as View },
     { label: 'Вопросы', icon: MessageCircleQuestion, target: 'feedback' as View },
-    { label: 'Группа', icon: UserRound, target: 'group' as View },
+    { label: hasSession ? 'Профиль' : 'Группа', icon: UserRound, target: 'group' as View },
   ]
 
   return (
