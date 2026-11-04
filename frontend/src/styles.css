@@ -458,6 +458,40 @@ h1 { margin-top: 7px; font-size: 24px; line-height: 1.16; letter-spacing: -.045e
 .push-card .form-error { width: 100%; }
 
 /* Групповая домашка */
+.lesson-homework-badge { display: inline-flex; align-items: center; align-self: flex-start; gap: 4px; width: fit-content; max-width: 100%; margin-top: 10px; padding: 4px 8px; border-radius: 8px; background: var(--amber-soft); color: var(--amber); font-size: 11px; font-weight: 650; line-height: 1.4; }
+.grid-lesson .lesson-homework-badge { margin-top: 4px; padding: 3px 5px; font-size: 10px; }
+.personal-note-button { margin-top: 12px; min-height: 44px; white-space: normal; }
+.private-note-preview { display: block; width: 100%; min-width: 0; margin: 12px 0 0; padding: 10px 12px; border: 0; border-radius: 10px; background: var(--purple-soft); color: inherit; font-family: inherit; font-size: 12px; line-height: 1.5; text-align: left; cursor: pointer; }
+.private-note-preview:focus-visible { outline: 2px solid var(--purple); outline-offset: 2px; }
+.private-note-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; white-space: normal; overflow-wrap: anywhere; }
+.lesson-extras { grid-column: 2; min-width: 0; }
+.lesson-extras:not(:has(> *)) { display: none; }
+.lesson-card-selectable { cursor: pointer; transition: border-color 160ms ease, box-shadow 160ms ease; }
+.lesson-card-selectable:focus-visible { outline: 2px solid var(--purple); outline-offset: 3px; }
+@media (max-width: 600px) {
+  .lesson-extras { grid-column: 1 / -1; }
+  .lesson-extras .private-note-preview { margin-top: 0; width: 100%; box-sizing: border-box; }
+  .lesson-extras .lesson-homework-badge { margin-top: 0; margin-bottom: 8px; }
+  .lesson-card-selectable:active { border-color: var(--purple); box-shadow: 0 2px 10px rgba(99,65,148,.12); }
+}
+.personal-note-backdrop { animation: note-backdrop-in 180ms ease-out both; }
+.personal-note-backdrop .personal-note-dialog { animation: note-dialog-in 220ms cubic-bezier(.2,.8,.2,1) both; }
+.personal-note-backdrop.closing { animation: note-backdrop-out 180ms ease-in both; pointer-events: none; }
+.personal-note-backdrop.closing .personal-note-dialog { animation: note-dialog-out 180ms ease-in both; }
+@keyframes note-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes note-backdrop-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes note-dialog-in { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes note-dialog-out { from { opacity: 1; transform: translateY(0) scale(1); } to { opacity: 0; transform: translateY(8px) scale(.98); } }
+@media (prefers-reduced-motion: reduce) {
+  .personal-note-backdrop, .personal-note-backdrop .personal-note-dialog { animation: none; }
+}
+.private-note-mark { color: var(--purple); font-weight: 600; }
+.personal-note-dialog { width: min(100%, 480px); max-height: calc(100dvh - 32px); overflow-y: auto; gap: 16px; align-items: stretch; }
+.personal-note-dialog h2 { padding-right: 24px; margin: 0; }
+.personal-note-dialog .admin-field { width: 100%; min-width: 0; }
+.personal-note-dialog textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 140px; font-size: 16px; }
+.private-note-caption { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--muted); font-size: 12px; }
+.note-delete-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-size: 12px; }
 .homework-panel { display: flex; flex-direction: column; gap: 16px; margin-top: 24px; padding: 20px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
 .homework-panel .admin-field { min-width: 0; width: 100%; margin: 0; }
 .homework-panel .text-field, .homework-panel .select-field { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }

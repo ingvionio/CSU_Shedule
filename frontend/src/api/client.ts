@@ -29,6 +29,8 @@ import type {
   HomeworkList,
   HomeworkPatch,
   GroupEditor,
+  PersonalNote,
+  NoteInput,
 } from './types'
 
 const BASE_URL = (import.meta.env.VITE_API_URL ?? '') + '/api/v1'
@@ -79,6 +81,9 @@ async function request<T>(path: string, { method = 'GET', body, token, feedbackT
 }
 
 export const api = {
+  notes: (token: string) => request<PersonalNote[]>('/me/notes', { token }),
+  saveNote: (token: string, body: NoteInput) => request<PersonalNote>('/me/notes', { method: 'POST', token, body }),
+  deleteNote: (token: string, id: number, version: number) => request<void>(`/me/notes/${id}?version=${version}`, { method: 'DELETE', token }),
   groups: () => request<Group[]>('/groups'),
   timeSlots: () => request<TimeSlot[]>('/time-slots'),
   lessonTypes: () => request<LessonType[]>('/lesson-types'),

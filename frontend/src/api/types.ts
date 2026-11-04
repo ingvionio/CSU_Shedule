@@ -46,6 +46,7 @@ export type LessonChange = {
 
 export type Lesson = {
   id: string
+  note_key?: string | null
   /** HH:MM, заполнено всегда. */
   start_time: string
   end_time: string
@@ -349,3 +350,16 @@ export type HomeworkInput = {
 export type HomeworkPatch = Partial<HomeworkInput> & { version: number; status?: HomeworkStatus }
 
 export type GroupEditor = { user_id: number; full_name: string; group_id: number; is_primary: boolean; active: boolean }
+
+export type PersonalNote = {
+  id: number
+  occurrence_key: string
+  group_id: number
+  lesson_date: string
+  subject: string
+  body: string
+  version: number
+  updated_at: string
+}
+
+export type NoteInput = { group_id: number; lesson_date: string; lesson_ref: string; body: string; version: number }

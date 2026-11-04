@@ -16,6 +16,7 @@ from app.models.message import Message, MessageRecipient
 from app.models.homework import GroupEditor, GroupHomework, HomeworkCompletion, HomeworkRevision
 from app.models.push import PushSubscription
 from app.models.user import User
+from app.models.note import PersonalNote
 
 __all__ = [
     "Base",
@@ -48,5 +49,6 @@ __all__ = [
     "Teacher",
     "TimeSlot",
     "User",
+    "PersonalNote",
     "WeekParity",
 ]

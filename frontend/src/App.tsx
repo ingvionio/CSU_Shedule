@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react'
 import { ChevronDown, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 
 import { clearAdminSession, readAdminSession, readSelectedGroup, writeAdminSession, writeSelectedGroup } from './api/cache'
-import { useCurrentWeek, useGroups, useInbox, useSchedule, useTimeSlots } from './api/queries'
+import { useCurrentWeek, useGroups, useHomework, useInbox, usePersonalNotes, useSchedule, useTimeSlots } from './api/queries'
 import { registerStudent, useStudentSession } from './api/student'
-import { BottomNav, DaySchedule, Header, WeekGrid, dayNumber, weekRangeLabel } from './ScheduleComponents'
+import { BottomNav, DaySchedule, Header, PersonalNotePreview, WeekGrid, dayNumber, weekRangeLabel } from './ScheduleComponents'
 import { AdminLogin } from './pages/admin/AdminLogin'
 import { AdminFeedback } from './pages/admin/AdminFeedback'
 import { AdminSchedule } from './pages/admin/AdminSchedule'
@@ -15,10 +15,17 @@ import { CampusMap } from './pages/CampusMap'
 import { StudentFeedback } from './pages/feedback/StudentFeedback'
 import { StudentMessages } from './pages/messages/StudentMessages'
 import { GroupHomeworkPanel } from './pages/homework/GroupHomeworkPanel'
-import type { AdminSession, Group, View } from './types'
+import { PersonalNoteDialog } from './pages/homework/PersonalNoteDialog'
+import type { PersonalNote } from './api/types'
+import type { AdminSession, Day, Group, Lesson, View } from './types'
 
 const WEEKDAY_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
 const COURSES = [1, 2, 3, 4]
+const mobileCardsQuery = window.matchMedia('(max-width: 600px)')
+const subscribeMobileCards = (notify: () => void) => {
+  mobileCardsQuery.addEventListener('change', notify)
+  return () => mobileCardsQuery.removeEventListener('change', notify)
+}
 const ADMIN_SUBTITLES = {
   schedule: 'Управление расписанием',
   messages: 'Сообщения студентам',
@@ -41,6 +48,7 @@ function messageFromUrl(url: string): number | null {
 }
 
 export function App() {
+  const mobileCards = useSyncExternalStore(subscribeMobileCards, () => mobileCardsQuery.matches)
   const [requestedMessage, setRequestedMessage] = useState(() => messageFromUrl(window.location.href))
   const [view, setView] = useState<View>(() => requestedMessage !== null ? 'messages' : 'day')
   const [groupId, setGroupId] = useState<number | null>(() => readSelectedGroup())
@@ -70,6 +78,27 @@ export function App() {
   const schedule = useSchedule(groupId, weekNumber)
   const adminSchedule = useSchedule(adminGroupId, weekNumber)
   const studentSession = useStudentSession()
+  const homework = useHomework(
+    studentSession !== null && groupId !== null && studentSession.profile.group_id === groupId,
+    schedule.data?.week.start_date,
+    schedule.data?.week.end_date,
+  )
+  const homeworkCounts = new Map<string, number>()
+  if (studentSession?.profile.group_id === groupId) {
+    for (const item of homework.data?.items ?? []) {
+      if (item.group_id !== groupId || item.lesson_id === null || item.lesson_date === null || item.status === 'archived') continue
+      const key = `${item.lesson_date}:l-${item.lesson_id}`
+      homeworkCounts.set(key, (homeworkCounts.get(key) ?? 0) + 1)
+    }
+  }
+  const personalNotes = usePersonalNotes()
+  const [noteSelection, setNoteSelection] = useState<{ groupId: number; day: Day; lesson: Lesson; note?: PersonalNote } | null>(null)
+  const notesByKey = new Map((personalNotes.data ?? []).map((note) => [note.occurrence_key, note]))
+  const openNote = (lesson: Lesson, day: Day) => {
+    if (groupId !== null && studentSession && personalNotes.isSuccess && lesson.note_key) {
+      setNoteSelection({ groupId, lesson, day, note: notesByKey.get(lesson.note_key) })
+    }
+  }
   const inbox = useInbox(studentSession !== null)
   const queryClient = useQueryClient()
 
@@ -343,7 +372,8 @@ export function App() {
         {!schedule.data && schedule.isLoading && <div className="state-note">Загружаем неделю…</div>}
 
         {schedule.data && (view === 'week'
-          ? <WeekGrid days={days} slots={timeSlots.data ?? []} currentMinutes={currentMinutes} />
+          ? <WeekGrid days={days} slots={timeSlots.data ?? []} currentMinutes={currentMinutes}
+              onLessonClick={studentSession && personalNotes.isSuccess ? openNote : undefined} notedKeys={new Set(notesByKey.keys())} homeworkCounts={homeworkCounts} />
           : <>
             <div className="week-picker-clip">
               <div
@@ -367,7 +397,15 @@ export function App() {
                 ))}
               </div>
             </div>
-            {days[selectedDay] && <DaySchedule day={days[selectedDay]} />}
+            {days[selectedDay] && <DaySchedule day={days[selectedDay]}
+              onLessonClick={mobileCards && studentSession && personalNotes.isSuccess ? openNote : undefined}
+              renderLessonExtras={studentSession ? (lesson, day) => <>
+              {homeworkCounts.has(`${day.date}:${lesson.id}`) && <span className="lesson-homework-badge">Домашка · {homeworkCounts.get(`${day.date}:${lesson.id}`)}</span>}
+              {lesson.note_key && notesByKey.get(lesson.note_key) && <PersonalNotePreview key={notesByKey.get(lesson.note_key)!.id} body={notesByKey.get(lesson.note_key)!.body} onOpen={mobileCards ? undefined : () => openNote(lesson, day)} />}
+              {!mobileCards && <button className="button button-secondary personal-note-button" disabled={!personalNotes.isSuccess || !lesson.note_key} onClick={() => openNote(lesson, day)}>
+                {lesson.note_key && notesByKey.has(lesson.note_key) ? 'Изменить мою заметку' : 'Моя заметка'}
+              </button>}
+            </> : undefined} />}
           </>)}
 
         {schedule.data && schedule.isStale && !navigator.onLine && (
@@ -385,6 +423,8 @@ export function App() {
             selectedDay={selectedDay}
           />
         )}
+        {personalNotes.isError && studentSession && <div className="state-note error-note"><span>Не удалось загрузить личные заметки: {personalNotes.error.message}</span><button className="button button-secondary" onClick={() => personalNotes.refetch()}>Повторить</button></div>}
+        {!studentSession && <p className="state-note">Чтобы оставлять личные заметки к парам, заполните профиль в разделе «Сообщения».</p>}
       </>}
 
       {view === 'admin' && !adminSession && <AdminLogin onLogin={loginAdmin} />}
@@ -439,6 +479,7 @@ export function App() {
     </main>
 
     <BottomNav view={view} onNavigate={nav} unread={inbox.data?.unread_count ?? 0} />
+    {noteSelection && studentSession && <PersonalNoteDialog {...noteSelection} onClose={() => setNoteSelection(null)} />}
     </div>
   </>
 }

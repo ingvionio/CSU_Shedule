@@ -51,6 +51,7 @@ class ChangeOut(BaseModel):
 
 class LessonOut(BaseModel):
     id: str
+    note_key: str | None = None
     start_time: str = Field(description="HH:MM, заполнено всегда")
     end_time: str
     slot: int | None = Field(default=None, description="Номер в сетке звонков; null -- пара вне сетки")

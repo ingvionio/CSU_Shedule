@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1 import admin, auth, feedback, homework, me, messages, public
+from app.api.v1 import admin, auth, feedback, homework, me, messages, notes, public
 
 api_router = APIRouter()
 api_router.include_router(public.router, tags=["public"])
@@ -9,6 +9,7 @@ api_router.include_router(me.router, tags=["student"])
 api_router.include_router(messages.router, tags=["student", "messages"])
 api_router.include_router(messages.admin_router, tags=["admin", "messages"])
 api_router.include_router(homework.router, tags=["student", "homework"])
+api_router.include_router(notes.router, tags=["student", "notes"])
 api_router.include_router(homework.admin_router, tags=["admin", "homework"])
 api_router.include_router(admin.router, tags=["admin"])
 api_router.include_router(feedback.router, tags=["feedback"])

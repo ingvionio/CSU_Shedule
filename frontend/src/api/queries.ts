@@ -19,6 +19,7 @@ import type {
   WeekSchedule,
   HomeworkInput,
   HomeworkPatch,
+  NoteInput,
 } from './types'
 
 export function useGroups(): UseQueryResult<Group[]> {
@@ -242,6 +243,26 @@ export function useHomeworkMutations() {
   const update = useMutation({ mutationFn: ({ id, body }: { id: number; body: HomeworkPatch }) => asStudent((token) => api.updateHomework(token, id, body)), onSuccess: refresh })
   const complete = useMutation({ mutationFn: ({ id, completed }: { id: number; completed: boolean }) => asStudent((token) => api.completeHomework(token, id, completed)), onSuccess: refresh })
   return { create, update, complete }
+}
+
+export function usePersonalNotes() {
+  const session = useStudentSession()
+  return useQuery({
+    queryKey: ['personal-notes', session?.profile.id],
+    queryFn: () => asStudent(api.notes),
+    enabled: session !== null,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  })
+}
+
+export function usePersonalNoteMutations() {
+  const queryClient = useQueryClient()
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['personal-notes'] })
+  return {
+    save: useMutation({ mutationFn: (body: NoteInput) => asStudent((token) => api.saveNote(token, body)), onSuccess: refresh }),
+    remove: useMutation({ mutationFn: ({ id, version }: { id: number; version: number }) => asStudent((token) => api.deleteNote(token, id, version)), onSuccess: refresh }),
+  }
 }
 
 /* --- Рассылка: методист --- */
