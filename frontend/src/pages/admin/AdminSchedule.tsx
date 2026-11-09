@@ -1,3 +1,5 @@
+import { ContextHelp } from '../../ContextHelp'
+import { adminHelpItems } from './helpContent'
 import { useEffect, useState } from 'react'
 import { CalendarDays, ChevronLeft, ChevronRight, X } from 'lucide-react'
 
@@ -225,6 +227,8 @@ export function AdminSchedule({
           <p className="muted">Выберите группу или поток, затем занятие в календаре.</p>
         </div>
       </div>
+
+      <ContextHelp ids={['schedule-edit', 'schedule-scope']} items={adminHelpItems} label="Как менять расписание" />
 
       <div className="admin-target-tabs" aria-label="Кого изменить">
         <button

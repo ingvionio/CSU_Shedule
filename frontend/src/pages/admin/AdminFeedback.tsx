@@ -1,3 +1,5 @@
+import { ContextHelp } from '../../ContextHelp'
+import { adminHelpItems } from './helpContent'
 import { useEffect, useState } from 'react'
 import { Mail, RefreshCw, Send, X } from 'lucide-react'
 
@@ -44,6 +46,8 @@ export function AdminFeedback({ token, onUnauthorized }: AdminFeedbackProps) {
         <h1>Обращения</h1>
         <p className="muted">Вопросы и предложения студентов. Ответ студент увидит в приложении.</p>
       </div>
+
+      <ContextHelp ids={['feedback-reply', 'feedback-organize']} items={adminHelpItems} label="Как работать с обращениями" />
 
       <div className="feedback-folders" aria-label="Папки">
         {FOLDERS.map((folder) => {

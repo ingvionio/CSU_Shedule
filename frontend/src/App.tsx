@@ -11,6 +11,10 @@ import { AdminFeedback } from './pages/admin/AdminFeedback'
 import { AdminSchedule } from './pages/admin/AdminSchedule'
 import { AdminMessages } from './pages/admin/AdminMessages'
 import { AdminHomeworkEditors } from './pages/admin/AdminHomeworkEditors'
+import { useNavigation } from './navigation'
+import { ContextHelp } from './ContextHelp'
+import { Landing } from './pages/Landing'
+import { Help } from './pages/Help'
 import { CampusMap } from './pages/CampusMap'
 import { MoodleLogin } from './pages/MoodleLogin'
 import { StudentFeedback } from './pages/feedback/StudentFeedback'
@@ -52,8 +56,8 @@ export function App() {
   const mobileCards = useSyncExternalStore(subscribeMobileCards, () => mobileCardsQuery.matches)
   const studentSession = useStudentSession()
   const [requestedMessage, setRequestedMessage] = useState(() => messageFromUrl(window.location.href))
-  const [view, setView] = useState<View>(() => (requestedMessage !== null ? 'messages' : 'day'))
-  const [groupId, setGroupId] = useState<number | null>(() => readSelectedGroup() ?? studentSession?.profile.group_id ?? null)
+  const [view, setView] = useNavigation(studentSession !== null)
+  const [groupId, setGroupId] = useState<number | null>(() => studentSession ? studentSession.profile.group_id : readSelectedGroup())
   const [adminGroupId, setAdminGroupId] = useState<number | null>(null)
   const [weekNumber, setWeekNumber] = useState<number | null>(null)
   const [selectedDay, setSelectedDay] = useState(0)
@@ -111,18 +115,26 @@ export function App() {
     return () => window.clearInterval(timer)
   }, [])
 
-  // Ссылку из уведомления открыли — убираем параметр, чтобы обновление страницы не открывало его снова.
-  useEffect(() => {
-    if (messageFromUrl(window.location.href) !== null) window.history.replaceState(null, '', window.location.pathname)
-  }, [])
-
   // При наличии сессии студента восстанавливаем его группу
   useEffect(() => {
-    if (groupId === null && studentSession?.profile.group_id) {
+    if (studentSession && groupId !== studentSession.profile.group_id) {
       setGroupId(studentSession.profile.group_id)
-      writeSelectedGroup(studentSession.profile.group_id)
+      if (studentSession.profile.group_id !== null) writeSelectedGroup(studentSession.profile.group_id)
     }
-  }, [studentSession?.profile.group_id, groupId])
+  }, [studentSession, groupId])
+
+  useEffect(() => {
+    if (studentSession && view === 'login') setView(requestedMessage !== null ? 'messages' : 'day', true)
+  }, [studentSession, view, requestedMessage, setView])
+
+  useEffect(() => {
+    const restoreMessage = () => {
+      const id = messageFromUrl(window.location.href)
+      if (id !== null) setRequestedMessage(id)
+    }
+    window.addEventListener('popstate', restoreMessage)
+    return () => window.removeEventListener('popstate', restoreMessage)
+  }, [])
 
   // Service worker сообщает о новом push и о нажатии на уведомление в уже открытом приложении.
   useEffect(() => {
@@ -166,6 +178,7 @@ export function App() {
   }
 
   const handleMoodleLogin = (session: StudentSession) => {
+    setGroupId(session.profile.group_id)
     if (session.profile.group_id) {
       setGroupId(session.profile.group_id)
       writeSelectedGroup(session.profile.group_id)
@@ -176,21 +189,23 @@ export function App() {
       }
     }
     setWeekNumber(currentWeek.data?.number ?? null)
-    setView('day')
+    setView(requestedMessage !== null ? 'messages' : (view === 'login' || view === 'landing' ? 'day' : view), true)
     queryClient.invalidateQueries({ queryKey: ['inbox'] })
   }
 
   const handleStudentLogout = () => {
     logoutStudent()
     setGroupId(null)
-    setView('day')
+    setRequestedMessage(null)
+    setView('landing', true)
     setMenuOpen(false)
   }
 
   const handleForgetMoodle = async () => {
     await forgetMoodle()
     setGroupId(null)
-    setView('day')
+    setRequestedMessage(null)
+    setView('landing', true)
     setMenuOpen(false)
   }
 
@@ -279,13 +294,16 @@ export function App() {
     setMenuOpen(false)
   }
 
+  const publicView = view === 'landing' || view === 'help' || view === 'feedback'
+  const needsLogin = !studentSession && view !== 'admin' && !publicView
+
   return (
     <>
-      <CampusMap active={view === 'map'} onBack={() => nav(mapReturnView.current)} />
-      <div className="app-shell" hidden={view === 'map'}>
+      <CampusMap active={view === 'map' && !needsLogin} onBack={() => nav(mapReturnView.current)} />
+      <div className={`app-shell ${view === 'landing' ? 'landing-shell' : ''}`} hidden={view === 'map' && !needsLogin}>
         <Header
           title={
-            view === 'group'
+            view === 'landing' ? 'Расписание ИИТ' : view === 'help' ? 'Помощь' : view === 'group'
               ? studentSession
                 ? 'Профиль студента'
                 : 'Выберите группу'
@@ -300,17 +318,17 @@ export function App() {
                       : 'Расписание'
           }
           subtitle={
-            view === 'group'
+            view === 'landing' || view === 'help' ? 'Институт информационных технологий · ЧелГУ' : view === 'group'
               ? studentSession
                 ? 'Данные авторизации Moodle'
                 : 'Группа сохранится на этом устройстве'
               : view === 'admin'
                 ? ADMIN_SUBTITLES[adminSection]
-                : !studentSession
+                : needsLogin
                   ? 'Институт ИТ ЧелГУ · Вход через Moodle'
-                  : `Институт ИТ · ${selectedGroup?.name ?? studentSession.profile.group_name ?? ''}`
+                  : `Институт ИТ · ${selectedGroup?.name ?? studentSession?.profile.group_name ?? 'ЧелГУ'}`
           }
-          onBack={view === 'group' && groupId !== null ? () => nav('day') : undefined}
+          onBack={view === 'help' || view === 'login' || (view === 'group' && groupId !== null) ? () => nav(studentSession ? 'day' : 'landing') : undefined}
           onMenu={() => setMenuOpen((open) => !open)}
         />
         {menuOpen && (
@@ -323,6 +341,8 @@ export function App() {
               </div>
             )}
             {studentSession && <button onClick={() => nav('day')}>Студенческое расписание</button>}
+            <button onClick={() => nav('landing')}>О проекте</button>
+            <button onClick={() => nav('help')}>Помощь</button>
             <button onClick={() => nav('admin')}>Администрирование расписания</button>
             {studentSession && <button onClick={handleStudentLogout}>Выйти из аккаунта</button>}
             {studentSession && (
@@ -335,13 +355,14 @@ export function App() {
         )}
 
         <main className="content">
-          {/* Если пользователь не авторизован через Moodle и не в админке — строгий экран входа */}
-          {!studentSession && view !== 'admin' ? (
+          {view === 'landing' ? <Landing authenticated={Boolean(studentSession)} onStart={() => nav(studentSession ? 'day' : 'login')} onHelp={() => nav('help')} onAdmin={() => nav('admin')} />
+          : view === 'help' ? <Help onFeedback={() => nav('feedback')} />
+          : needsLogin ? (
             <MoodleLogin onLogin={handleMoodleLogin} onGoToAdmin={() => nav('admin')} />
           ) : (
             <>
-              {groups.isLoading && !groups.data && <div className="state-note">Загружаем расписание…</div>}
-              {groups.isError && !groups.data && (
+              {(view === 'day' || view === 'week' || view === 'admin') && groups.isLoading && !groups.data && <div className="state-note">Загружаем расписание…</div>}
+              {(view === 'day' || view === 'week' || view === 'admin') && groups.isError && !groups.data && (
                 <div className="state-note error-note">
                   <span>{(groups.error as Error).message}</span>
                   <button className="button button-secondary" onClick={() => groups.refetch()}>
@@ -493,6 +514,8 @@ export function App() {
                       </button>
                     </div>
                   </section>
+
+                  <ContextHelp ids={['views', 'parity', 'changes']} label="Как читать расписание" />
 
                   {schedule.isError && (
                     <div className="state-note error-note">
@@ -673,7 +696,7 @@ export function App() {
           )}
         </main>
 
-        {studentSession && view !== 'admin' && (
+        {studentSession && view !== 'admin' && view !== 'landing' && (
           <BottomNav view={view} onNavigate={nav} unread={inbox.data?.unread_count ?? 0} hasSession={Boolean(studentSession)} />
         )}
         {noteSelection && studentSession && (

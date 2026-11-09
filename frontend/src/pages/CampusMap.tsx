@@ -1,3 +1,4 @@
+import { ContextHelp } from '../ContextHelp'
 import { useEffect, useState } from 'react'
 import { ArrowLeft, ExternalLink, RefreshCw } from 'lucide-react'
 
@@ -51,10 +52,13 @@ export function CampusMap({ active, onBack }: { active: boolean; onBack: () => v
           <ArrowLeft size={20} />
         </button>
         <strong>Карта ЧелГУ</strong>
-        <a className="icon-button" href={MAP_URL} target="_blank" rel="noopener noreferrer"
-          aria-label="Открыть карту в отдельной вкладке" title="Открыть в отдельной вкладке">
-          <ExternalLink size={18} />
-        </a>
+        <div className="campus-map-actions">
+          <ContextHelp ids={['map']} label="Как пользоваться картой" compact />
+          <a className="icon-button" href={MAP_URL} target="_blank" rel="noopener noreferrer"
+            aria-label="Открыть карту в отдельной вкладке" title="Открыть в отдельной вкладке">
+            <ExternalLink size={18} />
+          </a>
+        </div>
       </header>
       <div className="campus-map-body">
         {online && <iframe

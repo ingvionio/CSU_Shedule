@@ -1,3 +1,5 @@
+import { ContextHelp } from '../../ContextHelp'
+import { adminHelpItems } from './helpContent'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { BellRing, Plus, RefreshCw, Send, Trash2, X } from 'lucide-react'
 
@@ -39,6 +41,8 @@ export function AdminMessages({ token, groups, onUnauthorized }: AdminMessagesPr
           увидит сообщения своей группе, курсу и потоку за последние две недели.
         </p>
       </div>
+
+      <ContextHelp ids={['message-send', 'message-status']} items={adminHelpItems} label="Как отправлять сообщения" />
 
       {composing
         ? <MessageComposer

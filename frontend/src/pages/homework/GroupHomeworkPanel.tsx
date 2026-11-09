@@ -1,3 +1,4 @@
+import { ContextHelp } from '../../ContextHelp'
 import { useMemo, useState } from 'react'
 import { Check, Plus, RotateCcw } from 'lucide-react'
 
@@ -67,6 +68,7 @@ export function GroupHomeworkPanel({ groupId, weekStart, weekEnd, days, selected
         <span className="eyebrow">ГРУППОВАЯ ДОМАШКА</span>
         <h2>Задания на эту неделю</h2>
         <p className="muted">Общие записи группы. Отметка выполнения видна только вам.</p>
+        <ContextHelp ids={['homework', 'notes']} label="Домашка и личные заметки" />
       </div>
       {homework.data.can_edit && <button className="button button-secondary" onClick={() => setExpanded((value) => !value)}>
         <Plus size={16} />{expanded ? 'Закрыть' : 'Добавить'}
