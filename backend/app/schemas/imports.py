@@ -28,6 +28,8 @@ class WeeklyImportOut(BaseModel):
     groups_created: int
     lessons_created: int
     overrides_deleted: int
+    homework_rebound: int = 0
+    homework_unbound: int = 0
     errors_count: int
     warnings_count: int
     applied: bool
@@ -46,6 +48,9 @@ class SemesterImportOut(BaseModel):
     warnings: list[ImportIssueOut] = Field(default_factory=list)
     lessons_replaced: int = 0
     overrides_deleted: int = 0
+    homework_affected: int = 0
+    homework_rebound: int = 0
+    homework_unbound: int = 0
     groups_created: int = 0
     lessons_created: int = 0
     semester_title: str

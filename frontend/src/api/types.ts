@@ -385,6 +385,8 @@ export type WeeklyImportReport = {
   groups_created: number
   lessons_created: number
   overrides_deleted: number
+  homework_rebound: number
+  homework_unbound: number
   errors_count: number
   warnings_count: number
   applied: boolean
@@ -398,6 +400,9 @@ export type SemesterImportReport = {
   warnings: ImportIssue[]
   lessons_replaced: number
   overrides_deleted: number
+  homework_affected: number
+  homework_rebound: number
+  homework_unbound: number
   groups_created: number
   lessons_created: number
   semester_title: string

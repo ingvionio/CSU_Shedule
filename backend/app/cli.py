@@ -86,6 +86,8 @@ def import_excel(path: str) -> None:
             f"групп создано {report.groups_created}, пар записано {report.lessons_created}, "
             f"предупреждений {report.warnings}"
         )
+        if report.homework_rebound + report.homework_unbound:
+            print(f"домашка: перепривязано {report.homework_rebound}, отвязано {report.homework_unbound}")
 
 
 def import_weekly(paths: list[str], skip_errors: bool = False) -> int:
@@ -112,6 +114,8 @@ def import_weekly(paths: list[str], skip_errors: bool = False) -> int:
             print("Импорт отменён: ничего не записано.")
         print(f"Файлов: {len(report.files)}, групп: {report.groups_count} (новых: {report.groups_created}), "
               f"пар: {report.lessons_created}, удалено изменений: {report.overrides_deleted}, ошибок: {len(report.errors)}")
+        if report.homework_rebound + report.homework_unbound:
+            print(f"домашка: перепривязано {report.homework_rebound}, отвязано {report.homework_unbound}")
         return 1 if report.errors else 0
 
 

@@ -54,6 +54,16 @@ function Report({ result }: { result: Result }) {
         временных изменений {report.applied ? 'удалено' : 'удалится'}: {report.overrides_deleted}.
       </p>
     </>}
+    {result.kind === 'semester' && !report.applied && result.report.homework_affected > 0 && <p className="muted">
+      Домашка у заменяемых пар: {result.report.homework_affected} — будет перепривязана к тем же парам, где они совпадут
+    </p>}
+    {report.homework_rebound + report.homework_unbound > 0 && <p className="muted">
+      Домашка: {report.applied ? 'перепривязано' : 'будет перепривязано'} {report.homework_rebound},
+      {' '}{report.applied ? 'отвязано' : 'будет отвязано'} {report.homework_unbound}.
+    </p>}
+    {report.homework_unbound > 0 && <p className="state-note import-homework-warning" role="alert">
+      {report.homework_unbound} заданий останутся без пары — они видны в «Заданиях на неделю», но не в окне пары
+    </p>}
   </div>
 }
 

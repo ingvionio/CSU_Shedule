@@ -28,6 +28,7 @@ from app.models import (
 from app.services import weeks
 from app.services.excel_parser import ParsedLesson, ParseResult, parse_workbook
 from app.services.groups import direction_of
+from app.services.homework_rebind import HomeworkBinding, collect_homework, rebind_homework
 
 # Форматы пар. Таблица, а не enum — список расширяется без миграции.
 DEFAULT_LESSON_TYPES: list[tuple[str, str]] = [
@@ -58,6 +59,8 @@ class ImportReport:
     lessons_created: int
     warnings: int
     semester_title: str
+    homework_rebound: int = 0
+    homework_unbound: int = 0
 
 
 def _parse_time(text: str) -> time:
@@ -161,13 +164,17 @@ def import_workbook(
             group.direction = direction_of(group.name)
         group_ids[parsed_group.name] = group.id
 
+    homework: list[HomeworkBinding] = []
     if replace:
+        old_ids = select(Lesson.id).where(Lesson.semester_id == semester.id, Lesson.group_id.in_(group_ids.values()))
+        homework = collect_homework(session, old_ids)
         session.execute(
             delete(Lesson).where(Lesson.semester_id == semester.id, Lesson.group_id.in_(group_ids.values()))
         )
         session.flush()
 
     slots = {slot.number: slot for slot in session.scalars(select(TimeSlot)).all()}
+    new_lessons: list[Lesson] = []
 
     for parsed in result.lessons:
         group_id = group_ids.get(parsed.group_name)
@@ -183,33 +190,35 @@ def import_workbook(
         )
         room = _get_or_create(session, Room, Room.name, parsed.room) if parsed.room else None
 
-        session.add(
-            Lesson(
-                semester_id=semester.id,
-                group_id=group_id,
-                weekday=parsed.weekday,
-                start_time=start_time,
-                end_time=end_time,
-                slot=slot_number,
-                week_parity=parsed.parity,
-                subject_id=subject.id,
-                lesson_type=parsed.lesson_type,
-                teacher_id=teacher.id if teacher else None,
-                room_id=room.id if room else None,
-                valid_from=valid_from,
-                valid_to=valid_to,
-                week_from=parsed.week_from,
-                week_to=parsed.week_to,
-                subgroup=parsed.subgroup,
-                status=PublishStatus.PUBLISHED.value,
-                import_id=record.id,
-                source_ref=f"{parsed.sheet}!{parsed.source_ref}",
-                source_text=parsed.source_text,
-            )
+        new_lesson = Lesson(
+            semester_id=semester.id,
+            group_id=group_id,
+            weekday=parsed.weekday,
+            start_time=start_time,
+            end_time=end_time,
+            slot=slot_number,
+            week_parity=parsed.parity,
+            subject_id=subject.id,
+            lesson_type=parsed.lesson_type,
+            teacher_id=teacher.id if teacher else None,
+            room_id=room.id if room else None,
+            valid_from=valid_from,
+            valid_to=valid_to,
+            week_from=parsed.week_from,
+            week_to=parsed.week_to,
+            subgroup=parsed.subgroup,
+            status=PublishStatus.PUBLISHED.value,
+            import_id=record.id,
+            source_ref=f"{parsed.sheet}!{parsed.source_ref}",
+            source_text=parsed.source_text,
         )
+        session.add(new_lesson)
+        new_lessons.append(new_lesson)
 
     record.lessons_count = len(result.lessons)
     record.status = ImportStatus.PUBLISHED.value
+    session.flush()
+    homework_rebound, homework_unbound = rebind_homework(session, semester, homework, new_lessons)
     session.commit()
 
     return ImportReport(
@@ -218,4 +227,6 @@ def import_workbook(
         lessons_created=len(result.lessons),
         warnings=len(result.errors),
         semester_title=semester.title,
+        homework_rebound=homework_rebound,
+        homework_unbound=homework_unbound,
     )

@@ -261,6 +261,7 @@ h1 { margin-top: 7px; font-size: 24px; line-height: 1.16; letter-spacing: -.045e
 .import-actions .button { flex: 1; }
 .import-report, .import-history { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
 .import-report h2, .import-history h2 { font-size: 16px; }
+.import-report .import-homework-warning { margin: 0; border-color: var(--amber); background: var(--amber-soft); color: var(--amber); text-align: left; }
 .import-table-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .import-table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; }
 .import-table caption { padding: 10px; text-align: left; }

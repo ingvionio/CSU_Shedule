@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Group, Lesson, LessonOverride, ScheduleImport, Semester
+from app.models import Group, GroupHomework, Lesson, LessonOverride, ScheduleImport, Semester
 from app.schemas.imports import (
     ImportHistoryOut, ImportIssueOut, SemesterGroupOut, SemesterImportOut, WeeklyFileOut, WeeklyImportOut,
 )
@@ -83,6 +83,7 @@ def upload_weekly(
             ) for file in report.files],
             files_count=len(report.files), groups_count=report.groups_count, groups_created=report.groups_created,
             lessons_created=report.lessons_created, overrides_deleted=report.overrides_deleted,
+            homework_rebound=report.homework_rebound, homework_unbound=report.homework_unbound,
             errors_count=len(report.errors), warnings_count=len(report.warnings),
             applied=not dry_run and report.import_id is not None,
             import_id=report.import_id if not dry_run else None,
@@ -118,6 +119,10 @@ def upload_semester(db: Session, files: list[UploadFile], dry_run: bool, admin: 
         result.lessons_replaced = db.scalar(select(func.count()).select_from(old_ids.subquery()))
         result.overrides_deleted = db.scalar(select(func.count()).select_from(LessonOverride).where(
             LessonOverride.lesson_id.in_(old_ids)))
+        if dry_run:
+            result.homework_affected = db.scalar(select(func.count()).select_from(GroupHomework).join(
+                Lesson, GroupHomework.lesson_id == Lesson.id,
+            ).where(Lesson.id.in_(old_ids), GroupHomework.group_id == Lesson.group_id))
         existing_groups = db.scalar(select(func.count()).select_from(Group).where(Group.name.in_(group_names)))
         result.groups_created = len(group_names) - existing_groups
         result.lessons_created = len(parsed.lessons)
@@ -126,6 +131,8 @@ def upload_semester(db: Session, files: list[UploadFile], dry_run: bool, admin: 
             result.import_id = report.import_id
             result.groups_created = report.groups_created
             result.lessons_created = report.lessons_created
+            result.homework_rebound = report.homework_rebound
+            result.homework_unbound = report.homework_unbound
             result.applied = True
         return result
 
