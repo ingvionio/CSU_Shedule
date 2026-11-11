@@ -1,3 +1,4 @@
+import { Capacitor } from '@capacitor/core'
 import type {
   ImportHistory,
   SemesterImportReport,
@@ -36,7 +37,28 @@ import type {
   NoteInput,
 } from './types'
 
-const BASE_URL = (import.meta.env.VITE_API_URL ?? '') + '/api/v1'
+const PRODUCTION_API_URL = 'https://iit-app.ru'
+
+export function resolveApiBaseUrl(): string {
+  const custom = import.meta.env.VITE_API_URL
+  if (custom) return custom.replace(/\/+$/, '') + '/api/v1'
+
+  // В мобильном приложении Capacitor (Android/iOS) бэкенд не развёрнут локально,
+  // поэтому запросы всегда направляются на рабочий API сервер.
+  if (typeof window !== 'undefined') {
+    if (
+      Capacitor.isNativePlatform() ||
+      window.location.protocol === 'capacitor:' ||
+      window.location.origin === 'https://localhost'
+    ) {
+      return `${PRODUCTION_API_URL}/api/v1`
+    }
+  }
+
+  return '/api/v1'
+}
+
+export const BASE_URL = resolveApiBaseUrl()
 
 export class ApiError extends Error {
   constructor(message: string, readonly status: number) {
@@ -62,7 +84,7 @@ async function request<T>(path: string, { method = 'GET', body, token, feedbackT
 
   let response: Response
   try {
-    response = await fetch(BASE_URL + path, {
+    response = await fetch(resolveApiBaseUrl() + path, {
       method,
       headers,
       body: isForm ? body : body === undefined ? undefined : JSON.stringify(body),
@@ -73,15 +95,33 @@ async function request<T>(path: string, { method = 'GET', body, token, feedbackT
 
   if (response.status === 204) return undefined as T
 
+  const contentType = response.headers.get('content-type') ?? ''
+  const isJson = contentType.includes('application/json')
+
   if (!response.ok) {
     // Бэкенд присылает причину в detail, её можно показать как есть.
     // У ошибок валидации (422 от FastAPI) detail — список, берём первое сообщение.
-    const payload = await response.json().catch(() => null)
-    const detail = Array.isArray(payload?.detail) ? payload.detail[0]?.msg : payload?.detail
+    let detail: string | undefined
+    if (isJson) {
+      try {
+        const payload = await response.json()
+        detail = Array.isArray(payload?.detail) ? payload.detail[0]?.msg : payload?.detail
+      } catch {
+        // Игнорируем ошибку чтения JSON ошибки
+      }
+    }
     throw new ApiError(detail ?? `Ошибка запроса (${response.status})`, response.status)
   }
 
-  return response.json() as Promise<T>
+  if (!isJson) {
+    throw new ApiError('Сервер вернул некорректный ответ (не JSON)', response.status)
+  }
+
+  try {
+    return (await response.json()) as T
+  } catch {
+    throw new ApiError('Ошибка обработки ответа сервера', response.status)
+  }
 }
 
 export const api = {
