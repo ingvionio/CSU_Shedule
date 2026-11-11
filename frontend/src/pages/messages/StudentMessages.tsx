@@ -1,3 +1,4 @@
+import { ContextHelp } from '../../ContextHelp'
 import { useEffect, useState, type FormEvent } from 'react'
 import { BellOff, BellRing, CheckCircle2, RefreshCw, UserRound, X } from 'lucide-react'
 
@@ -34,6 +35,7 @@ export function StudentMessages({ group, onChooseGroup, requestedId }: StudentMe
         <span>{session.profile.full_name} · {session.profile.group_name ?? 'без группы'} · профиль №{session.profile.id}</span>
       </div>
 
+      <ContextHelp ids={['ack', 'push', 'push-device']} label="О сообщениях и уведомлениях" />
       <PushToggle />
 
       {inbox.isError && !inbox.data && (

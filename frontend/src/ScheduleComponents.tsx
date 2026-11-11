@@ -101,7 +101,7 @@ function groupByRow(lessons: Lesson[], rowOf: (lesson: Lesson) => number): [numb
 }
 
 export function Brand() {
-  return <div className="brand" aria-label="Челябинский государственный университет">ЧелГУ</div>
+  return <div className="brand" aria-label="Институт информационных технологий ЧелГУ"><img src="/icons/iit-shield.png" alt="ИИТ" width="36" height="44" /></div>
 }
 
 export function Header({

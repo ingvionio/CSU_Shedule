@@ -1,3 +1,4 @@
+import { ContextHelp } from '../../ContextHelp'
 import { useState, type FormEvent } from 'react'
 import { CheckCircle2, RefreshCw, Send } from 'lucide-react'
 
@@ -17,6 +18,7 @@ export function StudentFeedback({ groupId }: { groupId: number | null }) {
 
   return (
     <section className="feedback-screen">
+      <ContextHelp ids={['feedback']} label="Как отправить обращение" />
       <div className="segmented">
         <button className={tab === 'write' ? 'active' : ''} onClick={() => setTab('write')}>Написать</button>
         <button className={tab === 'mine' ? 'active' : ''} onClick={() => setTab('mine')}>

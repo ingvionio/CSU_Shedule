@@ -1,3 +1,5 @@
+import { ContextHelp } from '../../ContextHelp'
+import { adminHelpItems } from './helpContent'
 import { useState } from 'react'
 import { UserPlus, X } from 'lucide-react'
 
@@ -17,6 +19,8 @@ export function AdminHomeworkEditors({ token, groups, groupId, onGroupChange }: 
     <span className="eyebrow">ГРУППОВАЯ ДОМАШКА</span>
     <h1>Редакторы группы</h1>
     <p className="muted">Назначьте старосту и заместителя. Они смогут публиковать домашку для выбранной группы.</p>
+      <ContextHelp ids={['homework-editors', 'homework-access']} items={adminHelpItems} label="Как назначать редакторов" />
+
     <label className="admin-field"><span>Группа</span><select className="select-field" value={groupId ?? ''} onChange={(event) => onGroupChange(Number(event.target.value))}>{groups.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
     {group && <>
       <div className="admin-editor-add"><select className="select-field" value={selected} onChange={(event) => setSelected(event.target.value)}><option value="">Выберите студента</option>{available.map((student) => <option key={student.id} value={student.id}>{student.full_name} · профиль №{student.id}</option>)}</select><button className="button button-primary" disabled={!selected || mutations.assign.isPending} onClick={async () => { await mutations.assign.mutateAsync({ userId: Number(selected), isPrimary: (editors.data ?? []).length === 0 }); setSelected('') }}><UserPlus size={16} />Назначить</button></div>
