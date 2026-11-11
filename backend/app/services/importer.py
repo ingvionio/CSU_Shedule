@@ -128,6 +128,7 @@ def import_workbook(
     semester: Semester,
     file_name: str | None = None,
     replace: bool = True,
+    uploaded_by: str | None = None,
 ) -> ImportReport:
     """Разбирает файл и записывает расписание в базу.
 
@@ -142,6 +143,7 @@ def import_workbook(
         file_name=file_name or path,
         status=ImportStatus.PARSED.value,
         errors=[asdict(error) for error in result.errors] or None,
+        uploaded_by=uploaded_by,
     )
     session.add(record)
     session.flush()

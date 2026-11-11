@@ -37,16 +37,22 @@ class WeeklyImportReport:
     import_id: int | None = None
 
 
-def _read_sources(paths: list[str], temporary: Path) -> list[WeeklyFileReport]:
+def _read_sources(paths: list[str | tuple[str, str]], temporary: Path) -> list[WeeklyFileReport]:
     files: list[WeeklyFileReport] = []
 
     def read(path: Path, name: str | None = None, fallback_name: str | None = None) -> None:
-        files.append(WeeklyFileReport(name or str(path), parse_weekly_workbook(path, file_name=fallback_name)))
+        try:
+            parsed = parse_weekly_workbook(path, file_name=fallback_name)
+        except Exception:
+            failed(name or str(path), "Не удалось прочитать книгу Excel")
+            return
+        files.append(WeeklyFileReport(name or str(path), parsed))
 
     def failed(name: str, reason: str) -> None:
         files.append(WeeklyFileReport(name, WeeklyParseResult(errors=[WeeklyIssue("", "", "", reason)])))
 
-    for raw in paths:
+    for source in paths:
+        raw, display_name = source if isinstance(source, tuple) else (source, source)
         path = Path(raw)
         try:
             if path.is_dir():
@@ -59,9 +65,10 @@ def _read_sources(paths: list[str], temporary: Path) -> list[WeeklyFileReport]:
                 with ZipFile(path) as archive:
                     members = [item for item in archive.infolist() if not item.is_dir() and item.filename.lower().endswith(".xlsx")]
                     if not members:
-                        failed(raw, "В архиве не найдены файлы .xlsx")
+                        failed(display_name, "В архиве не найдены файлы .xlsx")
                     for member in members:
-                        name = f"{raw}!{member.filename}"
+                        member_name = member.filename.replace("\\", "/").rsplit("/", 1)[-1]
+                        name = f"{display_name}!{member_name if isinstance(source, tuple) else member.filename}"
                         fallback_name = member.filename.replace("\\", "/").rsplit("/", 1)[-1]
                         if not member.flag_bits & 0x800 and not GROUP_RE.search(fallback_name):
                             for encoding in ("cp866", "cp1251"):
@@ -80,11 +87,11 @@ def _read_sources(paths: list[str], temporary: Path) -> list[WeeklyFileReport]:
                         except (OSError, ValueError, BadZipFile, RuntimeError, NotImplementedError) as error:
                             failed(name, f"Не удалось извлечь файл: {error}")
             elif path.suffix.lower() == ".xlsx":
-                read(path)
+                read(path, display_name, display_name if isinstance(source, tuple) else None)
             else:
-                failed(raw, "Ожидался файл .xlsx, папка или архив .zip")
+                failed(display_name, "Ожидался файл .xlsx, папка или архив .zip")
         except (OSError, ValueError, BadZipFile) as error:
-            failed(raw, f"Не удалось прочитать путь: {error}")
+            failed(display_name, f"Не удалось прочитать путь: {error}")
     return files
 
 
@@ -119,7 +126,13 @@ def _resolve_times(parsed: WeeklyParseResult, slots: dict[int, TimeSlot]) -> lis
     return resolved
 
 
-def import_weekly(session: Session, paths: list[str], semester: Semester, skip_errors: bool = False) -> WeeklyImportReport:
+def import_weekly(
+    session: Session,
+    paths: list[str | tuple[str, str]],
+    semester: Semester,
+    skip_errors: bool = False,
+    uploaded_by: str | None = None,
+) -> WeeklyImportReport:
     report = WeeklyImportReport()
     with TemporaryDirectory(prefix="schedule-weekly-") as temporary:
         report.files = _read_sources(paths, Path(temporary))
@@ -150,7 +163,9 @@ def import_weekly(session: Session, paths: list[str], semester: Semester, skip_e
     if not valid:
         return report
     ensure_reference_data(session)
-    record = ScheduleImport(semester_id=semester.id, file_name="; ".join(paths)[:300], status="published",
+    names = [source[1] if isinstance(source, tuple) else source for source in paths]
+    record = ScheduleImport(semester_id=semester.id, file_name="; ".join(names)[:300], status="published",
+                            uploaded_by=uploaded_by,
                             errors=report.errors + report.warnings or None)
     session.add(record)
     session.flush()

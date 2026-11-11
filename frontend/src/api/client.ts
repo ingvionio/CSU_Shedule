@@ -1,4 +1,7 @@
 import type {
+  ImportHistory,
+  SemesterImportReport,
+  WeeklyImportReport,
   AdminFeedback,
   AdminMessage,
   AdminMessageDetail,
@@ -52,7 +55,8 @@ type RequestOptions = {
 
 async function request<T>(path: string, { method = 'GET', body, token, feedbackToken }: RequestOptions = {}): Promise<T> {
   const headers: Record<string, string> = {}
-  if (body !== undefined) headers['Content-Type'] = 'application/json'
+  const isForm = body instanceof FormData
+  if (body !== undefined && !isForm) headers['Content-Type'] = 'application/json'
   if (token) headers.Authorization = `Bearer ${token}`
   if (feedbackToken) headers['X-Feedback-Token'] = feedbackToken
 
@@ -61,7 +65,7 @@ async function request<T>(path: string, { method = 'GET', body, token, feedbackT
     response = await fetch(BASE_URL + path, {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: isForm ? body : body === undefined ? undefined : JSON.stringify(body),
     })
   } catch {
     throw new ApiError('Нет связи с сервером расписания', 0)
@@ -81,6 +85,20 @@ async function request<T>(path: string, { method = 'GET', body, token, feedbackT
 }
 
 export const api = {
+  imports: (token: string) => request<ImportHistory[]>('/admin/imports', { token }),
+  importWeekly: (token: string, files: File[], dryRun: boolean, skipErrors: boolean) => {
+    const body = new FormData()
+    files.forEach((file) => body.append('files', file))
+    body.append('dry_run', String(dryRun))
+    body.append('skip_errors', String(skipErrors))
+    return request<WeeklyImportReport>('/admin/imports/weekly', { method: 'POST', body, token })
+  },
+  importSemester: (token: string, file: File, dryRun: boolean) => {
+    const body = new FormData()
+    body.append('file', file)
+    body.append('dry_run', String(dryRun))
+    return request<SemesterImportReport>('/admin/imports/semester', { method: 'POST', body, token })
+  },
   notes: (token: string) => request<PersonalNote[]>('/me/notes', { token }),
   saveNote: (token: string, body: NoteInput) => request<PersonalNote>('/me/notes', { method: 'POST', token, body }),
   deleteNote: (token: string, id: number, version: number) => request<void>(`/me/notes/${id}?version=${version}`, { method: 'DELETE', token }),
