@@ -137,6 +137,7 @@ h1 { margin-top: 7px; font-size: 24px; line-height: 1.16; letter-spacing: -.045e
 .lesson-meta span { display: inline-flex; align-items: center; gap: 4px; }
 .lesson-meta span:first-child { color: var(--purple); font-weight: 600; }
 .lesson-meta svg { flex: 0 0 auto; color: #9095a0; }
+.lesson-online-link { width: fit-content; min-height: 34px; margin-top: 9px; padding: 0 12px; font-size: 11px; text-decoration: none; }
 .empty-day { padding: 17px 14px; border: 1px dashed var(--line-strong); border-radius: 13px; color: #858a94; background: rgba(255,255,255,.55); font-size: 12px; text-align: center; }
 
 .bottom-nav { z-index: 3; position: fixed; bottom: 0; left: 50%; display: grid; grid-template-columns: repeat(3, 1fr); width: min(100%, 430px); min-height: 72px; padding: 8px 14px max(8px, env(safe-area-inset-bottom)); transform: translateX(-50%); border-top: 1px solid var(--line); background: rgba(255, 255, 255, .96); backdrop-filter: blur(18px); }

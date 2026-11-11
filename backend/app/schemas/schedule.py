@@ -58,6 +58,7 @@ class LessonOut(BaseModel):
     subject: str
     type: LessonTypeOut
     room: str | None = None
+    online_url: str | None = None
     teacher: str | None = None
     subgroup: int | None = Field(default=None, description="Подгруппа из Excel; null -- вся группа")
     status: LessonStatusLiteral = "regular"

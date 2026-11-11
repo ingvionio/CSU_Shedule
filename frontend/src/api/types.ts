@@ -55,6 +55,7 @@ export type Lesson = {
   subject: string
   type: LessonType
   room: string | null
+  online_url: string | null
   teacher: string | null
   /** Подгруппа из Excel; null — пара всей группы. */
   subgroup: number | null

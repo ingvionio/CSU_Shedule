@@ -131,7 +131,7 @@ def import_workbook(
 ) -> ImportReport:
     """Разбирает файл и записывает расписание в базу.
 
-    `replace=True` удаляет ранее импортированные пары этого семестра --
+    `replace=True` удаляет пары групп книги в этом семестре --
     повторный запуск не плодит дубликаты.
     """
     result: ParseResult = parse_workbook(path)
@@ -160,7 +160,9 @@ def import_workbook(
         group_ids[parsed_group.name] = group.id
 
     if replace:
-        session.execute(delete(Lesson).where(Lesson.semester_id == semester.id))
+        session.execute(
+            delete(Lesson).where(Lesson.semester_id == semester.id, Lesson.group_id.in_(group_ids.values()))
+        )
         session.flush()
 
     slots = {slot.number: slot for slot in session.scalars(select(TimeSlot)).all()}
