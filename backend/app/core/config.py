@@ -7,7 +7,12 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/csu_schedule"
-    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    cors_origins: str = (
+        "https://iit-app.ru,http://iit-app.ru,https://www.iit-app.ru,http://www.iit-app.ru,"
+        "https://illusoryorb.ru,http://illusoryorb.ru,"
+        "http://localhost:5173,http://127.0.0.1:5173,"
+        "https://localhost,http://localhost,capacitor://localhost"
+    )
     api_prefix: str = "/api/v1"
 
     # Вход администратора: один логин и пароль из окружения, выдаётся JWT.
