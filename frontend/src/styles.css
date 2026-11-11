@@ -137,6 +137,7 @@ h1 { margin-top: 7px; font-size: 24px; line-height: 1.16; letter-spacing: -.045e
 .lesson-meta span { display: inline-flex; align-items: center; gap: 4px; }
 .lesson-meta span:first-child { color: var(--purple); font-weight: 600; }
 .lesson-meta svg { flex: 0 0 auto; color: #9095a0; }
+.lesson-online-link { width: fit-content; min-height: 34px; margin-top: 9px; padding: 0 12px; font-size: 11px; text-decoration: none; }
 .empty-day { padding: 17px 14px; border: 1px dashed var(--line-strong); border-radius: 13px; color: #858a94; background: rgba(255,255,255,.55); font-size: 12px; text-align: center; }
 
 .bottom-nav { z-index: 3; position: fixed; bottom: 0; left: 50%; display: grid; grid-template-columns: repeat(3, 1fr); width: min(100%, 430px); min-height: 72px; padding: 8px 14px max(8px, env(safe-area-inset-bottom)); transform: translateX(-50%); border-top: 1px solid var(--line); background: rgba(255, 255, 255, .96); backdrop-filter: blur(18px); }
@@ -248,6 +249,29 @@ h1 { margin-top: 7px; font-size: 24px; line-height: 1.16; letter-spacing: -.045e
 .upload-area > span, .export-row span { color: var(--muted); font-size: 10px; }
 .upload-button { min-height: 37px; margin-top: 4px; padding: 0 13px; font-size: 11px; }
 .upload-button input { display: none; }
+.import-file-input { display: none; }
+.import-files { margin: 0; padding: 0; list-style: none; }
+.import-files li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.import-files li > span { min-width: 0; overflow-wrap: anywhere; }
+.import-files strong { font-size: 12px; }
+.import-files small, .import-table small { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
+.import-skip { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.import-skip input { accent-color: var(--purple); }
+.import-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.import-actions .button { flex: 1; }
+.import-report, .import-history { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+.import-report h2, .import-history h2 { font-size: 16px; }
+.import-report .import-homework-warning { margin: 0; border-color: var(--amber); background: var(--amber-soft); color: var(--amber); text-align: left; }
+.import-table-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.import-table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; }
+.import-table caption { padding: 10px; text-align: left; }
+.import-table th, .import-table td { min-width: 70px; padding: 10px; vertical-align: top; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.import-table th { color: var(--muted); font-size: 10px; }
+.import-table tbody tr:last-child td { border-bottom: 0; }
+.import-issues { padding-left: 16px; margin: 4px 0; font-size: 11px; line-height: 1.5; }
+.import-issues:empty { display: none; }
+.import-issues span { display: block; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+.import-screen .admin-target-tabs button:disabled { opacity: .5; cursor: not-allowed; }
 .divider { display: flex; align-items: center; gap: 10px; margin: 10px 0 2px; color: var(--muted); font-size: 9px; font-weight: 700; letter-spacing: .08em; }
 .divider::before, .divider::after { height: 1px; flex: 1; background: var(--line); content: ""; }
 .export-row { display: flex; align-items: center; gap: 10px; padding: 7px 2px; }
@@ -427,7 +451,7 @@ h1 { margin-top: 7px; font-size: 24px; line-height: 1.16; letter-spacing: -.045e
 .importance-high { background: #fdf0ee; color: var(--red-dark); }
 .importance-normal { background: var(--purple-soft); color: var(--purple); }
 .importance-low { background: #e7e8eb; color: #767a83; }
-.admin-sections { grid-template-columns: repeat(4, 1fr); }
+.admin-sections { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .message-composer { display: flex; flex-direction: column; gap: 9px; }
 .message-composer .admin-field { width: 100%; }
 .choice-row.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }

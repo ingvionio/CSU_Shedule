@@ -86,6 +86,37 @@ def import_excel(path: str) -> None:
             f"групп создано {report.groups_created}, пар записано {report.lessons_created}, "
             f"предупреждений {report.warnings}"
         )
+        if report.homework_rebound + report.homework_unbound:
+            print(f"домашка: перепривязано {report.homework_rebound}, отвязано {report.homework_unbound}")
+
+
+def import_weekly(paths: list[str], skip_errors: bool = False) -> int:
+    from app.services.weekly_importer import import_weekly as import_batch
+
+    with SessionLocal() as session:
+        semester = session.scalar(select(Semester).where(Semester.is_active.is_(True)))
+        if semester is None:
+            print("Нет активного семестра. Сначала: python -m app.cli seed-semester")
+            return 1
+        report = import_batch(session, paths, semester, skip_errors=skip_errors)
+        if report.errors and not skip_errors:
+            session.rollback()
+        else:
+            session.commit()
+        for file in report.files:
+            parsed = file.parsed
+            if not parsed.errors:
+                print(f"{parsed.group_name}, неделя {parsed.week_number}: пар {len(parsed.lessons)}")
+        for issue in report.errors + report.warnings:
+            label = "Ошибка" if issue["severity"] == "error" else "Предупреждение"
+            print(f"{label}: {issue['file_name']} {issue['sheet']}!{issue['cell']}: {issue['reason']} — {issue['text']}")
+        if report.errors and not skip_errors:
+            print("Импорт отменён: ничего не записано.")
+        print(f"Файлов: {len(report.files)}, групп: {report.groups_count} (новых: {report.groups_created}), "
+              f"пар: {report.lessons_created}, удалено изменений: {report.overrides_deleted}, ошибок: {len(report.errors)}")
+        if report.homework_rebound + report.homework_unbound:
+            print(f"домашка: перепривязано {report.homework_rebound}, отвязано {report.homework_unbound}")
+        return 1 if report.errors else 0
 
 
 def stats() -> None:
@@ -163,6 +194,10 @@ def main() -> None:
     imp = sub.add_parser("import-excel", help="разобрать Excel и залить расписание")
     imp.add_argument("path")
 
+    weekly = sub.add_parser("import-weekly", help="загрузить понедельное расписание из файлов, папок или архивов")
+    weekly.add_argument("paths", nargs="+")
+    weekly.add_argument("--skip-errors", action="store_true", help="пропустить ошибочные файлы")
+
     sub.add_parser("stats", help="показать содержимое базы")
 
     mail = sub.add_parser("send-emails", help="дослать письма из очереди")
@@ -178,6 +213,8 @@ def main() -> None:
         seed_semester(args.title, date.fromisoformat(args.start), args.weeks, args.parity)
     elif args.command == "import-excel":
         import_excel(args.path)
+    elif args.command == "import-weekly":
+        sys.exit(import_weekly(args.paths, args.skip_errors))
     elif args.command == "stats":
         stats()
     elif args.command == "send-emails":

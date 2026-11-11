@@ -203,6 +203,7 @@ def _serialize_lesson(lesson: Lesson) -> dict:
         "subject": lesson.subject.name,
         "type": {"code": lesson.type.code, "name": lesson.type.name},
         "room": lesson.room.name if lesson.room else None,
+        "online_url": lesson.online_url,
         "teacher": lesson.teacher.full_name if lesson.teacher else None,
         "subgroup": lesson.subgroup,
         "status": LessonStatus.REGULAR.value,
@@ -250,6 +251,7 @@ def _apply_override(lesson: Lesson, override: LessonOverride | None) -> dict:
 def _serialize_added(override: LessonOverride) -> dict:
     return {
         "id": f"o-{override.id}",
+        "online_url": None,
         **_override_fields(override),
         "status": LessonStatus.ADDED.value,
         "change": _change(override),
@@ -261,6 +263,7 @@ def _serialize_moved_in(override: LessonOverride) -> dict:
     moved_from = _point(override.date, source.slot, source.start_time, source.end_time)
     return {
         "id": f"o-{override.id}",
+        "online_url": source.online_url,
         **_override_fields(override),
         "status": LessonStatus.MOVED_IN.value,
         "change": _change(override, moved_from=moved_from),

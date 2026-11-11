@@ -63,6 +63,8 @@ class Lesson(Base, TimestampMixin):
     teacher_id: Mapped[int | None] = mapped_column(ForeignKey("teachers.id", ondelete="SET NULL"), nullable=True)
     room_id: Mapped[int | None] = mapped_column(ForeignKey("rooms.id", ondelete="SET NULL"), nullable=True)
 
+    online_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
     # Срок действия пары. Основной фильтр при сборке недели.
     valid_from: Mapped[date] = mapped_column(Date)
     valid_to: Mapped[date | None] = mapped_column(Date, nullable=True)

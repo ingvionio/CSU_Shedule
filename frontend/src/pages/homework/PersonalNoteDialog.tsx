@@ -4,7 +4,7 @@ import { LockKeyhole, X } from 'lucide-react'
 import { usePersonalNoteMutations } from '../../api/queries'
 import type { GroupHomework, PersonalNote } from '../../api/types'
 import type { Day, Lesson } from '../../types'
-import { dayLabel } from '../../ScheduleComponents'
+import { dayLabel, OnlineLessonLink } from '../../ScheduleComponents'
 
 export function PersonalNoteDialog({ groupId, day, lesson, note, homework, homeworkLoading, homeworkError, onRetryHomework, onClose }: {
   groupId: number; day: Day; lesson: Lesson; note?: PersonalNote; onClose: () => void
@@ -61,7 +61,7 @@ export function PersonalNoteDialog({ groupId, day, lesson, note, homework, homew
       onKeyDown={(event) => {
         if (event.key === 'Escape' && !busy) close()
         if (event.key === 'Tab') {
-          const nodes = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), textarea'))
+          const nodes = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], textarea'))
           const first = nodes[0], last = nodes[nodes.length - 1]
           if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
           if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
@@ -69,7 +69,8 @@ export function PersonalNoteDialog({ groupId, day, lesson, note, homework, homew
       }}>
       <button ref={closeButton} className="modal-close" aria-label="Закрыть" disabled={busy || closing} onClick={close}><X size={18} /></button>
       <h2 id="personal-note-title">{lesson.subject}</h2>
-      <div className="admin-selected-lesson"><span>{dayLabel(day.date)} · {lesson.start_time}–{lesson.end_time}</span><span>{[lesson.type.name, lesson.teacher, lesson.room ? `Ауд. ${lesson.room}` : null].filter(Boolean).join(' · ')}</span></div>
+      <div className="admin-selected-lesson"><span>{dayLabel(day.date)} · {lesson.start_time}–{lesson.end_time}</span><span>{[lesson.type.name, lesson.teacher, lesson.online_url ? 'Онлайн' : lesson.room ? `Ауд. ${lesson.room}` : null].filter(Boolean).join(' · ')}</span></div>
+      <OnlineLessonLink lesson={lesson} />
       <section className="lesson-homework-section" aria-label="Домашка к паре">
         <h3>Домашка к паре</h3>
         {homeworkLoading && <p className="muted">Загружаем задания…</p>}
