@@ -100,8 +100,11 @@ function groupByRow(lessons: Lesson[], rowOf: (lesson: Lesson) => number): [numb
   return [...byRow.entries()].sort(([a], [b]) => a - b)
 }
 
-export function Brand() {
-  return <div className="brand" aria-label="Институт информационных технологий ЧелГУ"><img src="/icons/iit-shield.png" alt="ИИТ" width="36" height="44" /></div>
+export function Brand({ onHome }: { onHome?: () => void }) {
+  const image = <img src="/icons/iit-shield.png" alt="ИИТ" width="36" height="44" />
+  return onHome
+    ? <button type="button" className="brand brand-link" aria-label="На главную" onClick={onHome}>{image}</button>
+    : <div className="brand" aria-label="Институт информационных технологий ЧелГУ">{image}</div>
 }
 
 export function Header({
@@ -109,24 +112,31 @@ export function Header({
   onBack,
   subtitle,
   onMenu,
+  onHome,
+  accountAction,
 }: {
   title: string
   onBack?: () => void
   subtitle?: string
   onMenu?: () => void
+  onHome?: () => void
+  accountAction?: { label: string; onClick: () => void }
 }) {
   return (
-    <header className="topbar">
+    <header className={`topbar${accountAction ? ' topbar-with-account' : ''}`}>
       {onBack
         ? <button className="icon-button" aria-label="Назад" onClick={onBack}><ArrowLeft size={20} /></button>
-        : <Brand />}
+        : <Brand onHome={onHome} />}
       <div className="topbar-title">
         <strong>{title}</strong>
         {subtitle && <span>{subtitle}</span>}
       </div>
+      <div className="topbar-actions">
+      {accountAction && <button type="button" className="topbar-account" onClick={accountAction.onClick}>{accountAction.label}</button>}
       {onMenu
         ? <button className="icon-button" aria-label="Меню" onClick={onMenu}><Menu size={20} /></button>
         : <span className="icon-button placeholder" aria-hidden="true" />}
+      </div>
     </header>
   )
 }
@@ -361,7 +371,7 @@ export function BottomNav({
     { label: 'Расписание', icon: CalendarDays, target: 'day' as View },
     { label: 'Сообщения', icon: Bell, target: 'messages' as View, badge: unread },
     { label: 'Карта', icon: MapIcon, target: 'map' as View },
-    { label: 'Вопросы', icon: MessageCircleQuestion, target: 'feedback' as View },
+    { label: 'Обращения', icon: MessageCircleQuestion, target: 'feedback' as View },
     { label: hasSession ? 'Профиль' : 'Группа', icon: UserRound, target: 'group' as View },
   ]
 

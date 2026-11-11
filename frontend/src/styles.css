@@ -140,7 +140,7 @@ h1 { margin-top: 7px; font-size: 24px; line-height: 1.16; letter-spacing: -.045e
 .lesson-online-link { width: fit-content; min-height: 34px; margin-top: 9px; padding: 0 12px; font-size: 11px; text-decoration: none; }
 .empty-day { padding: 17px 14px; border: 1px dashed var(--line-strong); border-radius: 13px; color: #858a94; background: rgba(255,255,255,.55); font-size: 12px; text-align: center; }
 
-.bottom-nav { z-index: 3; position: fixed; bottom: 0; left: 50%; display: grid; grid-template-columns: repeat(3, 1fr); width: min(100%, 430px); min-height: 72px; padding: 8px 14px max(8px, env(safe-area-inset-bottom)); transform: translateX(-50%); border-top: 1px solid var(--line); background: rgba(255, 255, 255, .96); backdrop-filter: blur(18px); }
+.bottom-nav { z-index: 3; position: fixed; bottom: 0; left: 50%; display: grid; grid-template-columns: repeat(3, 1fr); width: min(100%, 430px); min-height: 72px; padding: 8px 14px calc(16px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); border-top: 1px solid var(--line); background: rgba(255, 255, 255, .96); backdrop-filter: blur(18px); }
 .student-nav { grid-template-columns: repeat(4, 1fr); }
 /* Help opens over the map; only the header reserves vertical space. */
 .campus-map { position: fixed; inset: 0; z-index: 20; display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100dvh; background: #f4f4f4; overscroll-behavior: none; }
@@ -339,21 +339,11 @@ h1 { margin-top: 7px; font-size: 24px; line-height: 1.16; letter-spacing: -.045e
   cursor: not-allowed;
 }
 
-.date-cell.today strong {
-  position: relative;
-}
-.date-cell.today strong::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  bottom: -6px;
-  width: 4px;
-  height: 4px;
-  margin-left: -2px;
-  border-radius: 50%;
-  background: var(--red);
-}
-.date-cell.active.today strong::after { background: #fff; }
+ .date-cell.today { border-color: var(--red); box-shadow: inset 0 3px 0 var(--red); }
+.date-cell.today span { color: var(--red-dark); font-weight: 750; font-size: 9px; }
+.date-cell.active.today { background: var(--red-dark); color: white; }
+.date-cell.active.today span { color: white; }
+
 
 .icon-button.placeholder { visibility: hidden; }
 
@@ -698,3 +688,22 @@ button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visibl
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; scroll-behavior: auto !important; transition: none !important; }
 }
+
+/* Действия в шапке остаются доступными на узком экране. */
+.topbar-with-account { grid-template-columns: 44px minmax(0, 1fr) auto; column-gap: 6px; }
+.topbar-actions { display: flex; align-items: center; gap: 4px; }
+.topbar-account { min-height: 40px; padding: 0 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--red-dark); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.topbar-account:hover { background: var(--purple-soft); }
+.brand-link { width: 44px; min-height: 44px; padding: 0; border: 0; border-radius: 8px; background: transparent; }
+.brand-link:hover { background: var(--purple-soft); }
+.faq-action { margin: 0 16px 16px; max-width: calc(100% - 32px); }
+
+.today-button { flex-shrink: 0; min-height: 32px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface); color: var(--red-dark); font-size: 12px; font-weight: 650; }
+.today-button:hover { background: var(--purple-soft); }
+.week-line { flex-wrap: wrap; }
+.week-line > div { min-width: 145px; }
+.profile-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 24px; }
+.profile-actions .button { width: 100%; min-height: 48px; height: auto; margin: 0; padding: 10px 8px; }
+.button-logout { background: #c92a2a; color: white; }
+.button-logout:hover { background: #a61e1e; }
+.content { padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px)); }

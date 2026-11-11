@@ -54,6 +54,8 @@ export function useCurrentWeek(): UseQueryResult<CurrentWeek> {
     queryKey: ['current-week'],
     queryFn: async () => writeCache('current-week', await api.currentWeek()),
     initialData: () => readCache<CurrentWeek>('current-week') ?? undefined,
+    initialDataUpdatedAt: 0,
+    refetchOnMount: 'always',
     staleTime: 60 * 60 * 1000,
   })
 }
