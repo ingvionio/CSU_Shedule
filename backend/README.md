@@ -54,7 +54,8 @@ DATABASE_URL="sqlite+pysqlite:///./schedule.db" python -m app.cli init-db
 |---|---|
 | `python -m app.cli init-db` | создать таблицы по моделям (альтернатива Alembic) |
 | `python -m app.cli seed-semester` | завести активный семестр, сетку звонков и форматы пар |
-| `python -m app.cli import-excel <путь>` | разобрать Excel и залить расписание (повторный запуск заменяет пары семестра) |
+| `python -m app.cli import-excel <путь>` | разобрать Excel бакалавров и залить расписание (повторный запуск заменяет пары групп из этого файла) |
+| `python -m app.cli import-weekly <путь> [<путь> …] [--skip-errors]` | понедельное расписание магистров: файлы `.xlsx`, папки или `.zip`. Каждая книга — группа × неделя; повторная загрузка заменяет только пары этой группы в этой неделе. Ошибка в любом файле отменяет всю пачку (с `--skip-errors` — ошибочные пропускаются) |
 | `python -m app.cli stats` | сводка по базе: группы, пары, справочники |
 
 Параметры семестра по умолчанию: `1 семестр 2026/27`, начало 1 сентября 2026,
@@ -75,6 +76,11 @@ DATABASE_URL="sqlite+pysqlite:///./schedule.db" python -m app.cli init-db
 | GET | `/api/v1/admin/catalog` | предметы, преподаватели, аудитории для подсказок |
 | POST | `/api/v1/admin/overrides` | временное изменение для группы или потока |
 | DELETE | `/api/v1/admin/overrides/{id}?batch=true` | откатить изменение (`batch` — для всех групп потока) |
+| POST | `/api/v1/admin/imports/weekly` | понедельные книги магистров (multipart: `files` — .xlsx/.zip, `dry_run`, `skip_errors`); проверка без записи или загрузка |
+| POST | `/api/v1/admin/imports/semester` | Excel бакалавров на семестр (multipart: `file`, `dry_run`) |
+| GET | `/api/v1/admin/imports?limit=20` | последние загрузки: файл, кто, когда, пар, ошибок |
+
+Лимиты загрузки: 20 МБ на файл, 50 МБ на запрос. Проверка (`dry_run=true`, по умолчанию) выполняет импорт в транзакции и откатывает её — отчёт ровно такой, как при загрузке. Нужен пакет `python-multipart`.
 | GET | `/api/v1/me/homework?start=&end=` | домашка своей группы |
 | POST/PATCH | `/api/v1/me/homework[/{id}]` | добавить или изменить домашку; только редактор группы |
 | POST | `/api/v1/me/homework/{id}/complete` | личная отметка выполнения |

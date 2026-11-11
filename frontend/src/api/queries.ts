@@ -83,6 +83,33 @@ export function useSchedule(groupId: number | null, week: number | null): UseQue
 
 /* --- Админка --- */
 
+export function useImports(token: string) {
+  return useQuery({ queryKey: ['admin-imports', token], queryFn: () => api.imports(token) })
+}
+
+export function useImportMutations(token: string) {
+  const queryClient = useQueryClient()
+  const refresh = async (result: { applied: boolean }) => {
+    if (result.applied) await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['schedule'] }),
+      queryClient.invalidateQueries({ queryKey: ['groups'] }),
+      queryClient.invalidateQueries({ queryKey: ['directions'] }),
+      queryClient.invalidateQueries({ queryKey: ['admin-catalog'] }),
+      queryClient.invalidateQueries({ queryKey: ['admin-imports'] }),
+    ])
+  }
+  const weekly = useMutation({
+    mutationFn: ({ files, dryRun, skipErrors }: { files: File[]; dryRun: boolean; skipErrors: boolean }) =>
+      api.importWeekly(token, files, dryRun, skipErrors),
+    onSuccess: refresh,
+  })
+  const semester = useMutation({
+    mutationFn: ({ file, dryRun }: { file: File; dryRun: boolean }) => api.importSemester(token, file, dryRun),
+    onSuccess: refresh,
+  })
+  return { weekly, semester }
+}
+
 /** Предметы, преподаватели и аудитории для подсказок в форме изменения. */
 export function useCatalog(token: string | null): UseQueryResult<Catalog> {
   return useQuery({

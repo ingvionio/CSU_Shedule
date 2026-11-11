@@ -10,6 +10,7 @@ import { AdminLogin } from './pages/admin/AdminLogin'
 import { AdminFeedback } from './pages/admin/AdminFeedback'
 import { AdminSchedule } from './pages/admin/AdminSchedule'
 import { AdminMessages } from './pages/admin/AdminMessages'
+import { AdminImports } from './pages/admin/AdminImports'
 import { AdminHomeworkEditors } from './pages/admin/AdminHomeworkEditors'
 import { useNavigation } from './navigation'
 import { ContextHelp } from './ContextHelp'
@@ -36,6 +37,7 @@ const ADMIN_SUBTITLES = {
   messages: 'Сообщения студентам',
   feedback: 'Обращения студентов',
   homework: 'Редакторы групповой домашки',
+  imports: 'Загрузка расписаний',
 }
 
 /**
@@ -63,8 +65,29 @@ export function App() {
   const [selectedDay, setSelectedDay] = useState(0)
   const [now, setNow] = useState(() => new Date())
   const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  // Меню ☰ закрывается нажатием в любом месте вне меню и клавишей Esc.
+  // Кнопку ☰ не считаем «вне»: её нажатие и так переключает меню.
+  useEffect(() => {
+    if (!menuOpen) return
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Element | null
+      if (menuRef.current?.contains(target) || target?.closest('[aria-label="Меню"]')) return
+      setMenuOpen(false)
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [menuOpen])
   const [adminSession, setAdminSession] = useState<AdminSession | null>(() => readAdminSession())
-  const [adminSection, setAdminSection] = useState<'schedule' | 'messages' | 'feedback' | 'homework'>('schedule')
+  const [adminSection, setAdminSection] = useState<'schedule' | 'messages' | 'feedback' | 'homework' | 'imports'>('schedule')
 
   // Выбор группы на экране настройки.
   const [course, setCourse] = useState(1)
@@ -332,7 +355,7 @@ export function App() {
           onMenu={() => setMenuOpen((open) => !open)}
         />
         {menuOpen && (
-          <div className="role-switch-menu">
+          <div className="role-switch-menu" ref={menuRef}>
             <span>МЕНЮ</span>
             {studentSession && (
               <div style={{ padding: '6px 12px', fontSize: '12px', color: '#666', borderBottom: '1px solid #eee' }}>
@@ -641,6 +664,12 @@ export function App() {
                     Расписание
                   </button>
                   <button
+                    className={adminSection === 'imports' ? 'active' : ''}
+                    onClick={() => setAdminSection('imports')}
+                  >
+                    Загрузка
+                  </button>
+                  <button
                     className={adminSection === 'messages' ? 'active' : ''}
                     onClick={() => setAdminSection('messages')}
                   >
@@ -659,6 +688,10 @@ export function App() {
                     Домашка
                   </button>
                 </div>
+              )}
+
+              {view === 'admin' && adminSession && adminSection === 'imports' && (
+                <AdminImports token={adminSession.token} onUnauthorized={logoutAdmin} />
               )}
 
               {view === 'admin' && adminSession && adminSection === 'messages' && (

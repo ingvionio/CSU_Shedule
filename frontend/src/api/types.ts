@@ -55,6 +55,7 @@ export type Lesson = {
   subject: string
   type: LessonType
   room: string | null
+  online_url: string | null
   teacher: string | null
   /** Подгруппа из Excel; null — пара всей группы. */
   subgroup: number | null
@@ -365,3 +366,57 @@ export type PersonalNote = {
 }
 
 export type NoteInput = { group_id: number; lesson_date: string; lesson_ref: string; body: string; version: number }
+
+export type ImportIssue = { sheet: string; cell: string; text: string; reason: string }
+
+export type WeeklyImportReport = {
+  files: {
+    file_name: string
+    group_name: string | null
+    week_number: number | null
+    start_date: string | null
+    end_date: string | null
+    lessons_count: number
+    errors: ImportIssue[]
+    warnings: ImportIssue[]
+  }[]
+  files_count: number
+  groups_count: number
+  groups_created: number
+  lessons_created: number
+  overrides_deleted: number
+  homework_rebound: number
+  homework_unbound: number
+  errors_count: number
+  warnings_count: number
+  applied: boolean
+  import_id: number | null
+}
+
+export type SemesterImportReport = {
+  file_name: string
+  groups: { name: string; lessons_count: number }[]
+  errors: ImportIssue[]
+  warnings: ImportIssue[]
+  lessons_replaced: number
+  overrides_deleted: number
+  homework_affected: number
+  homework_rebound: number
+  homework_unbound: number
+  groups_created: number
+  lessons_created: number
+  semester_title: string
+  applied: boolean
+  import_id: number | null
+}
+
+export type ImportHistory = {
+  id: number
+  file_name: string
+  uploaded_at: string
+  uploaded_by: string | null
+  status: string
+  lessons_count: number
+  errors_count: number
+  warnings_count: number
+}

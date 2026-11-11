@@ -5,7 +5,7 @@ import { CalendarDays, ChevronLeft, ChevronRight, X } from 'lucide-react'
 
 import { ApiError } from '../../api/client'
 import { useCatalog, useLessonTypes, useOverrideMutations } from '../../api/queries'
-import { WeekGrid, changeDetails, dayLabel } from '../../ScheduleComponents'
+import { WeekGrid, changeDetails, dayLabel, OnlineLessonLink } from '../../ScheduleComponents'
 import type { Day, Group, Lesson, OverrideInput, OverrideKind, TimeSlot, WeekSchedule } from '../../types'
 
 type SelectedCell =
@@ -324,7 +324,8 @@ export function AdminSchedule({
               <div className="admin-selected-lesson">
                 <strong>{selectedLesson.subject}</strong>
                 <span>{dayLabel(selectedCell.day.date)} · {selectedLesson.start_time}–{selectedLesson.end_time}</span>
-                <span>{selectedLesson.type.name}{selectedLesson.teacher ? ` · ${selectedLesson.teacher}` : ''}{selectedLesson.room ? ` · ${selectedLesson.room}` : ''}</span>
+                <span>{selectedLesson.type.name}{selectedLesson.teacher ? ` · ${selectedLesson.teacher}` : ''}{selectedLesson.online_url ? ' · Онлайн' : selectedLesson.room ? ` · ${selectedLesson.room}` : ''}</span>
+                <OnlineLessonLink lesson={selectedLesson} />
                 {changeDetails(selectedLesson).map((line) => <span className="admin-change-line" key={line}>{line}</span>)}
               </div>
             )}

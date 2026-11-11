@@ -1,4 +1,5 @@
 fastapi==0.120.4
+python-multipart==0.0.33
 PyJWT==2.10.1
 uvicorn[standard]==0.38.0
 sqlalchemy==2.0.44

@@ -144,6 +144,16 @@ function LessonTime({ lesson }: { lesson: Lesson }) {
   )
 }
 
+export function OnlineLessonLink({ lesson }: { lesson: Lesson }) {
+  if (!lesson.online_url || !/^https?:\/\//i.test(lesson.online_url)) return null
+  return <a className="button button-secondary lesson-online-link" href={lesson.online_url}
+    target="_blank" rel="noopener noreferrer"
+    onClick={(event) => event.stopPropagation()}
+    onKeyDown={(event) => {
+      if (event.key === 'Enter' || event.key === ' ') event.stopPropagation()
+    }}>Подключиться</a>
+}
+
 export function LessonCard({ lesson, children, onOpen }: { lesson: Lesson; children?: ReactNode; onOpen?: () => void }) {
   const label = STATUS_LABELS[lesson.status]
 
@@ -171,8 +181,10 @@ export function LessonCard({ lesson, children, onOpen }: { lesson: Lesson; child
           <span>{lesson.type.name}</span>
           {lesson.subgroup !== null && <span>{lesson.subgroup} подгруппа</span>}
           {lesson.teacher && <span><UserRound size={13} />{lesson.teacher}</span>}
-          {lesson.room && <span><MapPin size={13} />{lesson.room === 'ФОК' ? 'ФОК' : `Ауд. ${lesson.room}`}</span>}
+          {lesson.online_url ? <span>Онлайн</span>
+            : lesson.room && <span><MapPin size={13} />{lesson.room === 'ФОК' ? 'ФОК' : `Ауд. ${lesson.room}`}</span>}
         </div>
+        <OnlineLessonLink lesson={lesson} />
       </div>
       {children && <div className="lesson-extras">{children}</div>}
     </article>
@@ -296,7 +308,7 @@ export function WeekGrid({
                 key={lesson.id}
                 className={`grid-lesson ${statusClass(lesson.status)} ${onLessonClick ? 'grid-lesson-selectable' : ''}`}
                 title={`${lesson.start_time}–${lesson.end_time} · ${lesson.subject} · ${lesson.type.name}`
-                  + `${lesson.teacher ? ` · ${lesson.teacher}` : ''}${lesson.room ? ` · ауд. ${lesson.room}` : ''}`}
+                  + `${lesson.teacher ? ` · ${lesson.teacher}` : ''}${lesson.online_url ? ' · Онлайн' : lesson.room ? ` · ауд. ${lesson.room}` : ''}`}
                 role={onLessonClick ? 'button' : undefined}
                 tabIndex={onLessonClick ? 0 : undefined}
                 onClick={onLessonClick ? () => onLessonClick(lesson, day) : undefined}
@@ -310,7 +322,7 @@ export function WeekGrid({
                 <b>{lesson.start_time}</b>
                 <span>{lesson.subject}</span>
                 <small>{lesson.type.name}{lesson.subgroup !== null ? ` · ${lesson.subgroup} п/гр` : ''}</small>
-                <small>{[lesson.teacher, lesson.room].filter(Boolean).join(' · ')}</small>
+                <small>{[lesson.teacher, lesson.online_url ? 'Онлайн' : lesson.room].filter(Boolean).join(' · ')}</small>
                 {STATUS_LABELS[lesson.status] && <em>{STATUS_LABELS[lesson.status]}</em>}
                 {lesson.note_key && notedKeys?.has(lesson.note_key) && <small className="private-note-mark">Моя заметка</small>}
                 {homeworkCounts?.has(`${day.date}:${lesson.id}`) && <small className="lesson-homework-badge">Домашка · {homeworkCounts.get(`${day.date}:${lesson.id}`)}</small>}
