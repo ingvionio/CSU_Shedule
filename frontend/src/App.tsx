@@ -716,6 +716,7 @@ export function App() {
                   groups={groups.data ?? []}
                   groupId={adminGroupId}
                   schedule={adminSchedule.data}
+                  weekNumber={weekNumber}
                   days={adminDays}
                   slots={timeSlots.data ?? []}
                   currentMinutes={currentMinutes}

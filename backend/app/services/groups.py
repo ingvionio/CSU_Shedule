@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import re
+from typing import Literal
 
 # Магистерские коды раньше бакалаврских, чтобы потоки не смешивались.
-DIRECTION_PATTERN = re.compile(r"(МПрИ|МИТ|МПИ|МБИ|ПрИ|ПИ|БИ)")
+MASTER_DIRECTIONS = ("МПрИ", "МИТ", "МПИ", "МБИ")
+DIRECTION_PATTERN = re.compile("(" + "|".join((*MASTER_DIRECTIONS, "ПрИ", "ПИ", "БИ")) + ")")
+
+
+def level_of(direction: str | None) -> Literal["bachelor", "master"]:
+    return "master" if direction in MASTER_DIRECTIONS else "bachelor"
 
 
 def direction_of(name: str) -> str | None:

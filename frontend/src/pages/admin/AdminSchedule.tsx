@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { CalendarDays, ChevronLeft, ChevronRight, X } from 'lucide-react'
 
 import { ApiError } from '../../api/client'
-import { useCatalog, useLessonTypes, useOverrideMutations } from '../../api/queries'
+import { useCatalog, useLessonTypes, useOverrideMutations, useStreamSchedule } from '../../api/queries'
 import { WeekGrid, changeDetails, dayLabel, OnlineLessonLink } from '../../ScheduleComponents'
 import type { Day, Group, Lesson, OverrideInput, OverrideKind, TimeSlot, WeekSchedule } from '../../types'
 
@@ -19,6 +19,7 @@ type AdminScheduleProps = {
   groups: Group[]
   groupId: number | null
   schedule?: WeekSchedule
+  weekNumber: number | null
   days: Day[]
   slots: TimeSlot[]
   currentMinutes: number
@@ -56,8 +57,9 @@ const isOverrideLesson = (lesson: Lesson) => lesson.id.startsWith('o-')
 export function AdminSchedule({
   groups,
   groupId,
-  schedule,
-  days,
+  schedule: groupSchedule,
+  weekNumber,
+  days: groupDays,
   slots,
   currentMinutes,
   token,
@@ -94,12 +96,21 @@ export function AdminSchedule({
   const activeGroups = groups.filter((group) => targetGroupIds.includes(group.id))
   const primaryGroup = groups.find((group) => group.id === groupId)
   const streamGroups = primaryGroup
-    ? groups.filter((group) => group.course === primaryGroup.course)
+    ? groups.filter((group) => group.course === primaryGroup.course && group.level === primaryGroup.level)
     : groups
   const targetLabel = targetMode === 'stream'
     ? `Поток · ${activeGroups.length} группы`
     : primaryGroup?.name ?? 'Группа не выбрана'
-  const requestGroupIds = targetMode === 'stream' ? targetGroupIds : groupId === null ? [] : [groupId]
+  const requestGroupIds = groupId === null ? [] : targetMode === 'stream'
+    ? [groupId, ...targetGroupIds.filter((id) => id !== groupId)] : [groupId]
+  const showStream = targetMode === 'stream' && requestGroupIds.length > 1
+  const streamSchedule = useStreamSchedule(token, showStream ? requestGroupIds : [], weekNumber)
+  const schedule = showStream ? streamSchedule.data : groupSchedule
+  const days = showStream ? streamSchedule.data?.days ?? [] : groupDays
+
+  useEffect(() => {
+    if (showStream && streamSchedule.error instanceof ApiError && streamSchedule.error.status === 401) onUnauthorized()
+  }, [showStream, streamSchedule.error, onUnauthorized])
 
   const resetForm = (day: Day, slot?: TimeSlot, lesson?: Lesson) => {
     setDestinationDate(day.date)
@@ -293,6 +304,8 @@ export function AdminSchedule({
       </div>
 
       {notice && <div className="admin-draft-notice"><CalendarDays size={16} />{notice}</div>}
+      {showStream && <p className="stream-schedule-caption">Показаны только пары, общие для всех выбранных групп ({requestGroupIds.length})</p>}
+      {showStream && streamSchedule.isError && <p className="form-error" role="alert">{streamSchedule.error.message}</p>}
       {schedule
         ? <WeekGrid
             days={days}
@@ -301,7 +314,7 @@ export function AdminSchedule({
             onLessonClick={openLesson}
             onEmptySlotClick={openEmptySlot}
           />
-        : <div className="state-note">Загружаем расписание группы…</div>}
+        : !(showStream && streamSchedule.isError) && <div className="state-note">Загружаем расписание {showStream ? 'потока' : 'группы'}…</div>}
 
       {catalog.data && <>
         <datalist id="admin-subjects">{catalog.data.subjects.map((name) => <option key={name} value={name} />)}</datalist>
@@ -327,6 +340,10 @@ export function AdminSchedule({
                 <span>{selectedLesson.type.name}{selectedLesson.teacher ? ` · ${selectedLesson.teacher}` : ''}{selectedLesson.online_url ? ' · Онлайн' : selectedLesson.room ? ` · ${selectedLesson.room}` : ''}</span>
                 <OnlineLessonLink lesson={selectedLesson} />
                 {changeDetails(selectedLesson).map((line) => <span className="admin-change-line" key={line}>{line}</span>)}
+                {selectedLesson.stream_diff?.length ? <div className="stream-diff-details">
+                  <strong>У групп по-разному</strong>
+                  {selectedLesson.stream_diff.map((line) => <span key={line}>{line}</span>)}
+                </div> : null}
               </div>
             )}
 

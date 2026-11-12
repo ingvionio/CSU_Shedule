@@ -177,6 +177,7 @@ export function LessonCard({ lesson, children, onOpen }: { lesson: Lesson; child
           )}
         </div>
         {changeDetails(lesson).map((line) => <p className="change-note" key={line}>{line}</p>)}
+        {lesson.stream_diff?.length ? <span className="stream-diff-mark" title={lesson.stream_diff.join('\n')}>У групп по-разному</span> : null}
         <div className="lesson-meta">
           <span>{lesson.type.name}</span>
           {lesson.subgroup !== null && <span>{lesson.subgroup} подгруппа</span>}
@@ -308,7 +309,8 @@ export function WeekGrid({
                 key={lesson.id}
                 className={`grid-lesson ${statusClass(lesson.status)} ${onLessonClick ? 'grid-lesson-selectable' : ''}`}
                 title={`${lesson.start_time}–${lesson.end_time} · ${lesson.subject} · ${lesson.type.name}`
-                  + `${lesson.teacher ? ` · ${lesson.teacher}` : ''}${lesson.online_url ? ' · Онлайн' : lesson.room ? ` · ауд. ${lesson.room}` : ''}`}
+                  + `${lesson.teacher ? ` · ${lesson.teacher}` : ''}${lesson.online_url ? ' · Онлайн' : lesson.room ? ` · ауд. ${lesson.room}` : ''}`
+                  + (lesson.stream_diff?.length ? `\nУ групп по-разному\n${lesson.stream_diff.join('\n')}` : '')}
                 role={onLessonClick ? 'button' : undefined}
                 tabIndex={onLessonClick ? 0 : undefined}
                 onClick={onLessonClick ? () => onLessonClick(lesson, day) : undefined}
@@ -320,6 +322,7 @@ export function WeekGrid({
                 } : undefined}
               >
                 <b>{lesson.start_time}</b>
+                {lesson.stream_diff?.length ? <strong className="stream-diff-mark">У групп по-разному</strong> : null}
                 <span>{lesson.subject}</span>
                 <small>{lesson.type.name}{lesson.subgroup !== null ? ` · ${lesson.subgroup} п/гр` : ''}</small>
                 <small>{[lesson.teacher, lesson.online_url ? 'Онлайн' : lesson.room].filter(Boolean).join(' · ')}</small>

@@ -26,7 +26,10 @@ export function useGroups(): UseQueryResult<Group[]> {
   return useQuery({
     queryKey: ['groups'],
     queryFn: async () => writeCache('groups', await api.groups()),
-    initialData: () => readCache<Group[]>('groups') ?? undefined,
+    initialData: () => {
+      const cached = readCache<Group[]>('groups')
+      return cached?.every((group) => group.level === 'bachelor' || group.level === 'master') ? cached : undefined
+    },
     staleTime: 60 * 60 * 1000,
   })
 }
@@ -83,6 +86,18 @@ export function useSchedule(groupId: number | null, week: number | null): UseQue
 
 /* --- Админка --- */
 
+export function useStreamSchedule(token: string, groupIds: number[], week: number | null): UseQueryResult<WeekSchedule> {
+  return useQuery({
+    queryKey: ['stream-schedule', groupIds[0], [...groupIds].sort((a, b) => a - b), week, token],
+    queryFn: () => api.streamSchedule(token, groupIds, week!),
+    enabled: groupIds.length > 1 && week !== null,
+    staleTime: 5 * 60 * 1000,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: 'always',
+    refetchInterval: 60 * 1000,
+  })
+}
+
 export function useImports(token: string) {
   return useQuery({ queryKey: ['admin-imports', token], queryFn: () => api.imports(token) })
 }
@@ -92,6 +107,7 @@ export function useImportMutations(token: string) {
   const refresh = async (result: { applied: boolean }) => {
     if (result.applied) await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['schedule'] }),
+      queryClient.invalidateQueries({ queryKey: ['stream-schedule'] }),
       queryClient.invalidateQueries({ queryKey: ['groups'] }),
       queryClient.invalidateQueries({ queryKey: ['directions'] }),
       queryClient.invalidateQueries({ queryKey: ['admin-catalog'] }),
@@ -129,6 +145,7 @@ export function useOverrideMutations(token: string) {
   const queryClient = useQueryClient()
   const refresh = () => Promise.all([
     queryClient.invalidateQueries({ queryKey: ['schedule'] }),
+    queryClient.invalidateQueries({ queryKey: ['stream-schedule'] }),
     queryClient.invalidateQueries({ queryKey: ['admin-catalog'] }),
   ])
 
