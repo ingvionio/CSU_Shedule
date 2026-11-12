@@ -30,6 +30,8 @@ export function useGroups(): UseQueryResult<Group[]> {
       const cached = readCache<Group[]>('groups')
       return cached?.every((group) => group.level === 'bachelor' || group.level === 'master') ? cached : undefined
     },
+    // Кэш с устройства показываем сразу, но считаем устаревшим — сразу же перезапрашиваем.
+    initialDataUpdatedAt: 0,
     staleTime: 60 * 60 * 1000,
   })
 }
@@ -39,6 +41,8 @@ export function useTimeSlots(): UseQueryResult<TimeSlot[]> {
     queryKey: ['time-slots'],
     queryFn: async () => writeCache('time-slots', await api.timeSlots()),
     initialData: () => readCache<TimeSlot[]>('time-slots') ?? undefined,
+    // Кэш с устройства показываем сразу, но считаем устаревшим — сразу же перезапрашиваем.
+    initialDataUpdatedAt: 0,
     staleTime: 24 * 60 * 60 * 1000,
   })
 }
@@ -48,6 +52,8 @@ export function useLessonTypes(): UseQueryResult<LessonType[]> {
     queryKey: ['lesson-types'],
     queryFn: async () => writeCache('lesson-types', await api.lessonTypes()),
     initialData: () => readCache<LessonType[]>('lesson-types') ?? undefined,
+    // Кэш с устройства показываем сразу, но считаем устаревшим — сразу же перезапрашиваем.
+    initialDataUpdatedAt: 0,
     staleTime: 24 * 60 * 60 * 1000,
   })
 }
@@ -57,6 +63,8 @@ export function useCurrentWeek(): UseQueryResult<CurrentWeek> {
     queryKey: ['current-week'],
     queryFn: async () => writeCache('current-week', await api.currentWeek()),
     initialData: () => readCache<CurrentWeek>('current-week') ?? undefined,
+    // Кэш с устройства показываем сразу, но считаем устаревшим — сразу же перезапрашиваем.
+    initialDataUpdatedAt: 0,
     staleTime: 60 * 60 * 1000,
   })
 }
@@ -233,6 +241,8 @@ export function useDirections(): UseQueryResult<Direction[]> {
     queryKey: ['directions'],
     queryFn: async () => writeCache('directions', await api.directions()),
     initialData: () => readCache<Direction[]>('directions') ?? undefined,
+    // Кэш с устройства показываем сразу, но считаем устаревшим — сразу же перезапрашиваем.
+    initialDataUpdatedAt: 0,
     staleTime: 60 * 60 * 1000,
   })
 }
