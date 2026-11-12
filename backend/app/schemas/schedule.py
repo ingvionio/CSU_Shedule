@@ -5,7 +5,9 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
+
+from app.services.groups import level_of
 
 LessonStatusLiteral = Literal["regular", "changed", "cancelled", "moved_out", "moved_in", "added"]
 ParityLiteral = Literal["odd", "even"]
@@ -18,6 +20,11 @@ class GroupOut(BaseModel):
     name: str
     course: int
     direction: str | None = None
+
+    @computed_field
+    @property
+    def level(self) -> Literal["bachelor", "master"]:
+        return level_of(self.direction)
 
 
 class DirectionOut(BaseModel):
@@ -52,6 +59,7 @@ class ChangeOut(BaseModel):
 class LessonOut(BaseModel):
     id: str
     note_key: str | None = None
+    stream_diff: list[str] | None = None
     start_time: str = Field(description="HH:MM, заполнено всегда")
     end_time: str
     slot: int | None = Field(default=None, description="Номер в сетке звонков; null -- пара вне сетки")
