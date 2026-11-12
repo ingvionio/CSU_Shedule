@@ -72,11 +72,13 @@ def test_match_student_group_long_name_alias():
 def test_moodle_mock_login(bare_client, monkeypatch):
     from app.core.db import SessionLocal
 
-    # Создаём группу в тестовой базе
+    # Создаём группу в тестовой базе (с реальным Excel она уже может быть)
+    from sqlalchemy import select
+
     with SessionLocal() as db:
-        group = Group(name="ИТ1-ПрИб-11", course=1, direction="ПрИ")
-        db.add(group)
-        db.commit()
+        if db.scalar(select(Group).where(Group.name == "ИТ1-ПрИб-11")) is None:
+            db.add(Group(name="ИТ1-ПрИб-11", course=1, direction="ПрИ"))
+            db.commit()
 
     # Включаем MOODLE_MOCK
     from app.core.config import get_settings
@@ -84,21 +86,22 @@ def test_moodle_mock_login(bare_client, monkeypatch):
 
     resp = bare_client.post(
         "/api/v1/auth/moodle/login",
-        json={"username": "ivanov_ii", "password": "any-password", "device_key": "device-key-mock-123456789"},
+        # Группа в логине: с реальным Excel групп много, без неё mock берёт первую.
+        json={"username": "ivanov_ит1-приб-11", "password": "any-password", "device_key": "device-key-mock-123456789"},
     )
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert "access_token" in data
-    assert data["profile"]["full_name"] == "Студент Ivanov_ii"
+    assert data["profile"]["full_name"] == "Студент Ivanov_ит1-приб-11"
     assert data["profile"]["group_name"] == "ИТ1-ПрИб-11"
-    assert data["profile"]["moodle_username"] == "ivanov_ii"
+    assert data["profile"]["moodle_username"] == "ivanov_ит1-приб-11"
 
     # Проверяем эндпоинт /me
     token = data["access_token"]
     me_resp = bare_client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
     assert me_resp.status_code == 200
     me_data = me_resp.json()
-    assert me_data["moodle_username"] == "ivanov_ii"
+    assert me_data["moodle_username"] == "ivanov_ит1-приб-11"
 
     # Проверяем forget
     forget_resp = bare_client.post("/api/v1/auth/moodle/forget", headers={"Authorization": f"Bearer {token}"})
