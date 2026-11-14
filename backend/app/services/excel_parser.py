@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
@@ -374,6 +374,14 @@ def _parse_group_block(
                     custom_start=parsed["custom_start"],  # type: ignore[arg-type]
                 )
             )
+            # В записи «425/201» кабинеты относятся к нечётной и чётной неделям.
+            lesson = lessons[-1]
+            rooms = re.fullmatch(r"([\w-]+)\s*/\s*([\w-]+)", lesson.room or "")
+            if rooms:
+                lessons.pop()
+                for parity, room in zip(("odd", "even"), rooms.groups()):
+                    if lesson.parity in ("both", parity):
+                        lessons.append(replace(lesson, parity=parity, room=room))
             if not second_line:
                 errors.append(
                     ParseError(group.sheet, ref, first_line, "нет строки с преподавателем и аудиторией")
