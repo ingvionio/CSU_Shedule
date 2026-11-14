@@ -38,6 +38,7 @@ GET /api/v1/groups/{group_id}/schedule?week={week_number}
 | `subject` | string | предмет |
 | `type` | object | формат: `{ "code": "lecture", "name": "Лекция" }`. Сейчас `lecture` и `practice`, позже добавятся другие — фронт должен показывать `name` и не падать на незнакомом `code` |
 | `room` | string \| null | аудитория |
+| `stream_diff` | string[] | null | только в неделе потока (`/admin/stream-schedule`): чем эта пара отличается у других выбранных групп; в обычной неделе — `null` |
 | `online_url` | string \| null | ссылка на онлайн-занятие (Телемост, BBB и т.п.); у таких пар `room = null`, фронт пишет «Онлайн» и показывает кнопку «Подключиться» (только для `http(s)://`) |
 | `teacher` | string \| null | ФИО преподавателя |
 | `status` | enum | см. ниже |

@@ -1,4 +1,5 @@
 import os
+import unicodedata
 from pathlib import Path
 
 # База для тестов — отдельный SQLite-файл, настройки читаются при импорте app.core.db.
@@ -17,7 +18,20 @@ from app.main import app  # noqa: E402
 from app.models import Base, Semester  # noqa: E402
 from app.services.importer import import_workbook  # noqa: E402
 
-EXCEL = Path(__file__).resolve().parents[2] / "Расписание_ИИТ_1_сем_26_27_уч_г_РАБОЧИЙ_ВАРИАНТ.xlsx"
+EXCEL_NAME = "Расписание_ИИТ_1_сем_26_27_уч_г_РАБОЧИЙ_ВАРИАНТ.xlsx"
+
+
+def _find_excel() -> Path:
+    """Файл из Telegram/macOS приходит с «Й» в разложенной форме (И + кратка) — сравниваем по NFC."""
+    root = Path(__file__).resolve().parents[2]
+    wanted = unicodedata.normalize("NFC", EXCEL_NAME)
+    for candidate in root.glob("*.xlsx"):
+        if unicodedata.normalize("NFC", candidate.name) == wanted:
+            return candidate
+    return root / EXCEL_NAME
+
+
+EXCEL = _find_excel()
 
 
 @pytest.fixture(scope="session")

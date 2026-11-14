@@ -14,6 +14,7 @@ export type Group = {
   id: number
   name: string
   course: number
+  level: 'bachelor' | 'master'
   /** Направление (поток): «ПИ», «ПрИ», «БИ». null — не распознано по названию. */
   direction: string | null
 }
@@ -47,6 +48,7 @@ export type LessonChange = {
 export type Lesson = {
   id: string
   note_key?: string | null
+  stream_diff?: string[] | null
   /** HH:MM, заполнено всегда. */
   start_time: string
   end_time: string

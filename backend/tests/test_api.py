@@ -40,7 +40,10 @@ def test_текущая_неделя(client):
 def test_структура_ответа_недели(client, group_ids):
     data = client.get(f"/api/v1/groups/{group_ids['ПИ 201']}/schedule", params={"week": 7}).json()
 
-    assert data["group"] == {"id": group_ids["ПИ 201"], "name": "ПИ 201", "course": 2}
+    assert data["group"] == {
+        "id": group_ids["ПИ 201"], "name": "ПИ 201", "course": 2,
+        "direction": "ПИ", "level": "bachelor",
+    }
     assert data["week"] == {
         "number": 7,
         "parity": "odd",

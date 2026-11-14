@@ -79,6 +79,7 @@ DATABASE_URL="sqlite+pysqlite:///./schedule.db" python -m app.cli init-db
 | POST | `/api/v1/admin/imports/weekly` | понедельные книги магистров (multipart: `files` — .xlsx/.zip, `dry_run`, `skip_errors`); проверка без записи или загрузка |
 | POST | `/api/v1/admin/imports/semester` | Excel бакалавров на семестр (multipart: `file`, `dry_run`) |
 | GET | `/api/v1/admin/imports?limit=20` | последние загрузки: файл, кто, когда, пар, ошибок |
+| GET | `/api/v1/admin/stream-schedule?group_ids=…&week=N` | неделя потока: только пары, общие для всех выбранных групп (2+, один курс и уровень); `stream_diff` — чем пара отличается у групп |
 
 Лимиты загрузки: 20 МБ на файл, 50 МБ на запрос. Проверка (`dry_run=true`, по умолчанию) выполняет импорт в транзакции и откатывает её — отчёт ровно такой, как при загрузке. Нужен пакет `python-multipart`.
 | GET | `/api/v1/me/homework?start=&end=` | домашка своей группы |

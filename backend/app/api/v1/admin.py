@@ -10,10 +10,35 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.security import require_admin
 from app.schemas.admin import CatalogOut, OverrideCreatedOut, OverrideDeletedOut, OverrideIn
+from app.schemas.schedule import WeekScheduleOut
 from app.services import overrides as overrides_service
 from app.services import schedule as schedule_service
+from app.services import stream_schedule as stream_service
+from app.services import weeks as weeks_service
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)])
+
+
+@router.get("/stream-schedule", response_model=WeekScheduleOut, summary="Общие пары потока на неделю")
+def stream_schedule(
+    group_ids: list[int] = Query(default=[]),
+    week: int | None = Query(default=None, ge=1),
+    db: Session = Depends(get_db),
+) -> WeekScheduleOut:
+    try:
+        groups = stream_service.load_groups(db, group_ids)
+        semester = schedule_service.active_semester(db)
+        today = datetime.now().date()
+        number = week or weeks_service.current_week_number(semester, today)
+        info, days = stream_service.build_stream_schedule(db, groups, semester, number, today)
+    except stream_service.StreamScheduleError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
+    except schedule_service.ScheduleError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
+    return WeekScheduleOut.model_validate({
+        "group": groups[0], "week": info.__dict__,
+        "generated_at": datetime.now().astimezone(), "days": days,
+    })
 
 
 @router.get("/catalog", response_model=CatalogOut, summary="Предметы, преподаватели, аудитории для подсказок")

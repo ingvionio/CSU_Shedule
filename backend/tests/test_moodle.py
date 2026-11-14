@@ -1,7 +1,109 @@
+from unittest.mock import Mock
+
 import pytest
+
 from app.core.crypto import decrypt_secret, encrypt_secret
 from app.models import Group
 from app.services.moodle import match_student_group
+
+
+def test_mock_prefix_requires_real_login_when_mock_disabled(bare_client, test_groups, monkeypatch):
+    from app.core.config import get_settings
+    from app.services.moodle import MoodleAuthError, MoodleClient
+
+    monkeypatch.setattr(get_settings(), "moodle_mock", False)
+    login = Mock(side_effect=MoodleAuthError())
+    monkeypatch.setattr(MoodleClient, "execute_login", login)
+
+    response = bare_client.post(
+        "/api/v1/auth/moodle/login",
+        json={"username": "mock_intruder", "password": "arbitrary"},
+    )
+
+    assert response.status_code == 401
+    assert "access_token" not in response.json()
+    login.assert_called_once_with("mock_intruder", "arbitrary")
+
+
+@pytest.mark.parametrize("source", ["url", "link", "missing"])
+def test_profile_requires_moodle_id(monkeypatch, source):
+    from app.services.moodle import MoodleClient, MoodleError
+
+    response = Mock()
+    response.url = "https://eu.iit.csu.ru/user/profile.php"
+    response.text = '<div class="card-profile"><h3>Иван Иванов</h3></div>'
+    if source == "url":
+        response.url += "?id=123"
+    elif source == "link":
+        response.text += '<a href="/user/profile.php?id=123">Профиль</a>'
+
+    client = MoodleClient()
+    monkeypatch.setattr(client.session, "get", Mock(return_value=response))
+    if source == "missing":
+        with pytest.raises(MoodleError, match="идентификатор") as error:
+            client.get_profile_info()
+        assert error.value.status_code == 502
+    else:
+        full_name, moodle_id, _, _ = client.get_profile_info()
+        assert full_name == "Иван Иванов"
+        assert moodle_id == "123"
+
+
+def test_login_without_moodle_id_does_not_issue_token(bare_client, monkeypatch):
+    from app.core.config import get_settings
+    from app.services.moodle import MoodleClient
+
+    monkeypatch.setattr(get_settings(), "moodle_mock", False)
+    monkeypatch.setattr(MoodleClient, "execute_login", Mock(return_value=("", "key")))
+    response = Mock(
+        url="https://eu.iit.csu.ru/user/profile.php",
+        text='<div class="card-profile"><h3>Иван Иванов</h3></div>',
+    )
+    monkeypatch.setattr("requests.Session.get", Mock(return_value=response))
+
+    result = bare_client.post(
+        "/api/v1/auth/moodle/login",
+        json={"username": "student_without_id", "password": "password"},
+    )
+
+    assert result.status_code == 502
+    assert "идентификатор" in result.json()["detail"]
+    assert "access_token" not in result.json()
+
+
+@pytest.mark.parametrize("invalid_id", ["", "unknown"])
+def test_invalid_moodle_id_cannot_overwrite_existing_account(invalid_id):
+    from datetime import datetime, timezone
+    from sqlalchemy import create_engine, select
+    from sqlalchemy.orm import Session
+
+    from app.models import Base, User
+    from app.services.moodle import MoodleError, MoodleSessionData, save_or_update_student
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    try:
+        Base.metadata.create_all(engine)
+        with Session(engine) as db:
+            group = Group(name="ПрИ-401", course=4, direction="ПрИ")
+            victim = User(full_name="Первый студент", moodle_id=invalid_id, moodle_username="first", group=group)
+            db.add(victim)
+            db.commit()
+            victim_id = victim.id
+            data = MoodleSessionData(
+                moodle_id=invalid_id, moodle_username="second", full_name="Второй студент",
+                group=group, cookies={}, sesskey="key", expires_at=datetime.now(timezone.utc),
+            )
+
+            with pytest.raises(MoodleError, match="идентификатор"):
+                save_or_update_student(db, data, "password", None, None)
+
+            db.expire_all()
+            stored = db.get(User, victim_id)
+            assert stored.full_name == "Первый студент"
+            assert stored.moodle_username == "first"
+            assert list(db.scalars(select(User.id))) == [victim_id]
+    finally:
+        engine.dispose()
 
 
 def test_crypto_roundtrip():
@@ -72,11 +174,13 @@ def test_match_student_group_long_name_alias():
 def test_moodle_mock_login(bare_client, monkeypatch):
     from app.core.db import SessionLocal
 
-    # Создаём группу в тестовой базе
+    # Создаём группу в тестовой базе (с реальным Excel она уже может быть)
+    from sqlalchemy import select
+
     with SessionLocal() as db:
-        group = Group(name="ИТ1-ПрИб-11", course=1, direction="ПрИ")
-        db.add(group)
-        db.commit()
+        if db.scalar(select(Group).where(Group.name == "ИТ1-ПрИб-11")) is None:
+            db.add(Group(name="ИТ1-ПрИб-11", course=1, direction="ПрИ"))
+            db.commit()
 
     # Включаем MOODLE_MOCK
     from app.core.config import get_settings
@@ -84,21 +188,22 @@ def test_moodle_mock_login(bare_client, monkeypatch):
 
     resp = bare_client.post(
         "/api/v1/auth/moodle/login",
-        json={"username": "ivanov_ii", "password": "any-password", "device_key": "device-key-mock-123456789"},
+        # Группа в логине: с реальным Excel групп много, без неё mock берёт первую.
+        json={"username": "ivanov_ит1-приб-11", "password": "any-password", "device_key": "device-key-mock-123456789"},
     )
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert "access_token" in data
-    assert data["profile"]["full_name"] == "Студент Ivanov_ii"
+    assert data["profile"]["full_name"] == "Студент Ivanov_ит1-приб-11"
     assert data["profile"]["group_name"] == "ИТ1-ПрИб-11"
-    assert data["profile"]["moodle_username"] == "ivanov_ii"
+    assert data["profile"]["moodle_username"] == "ivanov_ит1-приб-11"
 
     # Проверяем эндпоинт /me
     token = data["access_token"]
     me_resp = bare_client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
     assert me_resp.status_code == 200
     me_data = me_resp.json()
-    assert me_data["moodle_username"] == "ivanov_ii"
+    assert me_data["moodle_username"] == "ivanov_ит1-приб-11"
 
     # Проверяем forget
     forget_resp = bare_client.post("/api/v1/auth/moodle/forget", headers={"Authorization": f"Bearer {token}"})

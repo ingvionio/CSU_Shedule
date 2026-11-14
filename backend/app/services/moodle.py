@@ -159,8 +159,8 @@ class MoodleClient:
             return logout_match.group(1)
         return ""
 
-    def get_profile_info(self) -> tuple[str, str, str]:
-        """Запрашивает /user/profile.php и извлекает (full_name, moodle_id, sesskey)."""
+    def get_profile_info(self) -> tuple[str, str, str, str]:
+        """Извлекает ФИО, moodle_id, sesskey и HTML из /user/profile.php."""
         url = f"{self.base_url}/user/profile.php"
         try:
             resp = self.session.get(url, timeout=self.timeout)
@@ -218,7 +218,10 @@ class MoodleClient:
         if not full_name:
             raise MoodleError("Не удалось определить ФИО пользователя из профиля Moodle", 502)
 
-        return full_name, moodle_id or "unknown", sesskey, html
+        if not moodle_id:
+            raise MoodleError("Не удалось определить идентификатор пользователя Moodle", 502)
+
+        return full_name, moodle_id, sesskey, html
 
     def call_ajax(self, sesskey: str, method_name: str, args: dict[str, Any]) -> Any:
         """Вызывает внутренний AJAX-метод Moodle (/lib/ajax/service.php)."""
@@ -502,7 +505,7 @@ def authenticate_and_detect_student(
     groups = list(db.scalars(select(Group)).all())
 
     # Dev / Mock режим для локальной разработки
-    if settings.moodle_mock or username.startswith("mock_"):
+    if settings.moodle_mock:
         logger.info("Вход студента через Moodle MOCK режим: %s", username)
         if not groups:
             raise MoodleGroupError("В базе нет ни одной группы. Загрузите расписание перед входом.")
@@ -596,6 +599,10 @@ def save_or_update_student(
     Создает или обновляет запись пользователя User по данным Moodle.
     Шифрует пароль, сохраняет сессию и привязывает академическую группу.
     """
+    # Общий ID-заглушка не должен связывать разные учетные записи.
+    if not moodle_data.moodle_id or moodle_data.moodle_id == "unknown":
+        raise MoodleError("Не удалось определить идентификатор пользователя Moodle", 502)
+
     now = datetime.now(timezone.utc)
     encrypted_pass = encrypt_secret(plain_password)
     cookie_str = json.dumps(moodle_data.cookies)

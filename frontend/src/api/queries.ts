@@ -26,7 +26,12 @@ export function useGroups(): UseQueryResult<Group[]> {
   return useQuery({
     queryKey: ['groups'],
     queryFn: async () => writeCache('groups', await api.groups()),
-    initialData: () => readCache<Group[]>('groups') ?? undefined,
+    initialData: () => {
+      const cached = readCache<Group[]>('groups')
+      return cached?.every((group) => group.level === 'bachelor' || group.level === 'master') ? cached : undefined
+    },
+    // Кэш с устройства показываем сразу, но считаем устаревшим — сразу же перезапрашиваем.
+    initialDataUpdatedAt: 0,
     staleTime: 60 * 60 * 1000,
   })
 }
@@ -36,6 +41,8 @@ export function useTimeSlots(): UseQueryResult<TimeSlot[]> {
     queryKey: ['time-slots'],
     queryFn: async () => writeCache('time-slots', await api.timeSlots()),
     initialData: () => readCache<TimeSlot[]>('time-slots') ?? undefined,
+    // Кэш с устройства показываем сразу, но считаем устаревшим — сразу же перезапрашиваем.
+    initialDataUpdatedAt: 0,
     staleTime: 24 * 60 * 60 * 1000,
   })
 }
@@ -45,6 +52,8 @@ export function useLessonTypes(): UseQueryResult<LessonType[]> {
     queryKey: ['lesson-types'],
     queryFn: async () => writeCache('lesson-types', await api.lessonTypes()),
     initialData: () => readCache<LessonType[]>('lesson-types') ?? undefined,
+    // Кэш с устройства показываем сразу, но считаем устаревшим — сразу же перезапрашиваем.
+    initialDataUpdatedAt: 0,
     staleTime: 24 * 60 * 60 * 1000,
   })
 }
@@ -54,6 +63,7 @@ export function useCurrentWeek(): UseQueryResult<CurrentWeek> {
     queryKey: ['current-week'],
     queryFn: async () => writeCache('current-week', await api.currentWeek()),
     initialData: () => readCache<CurrentWeek>('current-week') ?? undefined,
+    // Кэш с устройства показываем сразу, но считаем устаревшим — сразу же перезапрашиваем.
     initialDataUpdatedAt: 0,
     refetchOnMount: 'always',
     staleTime: 60 * 60 * 1000,
@@ -85,6 +95,18 @@ export function useSchedule(groupId: number | null, week: number | null): UseQue
 
 /* --- Админка --- */
 
+export function useStreamSchedule(token: string, groupIds: number[], week: number | null): UseQueryResult<WeekSchedule> {
+  return useQuery({
+    queryKey: ['stream-schedule', groupIds[0], [...groupIds].sort((a, b) => a - b), week, token],
+    queryFn: () => api.streamSchedule(token, groupIds, week!),
+    enabled: groupIds.length > 1 && week !== null,
+    staleTime: 5 * 60 * 1000,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: 'always',
+    refetchInterval: 60 * 1000,
+  })
+}
+
 export function useImports(token: string) {
   return useQuery({ queryKey: ['admin-imports', token], queryFn: () => api.imports(token) })
 }
@@ -94,6 +116,7 @@ export function useImportMutations(token: string) {
   const refresh = async (result: { applied: boolean }) => {
     if (result.applied) await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['schedule'] }),
+      queryClient.invalidateQueries({ queryKey: ['stream-schedule'] }),
       queryClient.invalidateQueries({ queryKey: ['groups'] }),
       queryClient.invalidateQueries({ queryKey: ['directions'] }),
       queryClient.invalidateQueries({ queryKey: ['admin-catalog'] }),
@@ -131,6 +154,7 @@ export function useOverrideMutations(token: string) {
   const queryClient = useQueryClient()
   const refresh = () => Promise.all([
     queryClient.invalidateQueries({ queryKey: ['schedule'] }),
+    queryClient.invalidateQueries({ queryKey: ['stream-schedule'] }),
     queryClient.invalidateQueries({ queryKey: ['admin-catalog'] }),
   ])
 
@@ -218,6 +242,8 @@ export function useDirections(): UseQueryResult<Direction[]> {
     queryKey: ['directions'],
     queryFn: async () => writeCache('directions', await api.directions()),
     initialData: () => readCache<Direction[]>('directions') ?? undefined,
+    // Кэш с устройства показываем сразу, но считаем устаревшим — сразу же перезапрашиваем.
+    initialDataUpdatedAt: 0,
     staleTime: 60 * 60 * 1000,
   })
 }

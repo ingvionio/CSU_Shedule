@@ -108,6 +108,11 @@ export const api = {
   currentWeek: () => request<CurrentWeek>('/weeks/current'),
   schedule: (groupId: number, week?: number) =>
     request<WeekSchedule>(`/groups/${groupId}/schedule${week ? `?week=${week}` : ''}`),
+  streamSchedule: (token: string, groupIds: number[], week: number) => {
+    const params = new URLSearchParams(groupIds.map((id) => ['group_ids', String(id)]))
+    params.set('week', String(week))
+    return request<WeekSchedule>(`/admin/stream-schedule?${params}`, { token })
+  },
 
   adminLogin: (login: string, password: string) =>
     request<TokenResponse>('/auth/admin/login', { method: 'POST', body: { login, password } }),
