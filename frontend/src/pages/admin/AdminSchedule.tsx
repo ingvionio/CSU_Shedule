@@ -274,7 +274,7 @@ export function AdminSchedule({
       <div className="admin-week-heading">
         <div>
           <span className="eyebrow">{schedule ? `${dayLabel(schedule.week.start_date)} — ${dayLabel(schedule.week.end_date)}` : 'Расписание недели'}</span>
-          <strong>Неделя {schedule?.week.number ?? '—'} · {targetLabel}</strong>
+          <strong>Неделя {schedule?.week.number ?? '—'}{schedule && ` · ${schedule.week.parity === 'odd' ? 'нечётная' : 'чётная'}`} · {targetLabel}</strong>
         </div>
         <div>
           <button

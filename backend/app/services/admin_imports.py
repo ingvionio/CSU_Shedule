@@ -17,6 +17,7 @@ from app.schemas.imports import (
 )
 from app.services.excel_parser import parse_workbook
 from app.services.importer import import_workbook
+from app.services.weeks import parity_of_week
 from app.services.schedule import ScheduleError, active_semester
 from app.services.weekly_importer import import_weekly
 
@@ -77,6 +78,9 @@ def upload_weekly(
         result = WeeklyImportOut(
             files=[WeeklyFileOut(
                 file_name=file.file_name, group_name=file.parsed.group_name, week_number=file.parsed.week_number,
+                parity=(parity_of_week(semester, file.parsed.week_number)
+                        if file.parsed.week_number is not None
+                        and 1 <= file.parsed.week_number <= semester.total_weeks else None),
                 start_date=file.parsed.start_date, end_date=file.parsed.end_date,
                 lessons_count=len(file.parsed.lessons), errors=[asdict(issue) for issue in file.parsed.errors],
                 warnings=[asdict(issue) for issue in file.parsed.warnings],

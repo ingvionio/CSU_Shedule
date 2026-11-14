@@ -242,3 +242,23 @@ def test_import_history(upload_client, upload_headers, weekly_db):
     assert response.status_code == 200
     assert [item["file_name"] for item in response.json()] == ["2.xlsx", "1.xlsx"]
     assert response.json()[0]["errors_count"] == 1 and response.json()[0]["warnings_count"] == 2
+
+
+@pytest.mark.parametrize("first_parity,expected", [("odd", "even"), ("even", "odd")])
+def test_weekly_report_parity_uses_semester_calendar(
+    upload_client, upload_headers, weekly_db, weekly_book, first_parity, expected,
+):
+    with weekly_db() as db:
+        semester = db.scalar(select(Semester))
+        semester.first_week_parity = first_parity
+        db.commit()
+    path = weekly_book()
+    response = weekly_upload(upload_client, upload_headers, [(path.name, path.read_bytes())])
+    assert response.status_code == 200
+    assert response.json()["files"][0]["parity"] == expected
+
+
+def test_weekly_report_unknown_week_has_no_parity(upload_client, upload_headers):
+    response = weekly_upload(upload_client, upload_headers, [("broken.xlsx", b"broken")])
+    assert response.status_code == 200
+    assert response.json()["files"][0]["parity"] is None

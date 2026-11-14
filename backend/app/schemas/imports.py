@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -14,6 +15,7 @@ class WeeklyFileOut(BaseModel):
     file_name: str
     group_name: str | None
     week_number: int | None
+    parity: Literal["odd", "even"] | None = None
     start_date: date | None
     end_date: date | None
     lessons_count: int

@@ -374,6 +374,7 @@ export type WeeklyImportReport = {
     file_name: string
     group_name: string | null
     week_number: number | null
+    parity: WeekParity | null
     start_date: string | null
     end_date: string | null
     lessons_count: number
