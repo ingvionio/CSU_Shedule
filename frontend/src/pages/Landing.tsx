@@ -1,4 +1,5 @@
-import { ArrowRight, BellRing, CalendarDays, Check, ClipboardList, MapPin, MessageCircleQuestion, MessagesSquare, NotebookPen } from 'lucide-react'
+import { ArrowRight, BellRing, CalendarDays, Check, ClipboardList, Download, MapPin, MessageCircleQuestion, MessagesSquare, NotebookPen } from 'lucide-react'
+import { ANDROID_APK_URL } from './AndroidDownload'
 
 const features = [
   [CalendarDays, 'Расписание', 'Пары на день и неделю, преподаватели, аудитории и изменения.'],
@@ -19,7 +20,12 @@ export function Landing({ authenticated, onStart, onHelp, onAdmin }: {
         <div className="landing-institute"><img src="/icons/iit-logo.png" alt="Институт информационных технологий" /></div><span className="landing-kicker"><span /> СТУДЕНТАМ ИИТ ЧЕЛГУ</span>
         <h1 id="landing-title">Всё для учёбы<br />в <em>одном месте.</em></h1>
         <p>Расписание ИИТ — ваш учебный день под рукой. От первой пары до последней заметки: меньше поисков, больше времени на главное.</p>
-        <button className="button button-primary landing-cta" onClick={onStart}>{authenticated ? 'Открыть приложение' : 'Войти через Moodle'}<ArrowRight size={18} /></button>
+        <div className="landing-actions">
+          <button className="button button-primary landing-cta" onClick={onStart}>{authenticated ? 'Открыть приложение' : 'Войти через Moodle'}<ArrowRight size={18} /></button>
+          <a className="button button-secondary landing-cta" href={ANDROID_APK_URL} download>
+            Скачать для Android <Download size={18} aria-hidden="true" />
+          </a>
+        </div>
         <span className="landing-caption"><Check size={14} /> Группа определится автоматически через Moodle</span>
       </div>
       <div className="landing-preview" aria-label="Иллюстрация возможностей приложения, не актуальное расписание">

@@ -29,7 +29,9 @@ cleanupOutdatedCaches()
 // Любой адрес приложения открывается из закэшированного index.html; API не трогаем.
 // В dev прекэш пустой, index.html в нём нет — офлайн там и не нужен.
 if (import.meta.env.PROD) {
-  registerRoute(new NavigationRoute(createHandlerBoundToURL('index.html'), { denylist: [/^\/api\//] }))
+  registerRoute(new NavigationRoute(createHandlerBoundToURL('index.html'), {
+    denylist: [/^\/api\//, /^\/download(?:\/|$)/, /^\/downloads\//],
+  }))
 }
 
 self.addEventListener('push', (event) => {

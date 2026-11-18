@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import vm from 'node:vm'
 import assert from 'node:assert/strict'
@@ -6,15 +6,19 @@ import { test } from 'node:test'
 import ts from 'typescript'
 
 const require = createRequire(import.meta.url)
-function load(relative) {
+function load(relative, reactOverrides = {}) {
   const file = new URL(relative, import.meta.url)
   const code = ts.transpileModule(readFileSync(file, 'utf8'), { compilerOptions: {
     module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX,
   } }).outputText
   const exports = {}
   vm.runInNewContext(code, { exports, require: name => {
-    if (name === 'react') return { ...require(name), useState: value => [value, () => {}] }
-    if (name.startsWith('.')) return load(new URL(`${name}.ts`, file).href)
+    if (name === 'react') return { ...require(name), useState: value => [value, () => {}], ...reactOverrides }
+    if (name.startsWith('.')) {
+      const tsFile = new URL(`${name}.ts`, file)
+      const dependency = existsSync(tsFile) ? tsFile : new URL(`${name}.tsx`, file)
+      return load(dependency.href, reactOverrides)
+    }
     return require(name)
   } })
   return exports
@@ -59,4 +63,28 @@ test('help actions navigate directly and hide the login action after sign-in', (
       assert.equal(destination, target)
     }
   }
+})
+
+test('the landing and download page link to the public APK, with one automatic attempt', () => {
+  const effects = []
+  const { AndroidDownload } = load('../src/pages/AndroidDownload.tsx', {
+    useEffect: effect => effects.push(effect),
+    useRef: current => ({ current }),
+  })
+  const { Landing } = load('../src/pages/Landing.tsx')
+  const findDownload = tree => nodes(tree).find(node => node.type === 'a' && node.props.download)
+  const landing = Landing({ authenticated: false, onStart() {}, onHelp() {}, onAdmin() {} })
+  const landingLink = findDownload(landing)
+  const pageLink = findDownload(AndroidDownload())
+
+  assert.equal(landingLink.props.href, '/downloads/raspisanie-iit.apk')
+  assert.equal(pageLink.props.href, landingLink.props.href)
+  assert.ok(existsSync(new URL(`../public${pageLink.props.href}`, import.meta.url)))
+
+  let attempts = 0
+  pageLink.ref.current = { click: () => { attempts += 1 } }
+  assert.equal(effects.length, 1)
+  effects[0]()
+  effects[0]()
+  assert.equal(attempts, 1)
 })

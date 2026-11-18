@@ -600,9 +600,17 @@ button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visibl
 .landing-copy h1 { margin-top: 20px; font-size: clamp(36px, 4.5vw, 58px); font-weight: 750; line-height: 1.07; letter-spacing: -.055em; }
 .landing-copy h1 em { color: var(--primary); font-style: normal; }
 .landing-copy > p { max-width: 420px; margin-top: 22px; color: var(--muted); font-size: 15px; line-height: 1.75; }
-.landing-cta { display: inline-flex; justify-content: space-between; gap: 24px; margin-top: 28px; padding: 14px 21px; font-size: 14px; box-shadow: 0 6px 16px #007eae20; }
+.landing-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
+.landing-cta { justify-content: space-between; gap: 12px; padding: 14px 18px; font-size: 14px; text-decoration: none; }
+.landing-cta.button-primary { box-shadow: 0 6px 16px #007eae20; }
 .landing-caption { display: flex; align-items: center; gap: 5px; margin-top: 13px; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .landing-caption svg { flex-shrink: 0; color: var(--primary); }
+.android-download { display: flex; width: min(460px, calc(100% - 32px)); flex-direction: column; align-items: center; gap: 16px; margin: clamp(32px, 12vh, 100px) auto; padding: clamp(20px, 6vw, 36px); border: 1px solid var(--line); border-radius: 20px; background: var(--surface); text-align: center; }
+.android-download img { padding: 7px; border-radius: 12px; background: #152d42; object-fit: contain; }
+.android-download h1 { font-size: 24px; }
+.android-download p { color: var(--muted); line-height: 1.5; }
+.android-download a { text-decoration: none; }
+.android-download > a:last-child { color: var(--primary); }
 .landing-preview { position: relative; min-width: 0; padding: 24px; border: 1px solid #d3e3ed; border-radius: 25px; background: linear-gradient(145deg, #fff, #f1f8fc); box-shadow: 10px 18px 0 #e1edf3, 0 28px 45px #204e6410; transform: rotate(2deg); }
 .preview-top { display: flex; align-items: center; gap: 10px; padding-bottom: 18px; border-bottom: 1px solid var(--line); font-size: 13px; font-weight: 700; }
 .preview-top img { width: 30px; height: 38px; object-fit: contain; }
