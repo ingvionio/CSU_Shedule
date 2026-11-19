@@ -66,7 +66,7 @@ push-уведомление, у важных нажимает «Ознакомл
   иконки, прекэш статики, показ уведомлений, по нажатию открывается
   `/?message=ID`.
 * Ключи VAPID: `docker compose exec backend python -m app.cli generate-vapid`
-  → `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` в `.env` в корне.
+  → `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` в `backend/.env`.
   Фронт берёт публичный ключ из `GET /push/config`, своя переменная не нужна.
 * **Нужен HTTPS** (на `localhost` работает и без него).
 * **iPhone/iPad**: push только у приложения, добавленного на экран «Домой»
