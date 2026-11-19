@@ -19,17 +19,33 @@ from app.models import Message, PushDelivery, PushSubscription
 GONE_STATUSES = {404, 410}
 
 
-def is_configured() -> bool:
+def web_configured() -> bool:
     settings = get_settings()
     return bool(settings.vapid_public_key and settings.vapid_private_key)
 
 
-def subscribe(db: Session, user_id: int, endpoint: str, p256dh: str, auth: str, user_agent: str | None) -> PushSubscription:
-    """Сохраняет подписку. Тот же браузер под другим профилем — подписка переходит к нему."""
+def fcm_configured() -> bool:
+    return bool(get_settings().fcm_credentials_file)
+
+
+def is_configured() -> bool:
+    return web_configured() or fcm_configured()
+
+
+def configured_platforms() -> list[str]:
+    return (["web"] if web_configured() else []) + (["fcm"] if fcm_configured() else [])
+
+
+def subscribe(
+    db: Session, user_id: int, endpoint: str, p256dh: str | None, auth: str | None,
+    user_agent: str | None, platform: str = "web",
+) -> PushSubscription:
+    """Сохраняет подписку. То же устройство под другим профилем — подписка переходит к нему."""
     subscription = db.scalar(select(PushSubscription).where(PushSubscription.endpoint == endpoint))
     if subscription is None:
         subscription = PushSubscription(endpoint=endpoint)
         db.add(subscription)
+    subscription.platform = platform
     subscription.user_id = user_id
     subscription.p256dh = p256dh
     subscription.auth = auth
@@ -61,8 +77,9 @@ def payload(message: Message, reminder: bool) -> dict:
 @dataclass(frozen=True)
 class SubscriptionData:
     endpoint: str
-    p256dh: str
-    auth: str
+    p256dh: str | None
+    auth: str | None
+    platform: str = "web"
 
 
 @dataclass(frozen=True)
@@ -73,7 +90,9 @@ class SendResult:
 
 def enqueue(db: Session, message_id: int, user_ids: list[int], kind: str, now: datetime) -> int:
     """Записывает доставки без commit: их сохраняет транзакция сообщения."""
-    subscriptions = db.scalars(select(PushSubscription).where(PushSubscription.user_id.in_(user_ids))).all()
+    subscriptions = db.scalars(select(PushSubscription).where(
+        PushSubscription.user_id.in_(user_ids), PushSubscription.platform.in_(configured_platforms()),
+    )).all()
     db.add_all(
         PushDelivery(
             message_id=message_id, subscription_id=item.id, user_id=item.user_id,

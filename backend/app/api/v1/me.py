@@ -41,7 +41,10 @@ def subscribe_push(
     user: User = Depends(current_student),
     db: Session = Depends(get_db),
 ) -> PushSubscriptionOut:
-    subscription = push_service.subscribe(db, user.id, data.endpoint, data.keys.p256dh, data.keys.auth, user_agent)
+    if data.platform == "fcm":
+        subscription = push_service.subscribe(db, user.id, data.token, None, None, user_agent, platform="fcm")
+    else:
+        subscription = push_service.subscribe(db, user.id, data.endpoint, data.keys.p256dh, data.keys.auth, user_agent)
     return PushSubscriptionOut(id=subscription.id)
 
 

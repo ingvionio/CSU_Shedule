@@ -7,6 +7,8 @@ x-backend-env: &x-backend-env
   SMTP_USER: ${SMTP_USER:-}
   SMTP_PASSWORD: ${SMTP_PASSWORD:-}
   PUBLIC_APP_URL: ${PUBLIC_APP_URL:-}
+  # Ключ из backend/secrets/ доступен обоим сервисам в /app/secrets/.
+  FCM_CREDENTIALS_FILE: ${FCM_CREDENTIALS_FILE:-}
   VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
   VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
   VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@example.com}

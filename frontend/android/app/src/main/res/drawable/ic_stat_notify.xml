@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Белый силуэт существующего iit-shield.png, без фоновой плашки. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="55"
+    android:viewportHeight="55">
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M9,3h36v1h-36zM9,4h36v1h-36zM9,5h36v1h-36zM9,6h36v1h-36zM9,7h36v1h-36zM9,8h36v1h-36zM9,9h36v1h-36zM9,10h36v1h-36zM9,11h36v1h-36zM9,12h36v1h-36zM9,13h36v1h-36zM9,14h36v1h-36zM9,15h36v1h-36zM9,16h36v1h-36zM9,17h36v1h-36zM9,18h36v1h-36zM9,19h34v1h-34zM9,20h30v1h-30zM18,21h18v1h-18zM22,22h12v1h-12zM9,23h2v1h-2zM26,23h6v1h-6zM43,23h2v1h-2zM9,24h7v1h-7zM29,24h2v1h-2zM38,24h7v1h-7zM9,25h12v1h-12zM34,25h11v1h-11zM9,26h16v1h-16zM29,26h16v1h-16zM9,27h36v1h-36zM9,28h36v1h-36zM9,29h36v1h-36zM9,30h36v1h-36zM9,31h36v1h-36zM9,32h36v1h-36zM9,33h36v1h-36zM9,34h36v1h-36zM9,35h36v1h-36zM9,36h36v1h-36zM9,37h36v1h-36zM9,38h36v1h-36zM9,39h36v1h-36zM9,40h36v1h-36zM9,41h36v1h-36zM9,42h36v1h-36zM9,43h36v1h-36zM9,44h36v1h-36zM9,45h36v1h-36zM9,46h36v1h-36zM9,47h36v1h-36zM9,48h36v1h-36zM11,49h32v1h-32zM16,50h23v1h-23zM20,51h14v1h-14zM25,52h4v1h-4z" />
+</vector>

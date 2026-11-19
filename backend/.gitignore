@@ -17,6 +17,7 @@ dist/
 wheels/
 
 # Environment and secrets
+secrets/
 .env
 .env.*
 !.env.example

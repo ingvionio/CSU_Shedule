@@ -59,11 +59,11 @@ def student(client, group_id, device):
 
 
 def test_конфиг_без_ключей(bare_client):
-    assert bare_client.get(f"{API}/push/config").json() == {"public_key": None}
+    assert bare_client.get(f"{API}/push/config").json() == {"public_key": None, "fcm": False}
 
 
 def test_конфиг_с_ключами(bare_client, vapid):
-    assert bare_client.get(f"{API}/push/config").json() == {"public_key": "public-key"}
+    assert bare_client.get(f"{API}/push/config").json() == {"public_key": "public-key", "fcm": False}
 
 
 def test_подписка_и_отписка(bare_client, test_groups):

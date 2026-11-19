@@ -51,9 +51,12 @@ def list_directions(db: Session = Depends(get_db)) -> list[DirectionOut]:
     return [DirectionOut(code=code, courses=items) for code, items in courses.items()]
 
 
-@router.get("/push/config", response_model=PushConfigOut, summary="Публичный VAPID-ключ для подписки на push")
+@router.get("/push/config", response_model=PushConfigOut, summary="Настройки Web Push и FCM для подписки")
 def push_config() -> PushConfigOut:
-    return PushConfigOut(public_key=get_settings().vapid_public_key if push_service.is_configured() else None)
+    return PushConfigOut(
+        public_key=get_settings().vapid_public_key if push_service.web_configured() else None,
+        fcm=push_service.fcm_configured(),
+    )
 
 
 @router.get("/time-slots", response_model=list[TimeSlotOut], summary="Сетка звонков")

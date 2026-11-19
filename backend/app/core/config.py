@@ -46,11 +46,14 @@ class Settings(BaseSettings):
     remind_cooldown_hours: int = 6
 
     # Web Push (VAPID). Ключи: python -m app.cli generate-vapid. Пустые — push
-    # выключен, сообщения всё равно видны в приложении.
+    # Web Push выключен, сообщения всё равно видны в приложении.
     vapid_public_key: str = ""
     vapid_private_key: str = ""
     # Контакт для push-сервисов: mailto:... или https://...
     vapid_subject: str = "mailto:admin@example.com"
+
+    # Путь к JSON сервисного аккаунта Firebase; пусто — FCM выключен.
+    fcm_credentials_file: str = ""
 
     # Worker: опрос пустой очереди, размер пачки и параллельность push.
     worker_poll_seconds: float = Field(default=2, gt=0)

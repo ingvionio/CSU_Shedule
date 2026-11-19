@@ -13,6 +13,8 @@ import { AdminMessages } from './pages/admin/AdminMessages'
 import { AdminImports } from './pages/admin/AdminImports'
 import { AdminHomeworkEditors } from './pages/admin/AdminHomeworkEditors'
 import { useNavigation } from './navigation'
+import { Capacitor } from '@capacitor/core'
+import { startNativePush } from './api/native-push'
 import { ContextHelp } from './ContextHelp'
 import { Landing } from './pages/Landing'
 import { Help } from './pages/Help'
@@ -24,6 +26,8 @@ import { GroupHomeworkPanel } from './pages/homework/GroupHomeworkPanel'
 import { PersonalNoteDialog } from './pages/homework/PersonalNoteDialog'
 import type { GroupHomework, PersonalNote } from './api/types'
 import type { AdminSession, Day, Group, Lesson, StudentSession, View } from './types'
+
+type InboxPushEvent = { type: 'messages-updated' } | { type: 'open-message'; url: string }
 
 const WEEKDAY_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
 const COURSES = [1, 2, 3, 4]
@@ -160,20 +164,29 @@ export function App() {
     return () => window.removeEventListener('popstate', restoreMessage)
   }, [])
 
-  // Service worker сообщает о новом push и о нажатии на уведомление в уже открытом приложении.
+  // Web Push и Android передают события в одну навигацию сообщений.
   useEffect(() => {
-    if (!('serviceWorker' in navigator)) return
-    const handle = (event: MessageEvent) => {
-      if (event.data?.type === 'messages-updated') queryClient.invalidateQueries({ queryKey: ['inbox'] })
-      if (event.data?.type === 'open-message') {
+    const handle = (event: MessageEvent<InboxPushEvent> | CustomEvent<InboxPushEvent>) => {
+      const data = 'detail' in event ? event.detail : event.data
+      if (data?.type === 'messages-updated') queryClient.invalidateQueries({ queryKey: ['inbox'] })
+      if (data?.type === 'open-message') {
         queryClient.invalidateQueries({ queryKey: ['inbox'] })
-        setRequestedMessage(messageFromUrl(event.data.url))
+        setRequestedMessage(messageFromUrl(data.url))
         setView('messages')
       }
     }
-    navigator.serviceWorker.addEventListener('message', handle)
-    return () => navigator.serviceWorker.removeEventListener('message', handle)
-  }, [queryClient])
+    const nativeHandle = (event: Event) => handle(event as CustomEvent<InboxPushEvent>)
+    navigator.serviceWorker?.addEventListener('message', handle)
+    window.addEventListener('student-push', nativeHandle)
+    return () => {
+      navigator.serviceWorker?.removeEventListener('message', handle)
+      window.removeEventListener('student-push', nativeHandle)
+    }
+  }, [queryClient, setView])
+
+  useEffect(() => {
+    if (Capacitor.isNativePlatform()) startNativePush()
+  }, [studentSession?.profile.id])
 
   // По умолчанию открывается текущая неделя.
   useEffect(() => {

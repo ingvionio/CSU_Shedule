@@ -2,11 +2,15 @@
  * Подписка этого устройства на push-уведомления о сообщениях.
  *
  * Push — только сигнал «пришло новое»: сообщения всё равно лежат в инбоксе.
- * Работает по HTTPS (или на localhost). На iPhone — только если приложение
+ * Android APK использует FCM. Web Push работает по HTTPS (или localhost).
+ * На iPhone — только если приложение
  * добавлено на экран «Домой» (iOS 16.4+).
  */
 
 import { useCallback, useEffect, useState } from 'react'
+import { Capacitor } from '@capacitor/core'
+
+import { detectNativePush, disableNativePush, enableNativePush, nativePushError } from './native-push'
 
 import { api } from './client'
 import { readCache, removeCache, writeCache } from './cache'
@@ -18,7 +22,7 @@ export type PushState =
   | 'unsupported'
   /** iPhone/iPad в Safari: сначала «На экран Домой». */
   | 'ios-install'
-  /** На сервере не заданы VAPID-ключи. */
+  /** На сервере не настроена платформа уведомлений. */
   | 'unconfigured'
   | 'denied'
   | 'off'
@@ -44,6 +48,7 @@ async function currentSubscription(): Promise<PushSubscription | null> {
 }
 
 async function detect(): Promise<PushState> {
+  if (Capacitor.isNativePlatform()) return detectNativePush()
   if (!supported()) return isIos() && !isStandalone() ? 'ios-install' : 'unsupported'
   const { public_key } = await api.pushConfig()
   if (!public_key) return 'unconfigured'
@@ -53,6 +58,7 @@ async function detect(): Promise<PushState> {
 }
 
 async function enable(): Promise<void> {
+  if (Capacitor.isNativePlatform()) return enableNativePush()
   const { public_key } = await api.pushConfig()
   if (!public_key) throw new Error('Уведомления на сервере пока не настроены')
   if (await Notification.requestPermission() !== 'granted') throw new Error('Уведомления запрещены в настройках браузера')
@@ -69,6 +75,7 @@ async function enable(): Promise<void> {
 }
 
 async function disable(): Promise<void> {
+  if (Capacitor.isNativePlatform()) return disableNativePush()
   const id = readCache<number>(SUBSCRIPTION_KEY)
   if (id !== null) await asStudent((token) => api.unsubscribePush(token, id)).catch(() => undefined)
   removeCache(SUBSCRIPTION_KEY)
@@ -78,13 +85,21 @@ async function disable(): Promise<void> {
 export function usePush() {
   const [state, setState] = useState<PushState>('checking')
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
+  const [error, setError] = useState(nativePushError)
 
   const refresh = useCallback(() => {
     detect().then(setState).catch(() => setState('unsupported'))
   }, [])
 
   useEffect(refresh, [refresh])
+  useEffect(() => {
+    const handle = (event: Event) => {
+      setError((event as CustomEvent<string>).detail)
+      refresh()
+    }
+    window.addEventListener('push-error', handle)
+    return () => window.removeEventListener('push-error', handle)
+  }, [refresh])
 
   const run = (action: () => Promise<void>) => async () => {
     setBusy(true)

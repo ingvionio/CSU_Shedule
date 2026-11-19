@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.models import EmailOutbox, Message, PushDelivery, PushSubscription
-from app.services import mailer, push
+from app.services import fcm, mailer, push
 
 logger = logging.getLogger(__name__)
 LEASE = timedelta(minutes=5)
@@ -116,25 +116,26 @@ def process_push(db: Session, now: datetime, sender: PushSender | None = None) -
     jobs: dict[int, tuple[push.SubscriptionData, dict]] = {}
     outcomes: dict[int, tuple[str, str | None]] = {}
     subscriptions: dict[int, int | None] = {}
-    configured = push.is_configured()
+    configured = push.configured_platforms()
     for item, message, subscription in rows:
         subscriptions[item.id] = item.subscription_id
         if message is None or message.deleted_at is not None or subscription is None:
             outcomes[item.id] = ("skipped", None)
-        elif not configured:
+        elif subscription.platform not in configured:
             outcomes[item.id] = ("skipped", "push не настроен")
         elif now - _aware(item.created_at) > PUSH_TTL:
             outcomes[item.id] = ("failed", "истёк срок")
         else:
             jobs[item.id] = (
-                push.SubscriptionData(subscription.endpoint, subscription.p256dh, subscription.auth),
+                push.SubscriptionData(subscription.endpoint, subscription.p256dh, subscription.auth, subscription.platform),
                 push.payload(message, item.kind == "reminder"),
             )
     # Потокам передаются только снимки данных; транзакция чтения уже закрыта.
     db.commit()
     with ThreadPoolExecutor(max_workers=settings.push_concurrency) as executor:
         futures = {
-            item_id: executor.submit(sender or push.send_one, *job) for item_id, job in jobs.items()
+            item_id: executor.submit(sender or (fcm.send_one if job[0].platform == "fcm" else push.send_one), *job)
+            for item_id, job in jobs.items()
         }
         for item in claimed:
             if item.id not in subscriptions:

@@ -7,17 +7,21 @@ from app.models.base import Base
 
 
 class PushSubscription(Base):
-    """Подписка браузера на Web Push. У студента их может быть несколько (телефон, ноутбук)."""
+    """Подписка устройства на Web Push или FCM. У студента их может быть несколько (телефон, ноутбук)."""
 
     __tablename__ = "push_subscriptions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     endpoint: Mapped[str] = mapped_column(Text, unique=True)
-    p256dh: Mapped[str] = mapped_column(String(200))
-    auth: Mapped[str] = mapped_column(String(100))
+    # endpoint — адрес Web Push или регистрационный токен FCM.
+    platform: Mapped[str] = mapped_column(String(8), default="web", server_default="web")
+    p256dh: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    auth: Mapped[str | None] = mapped_column(String(100), nullable=True)
     user_agent: Mapped[str | None] = mapped_column(String(300), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (CheckConstraint("platform IN ('web','fcm')", name="ck_push_subscriptions_platform"),)
 
 
 class PushDelivery(Base):
