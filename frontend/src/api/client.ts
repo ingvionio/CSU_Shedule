@@ -5,6 +5,7 @@ import type {
   AdminFeedback,
   AdminMessage,
   AdminMessageDetail,
+  RemindOut,
   Catalog,
   CurrentWeek,
   Direction,
@@ -169,7 +170,7 @@ export const api = {
   sendMessage: (token: string, body: MessageInput) =>
     request<AdminMessage>('/admin/messages', { method: 'POST', body, token }),
   remindMessage: (token: string, id: number) =>
-    request<{ reminded: number }>(`/admin/messages/${id}/remind`, { method: 'POST', token }),
+    request<RemindOut>(`/admin/messages/${id}/remind`, { method: 'POST', token }),
   deleteMessage: (token: string, id: number) => request<void>(`/admin/messages/${id}`, { method: 'DELETE', token }),
 
   homework: (token: string, start?: string, end?: string) => {

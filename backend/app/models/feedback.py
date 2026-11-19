@@ -111,10 +111,12 @@ class EmailOutbox(Base):
     body: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(16), default=EmailStatus.PENDING.value, index=True)
     attempts: Mapped[int] = mapped_column(SmallInteger, default=0)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         CheckConstraint("status IN ('pending','sent','failed','skipped')", name="ck_email_outbox_status"),
+        Index("ix_email_outbox_status_next_attempt_at", "status", "next_attempt_at"),
     )

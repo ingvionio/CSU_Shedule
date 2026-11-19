@@ -8,3 +8,6 @@ __pycache__/
 .mypy_cache/
 tests/*.db
 .env
+
+# Временные папки тестов
+tests/.worker-tmp/

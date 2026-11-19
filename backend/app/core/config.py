@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -50,6 +51,12 @@ class Settings(BaseSettings):
     vapid_private_key: str = ""
     # Контакт для push-сервисов: mailto:... или https://...
     vapid_subject: str = "mailto:admin@example.com"
+
+    # Worker: опрос пустой очереди, размер пачки и параллельность push.
+    worker_poll_seconds: float = Field(default=2, gt=0)
+    push_batch_size: int = Field(default=100, gt=0)
+    push_concurrency: int = Field(default=8, gt=0)
+    push_max_attempts: int = Field(default=5, ge=1)
 
     # Интеграция с Moodle ИИТ ЧелГУ (eu.iit.csu.ru)
     moodle_base_url: str = "https://eu.iit.csu.ru"

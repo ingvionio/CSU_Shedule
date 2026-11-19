@@ -1,3 +1,22 @@
+x-backend-env: &x-backend-env
+  DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/csu_schedule
+  CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+  ADMIN_LOGIN: ${ADMIN_LOGIN:-admin}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+  JWT_SECRET: ${JWT_SECRET:-change-me}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  PUBLIC_APP_URL: ${PUBLIC_APP_URL:-}
+  VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+  VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+  VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@example.com}
+  STUDENT_JWT_TTL_HOURS: ${STUDENT_JWT_TTL_HOURS:-1440}
+  REMIND_COOLDOWN_HOURS: ${REMIND_COOLDOWN_HOURS:-6}
+  WORKER_POLL_SECONDS: ${WORKER_POLL_SECONDS:-2}
+  PUSH_BATCH_SIZE: ${PUSH_BATCH_SIZE:-100}
+  PUSH_CONCURRENCY: ${PUSH_CONCURRENCY:-8}
+  PUSH_MAX_ATTEMPTS: ${PUSH_MAX_ATTEMPTS:-5}
+
 services:
   postgres:
     image: postgres:16
@@ -17,25 +36,23 @@ services:
 
   backend:
     build: ./backend
-    environment:
-      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/csu_schedule
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
-      ADMIN_LOGIN: ${ADMIN_LOGIN:-admin}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
-      JWT_SECRET: ${JWT_SECRET:-change-me}
-      SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-}
-      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
-      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
-      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@example.com}
-      STUDENT_JWT_TTL_HOURS: ${STUDENT_JWT_TTL_HOURS:-1440}
-      REMIND_COOLDOWN_HOURS: ${REMIND_COOLDOWN_HOURS:-6}
+    environment: *x-backend-env
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
+    volumes:
+      - ./backend:/app
+
+  worker:
+    build: ./backend
+    command: python -m app.cli worker
+    environment: *x-backend-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
     volumes:
       - ./backend:/app
 

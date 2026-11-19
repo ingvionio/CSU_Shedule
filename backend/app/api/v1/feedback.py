@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
@@ -25,7 +25,6 @@ from app.schemas.feedback import (
 )
 from app.services import feedback as feedback_service
 from app.services.feedback import KIND_TITLES
-from app.services.mailer import deliver_by_ids
 
 router = APIRouter()
 admin_router = APIRouter(prefix="/admin/feedback", dependencies=[Depends(require_admin)])
@@ -114,18 +113,16 @@ def _raise(error: feedback_service.FeedbackError) -> HTTPException:
 def create_feedback(
     data: FeedbackIn,
     request: Request,
-    background: BackgroundTasks,
     token: str | None = TokenHeader,
     db: Session = Depends(get_db),
 ) -> FeedbackCreatedOut:
     try:
-        message, outbox_ids = feedback_service.create_message(
+        message, _ = feedback_service.create_message(
             db, data, token, request.client.host if request.client else None
         )
     except feedback_service.FeedbackError as error:
         raise _raise(error) from error
 
-    background.add_task(deliver_by_ids, outbox_ids)
     return FeedbackCreatedOut(id=message.id, kind_title=KIND_TITLES[message.kind])
 
 
@@ -174,14 +171,12 @@ def update_recipient(recipient_id: int, data: RecipientUpdateIn, db: Session = D
 def update_feedback(
     message_id: int,
     data: FeedbackUpdateIn,
-    background: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> AdminFeedbackOut:
     try:
-        message, outbox_ids = feedback_service.update_message(db, message_id, data)
+        message, _ = feedback_service.update_message(db, message_id, data)
     except feedback_service.FeedbackError as error:
         raise _raise(error) from error
-    background.add_task(deliver_by_ids, outbox_ids)
     return _admin_out(message)
 
 
@@ -194,13 +189,11 @@ def update_feedback(
 def reply_feedback(
     message_id: int,
     data: ReplyIn,
-    background: BackgroundTasks,
     db: Session = Depends(get_db),
     admin: str = Depends(require_admin),
 ) -> AdminFeedbackOut:
     try:
-        message, outbox_ids = feedback_service.add_reply(db, message_id, data.text, admin)
+        message, _ = feedback_service.add_reply(db, message_id, data.text, admin)
     except feedback_service.FeedbackError as error:
         raise _raise(error) from error
-    background.add_task(deliver_by_ids, outbox_ids)
     return _admin_out(message)

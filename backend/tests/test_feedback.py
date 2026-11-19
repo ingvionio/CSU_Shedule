@@ -5,19 +5,21 @@
 """
 
 import pytest
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import delete, select, update
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.models import EmailOutbox, EmailStatus, FeedbackMessage, FeedbackRecipient
 from app.services import mailer
+from app.services.worker import process_email
 
 TOKEN = "device-token-0123456789"
 OTHER_TOKEN = "device-token-9876543210"
 
 
 @pytest.fixture(autouse=True)
-def _clean_feedback(filled_db):
+def _clean_feedback(db_schema):
     yield
     with SessionLocal() as session:
         session.execute(delete(EmailOutbox))
@@ -27,9 +29,24 @@ def _clean_feedback(filled_db):
 
 
 @pytest.fixture
-def sent(monkeypatch) -> list[EmailOutbox]:
+def client(bare_client):
+    return bare_client
+
+
+@pytest.fixture
+def admin_headers(bare_admin_headers):
+    return bare_admin_headers
+
+
+@pytest.fixture
+def group_ids(test_groups):
+    return {"ПИ 201": test_groups["ТЕСТ ПИ 991"]}
+
+
+@pytest.fixture
+def sent(monkeypatch) -> list[mailer.EmailData]:
     """Почта «настроена», письма складываются в список вместо SMTP."""
-    letters: list[EmailOutbox] = []
+    letters: list[mailer.EmailData] = []
     monkeypatch.setattr(get_settings(), "smtp_user", "bot@yandex.ru")
     monkeypatch.setattr(mailer, "_send", lambda item: letters.append(item))
     return letters
@@ -181,6 +198,11 @@ def test_письмо_адресату_с_reply_to(client, admin_headers, sent):
     set_emails(client, admin_headers, "methodist", ["Method@csu.ru", "method@csu.ru", "helper@csu.ru"])
     send(client, author_name="Иван Петров", contact="ivan@mail.ru")
 
+    assert sent == []
+    assert {item.status for item in outbox()} == {EmailStatus.PENDING.value}
+    with SessionLocal() as session:
+        process_email(session, datetime.now(timezone.utc))
+
     assert sorted(item.to_address for item in sent) == ["helper@csu.ru", "method@csu.ru"]
     assert all(item.reply_to == "ivan@mail.ru" for item in sent)
     assert "Иван Петров" in sent[0].body and "Когда будет пересдача?" in sent[0].body
@@ -220,6 +242,9 @@ def test_перенос_из_нераспределённых_отправляе
     response = client.patch(f"/api/v1/admin/feedback/{message_id}", json={"kind": "deanery"}, headers=admin_headers)
     assert response.json()["kind"] == "deanery"
     assert response.json()["recipient_title"] == "Деканат"
+    assert sent == []
+    with SessionLocal() as session:
+        process_email(session, datetime.now(timezone.utc))
     assert [item.to_address for item in sent] == ["dekanat@csu.ru"]
 
 
@@ -227,6 +252,9 @@ def test_ответ_уходит_студенту_на_почту(client, admin_
     message_id = send(client, contact="student@mail.ru").json()["id"]
     client.post(f"/api/v1/admin/feedback/{message_id}/replies", json={"text": "В четверг."}, headers=admin_headers)
 
+    assert sent == []
+    with SessionLocal() as session:
+        process_email(session, datetime.now(timezone.utc))
     assert [item.to_address for item in sent] == ["student@mail.ru"]
     assert "В четверг." in sent[0].body
 
@@ -246,6 +274,10 @@ def test_сбой_smtp_не_теряет_обращение(client, admin_header
     set_emails(client, admin_headers, "dev", ["me@yandex.ru"])
 
     assert send(client, kind="dev").status_code == 201
+    now = datetime.now(timezone.utc)
+    assert outbox()[0].attempts == 0
+    with SessionLocal() as session:
+        process_email(session, now)
     [item] = outbox()
     assert item.status == EmailStatus.PENDING.value
     assert item.attempts == 1 and "smtp недоступен" in item.last_error
@@ -254,6 +286,8 @@ def test_сбой_smtp_не_теряет_обращение(client, admin_header
     letters = []
     monkeypatch.setattr(mailer, "_send", lambda letter: letters.append(letter))
     with SessionLocal() as session:
+        session.execute(update(EmailOutbox).values(next_attempt_at=now - timedelta(seconds=1)))
+        session.commit()
         assert mailer.deliver_pending(session) == 1
     assert outbox()[0].status == EmailStatus.SENT.value
 
@@ -262,4 +296,7 @@ def test_без_настроек_почты_письмо_пропускаетс�
     monkeypatch.setattr(get_settings(), "smtp_user", "")
     set_emails(client, admin_headers, "dev", ["me@yandex.ru"])
     send(client, kind="dev")
+    assert outbox()[0].status == EmailStatus.PENDING.value
+    with SessionLocal() as session:
+        process_email(session, datetime.now(timezone.utc))
     assert outbox()[0].status == EmailStatus.SKIPPED.value

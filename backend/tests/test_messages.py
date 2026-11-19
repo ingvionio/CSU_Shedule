@@ -3,11 +3,11 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import delete, update
+from sqlalchemy import delete, event, select, update
 
-from app.core.db import SessionLocal
-from app.models import Message, MessageRecipient
-from app.services import push as push_service
+from app.core.db import SessionLocal, engine
+from app.models import Message, MessageRecipient, PushDelivery, PushSubscription
+from app.core.config import get_settings
 
 API = "/api/v1"
 
@@ -16,18 +16,27 @@ API = "/api/v1"
 def _clean_messages(db_schema):
     yield
     with SessionLocal() as session:
+        session.execute(delete(PushDelivery))
+        session.execute(delete(PushSubscription))
         session.execute(delete(MessageRecipient))
         session.execute(delete(Message))
         session.commit()
 
 
 @pytest.fixture
-def pushed(monkeypatch) -> list[tuple[int, list[int], bool]]:
-    calls: list[tuple[int, list[int], bool]] = []
-    monkeypatch.setattr(
-        push_service, "notify_message", lambda message_id, user_ids, reminder: calls.append((message_id, user_ids, reminder))
-    )
-    return calls
+def pushed(monkeypatch, students):
+    """По одному устройству у студента; проверяем реальные строки очереди."""
+    monkeypatch.setattr(get_settings(), "vapid_public_key", "public")
+    monkeypatch.setattr(get_settings(), "vapid_private_key", "private")
+    with SessionLocal() as session:
+        session.add_all(PushSubscription(user_id=user_id, endpoint=f"https://push.example.com/{user_id}", p256dh="key", auth="auth")
+                        for user_id, _ in students.values())
+        session.commit()
+
+
+def deliveries(message_id, kind="message"):
+    with SessionLocal() as session:
+        return list(session.scalars(select(PushDelivery).where(PushDelivery.message_id == message_id, PushDelivery.kind == kind)).all())
 
 
 def student(client, group_id, name, device):
@@ -102,8 +111,8 @@ def test_пустая_адресация_отклоняется(bare_client, bar
 def test_push_уходит_всем_кроме_неважных(bare_client, bare_admin_headers, students, pushed):
     normal = send(bare_client, bare_admin_headers, {"type": "course", "courses": [2]})
     low = send(bare_client, bare_admin_headers, {"type": "course", "courses": [2]}, importance="low")
-    assert pushed[0] == (normal["id"], [students["vera"][0]], False)
-    assert pushed[1] == (low["id"], [], False)
+    assert [item.user_id for item in deliveries(normal["id"])] == [students["vera"][0]]
+    assert deliveries(low["id"]) == []
 
 
 def test_прочтение_обычного_сообщения(bare_client, bare_admin_headers, students, pushed):
@@ -159,11 +168,14 @@ def test_напоминание_непрочитавшим_и_пауза(bare_cl
     # Аня подтвердила, Борис только открыл — у важного ему тоже напоминаем.
     bare_client.post(f"{API}/me/messages/{message['id']}/acknowledge", headers=anya)
     bare_client.get(f"{API}/me/messages/{message['id']}", headers=boris)
+    with SessionLocal() as session:
+        session.add(PushSubscription(user_id=boris_id, endpoint="https://push.example.com/boris-tablet", p256dh="key", auth="auth"))
+        session.commit()
 
     response = bare_client.post(f"{API}/admin/messages/{message['id']}/remind", headers=bare_admin_headers)
-    assert response.json() == {"reminded": 2}
-    message_id, user_ids, reminder = pushed[-1]
-    assert (message_id, set(user_ids), reminder) == (message["id"], {boris_id, gleb_id}, True)
+    assert response.json() == {"reminded": 2, "devices": 3, "push_configured": True}
+    user_ids = [item.user_id for item in deliveries(message["id"], "reminder")]
+    assert set(user_ids) == {boris_id, gleb_id}
     assert anya_id not in user_ids
 
     again = bare_client.post(f"{API}/admin/messages/{message['id']}/remind", headers=bare_admin_headers)
@@ -186,6 +198,7 @@ def test_у_неважных_нет_напоминаний(bare_client, bare_adm
 def test_досылка_новичку_и_при_смене_группы(bare_client, bare_admin_headers, test_groups, students, pushed):
     to_group = send(bare_client, bare_admin_headers, {"type": "group", "group_ids": [test_groups["ТЕСТ ПИ 992"]]})
     send(bare_client, bare_admin_headers, {"type": "students", "user_ids": [students["anya"][0]]}, title="Личное")
+    original_deliveries = len(deliveries(to_group["id"]))
 
     # Новый студент группы получает групповое сообщение, но не чужое личное.
     _, dima = student(bare_client, test_groups["ТЕСТ ПИ 992"], "Дима Добров", "device-dima-0000000")
@@ -196,6 +209,7 @@ def test_досылка_новичку_и_при_смене_группы(bare_cl
     _, gleb = student(bare_client, test_groups["ТЕСТ ПИ 992"], "Глеб Громов", "device-gleb-0000000")
     ids = [item["id"] for item in bare_client.get(f"{API}/me/messages", headers=gleb).json()["messages"]]
     assert to_group["id"] in ids
+    assert len(deliveries(to_group["id"])) == original_deliveries
 
 
 def test_удаление_скрывает_сообщение(bare_client, bare_admin_headers, students, pushed):
@@ -217,3 +231,54 @@ def test_список_студентов_для_адресации(bare_client, 
 
     student_token = students["anya"][1]
     assert bare_client.get(f"{API}/admin/users", headers=student_token).status_code == 403
+
+
+def test_статистика_push_в_списке_и_деталях(bare_client, bare_admin_headers, students, pushed):
+    message = send(bare_client, bare_admin_headers, {"type": "all"})
+    assert message["push"] == {"configured": True, "total": 4, "sent": 0, "pending": 4, "failed": 0}
+    bare_client.post(f"{API}/admin/messages/{message['id']}/remind", headers=bare_admin_headers)
+    with SessionLocal() as session:
+        items = session.scalars(select(PushDelivery).order_by(PushDelivery.id)).all()
+        for item, status in zip(items, ["sent", "failed", "gone", "skipped"]):
+            item.status = status
+        session.commit()
+    expected = {"configured": True, "total": 8, "sent": 1, "pending": 4, "failed": 3}
+    listed = bare_client.get(f"{API}/admin/messages", headers=bare_admin_headers).json()
+    detail = bare_client.get(f"{API}/admin/messages/{message['id']}", headers=bare_admin_headers).json()
+    assert listed[0]["push"] == detail["push"] == expected
+
+
+def test_напоминание_без_push_честно_возвращает_устройства(bare_client, bare_admin_headers, students, monkeypatch):
+    monkeypatch.setattr(get_settings(), "vapid_private_key", "")
+    message = send(bare_client, bare_admin_headers, {"type": "all"})
+    assert message["push"] == {"configured": False, "total": 0, "sent": 0, "pending": 0, "failed": 0}
+    response = bare_client.post(f"{API}/admin/messages/{message['id']}/remind", headers=bare_admin_headers)
+    assert response.json() == {"reminded": 4, "devices": 0, "push_configured": False}
+    assert deliveries(message["id"], "reminder") == []
+
+
+def test_обычное_напоминание_только_непрочитавшим(bare_client, bare_admin_headers, students, pushed):
+    message = send(bare_client, bare_admin_headers, {"type": "all"})
+    bare_client.get(f"{API}/me/messages/{message['id']}", headers=students["anya"][1])
+    response = bare_client.post(f"{API}/admin/messages/{message['id']}/remind", headers=bare_admin_headers)
+    assert response.json() == {"reminded": 3, "devices": 3, "push_configured": True}
+    assert students["anya"][0] not in [item.user_id for item in deliveries(message["id"], "reminder")]
+
+
+def test_список_без_n_plus_one(bare_client, bare_admin_headers, test_groups, students, pushed):
+    for _ in range(4):
+        send(bare_client, bare_admin_headers, {"type": "group", "group_ids": [test_groups["ТЕСТ ПИ 991"]]})
+    queries = []
+
+    def capture(connection, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith("SELECT"):
+            queries.append(statement)
+
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        response = bare_client.get(f"{API}/admin/messages", headers=bare_admin_headers)
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+    assert response.status_code == 200 and len(response.json()) == 4
+    assert len(queries) == 3
+    assert sum("FROM push_deliveries" in query for query in queries) == 1

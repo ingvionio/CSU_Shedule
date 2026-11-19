@@ -10,23 +10,37 @@ from __future__ import annotations
 import logging
 import smtplib
 import ssl
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from email.utils import formataddr
+from typing import Literal
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.db import SessionLocal
-from app.models import EmailOutbox, EmailStatus
+from app.models import EmailOutbox
 
 logger = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 5
 
 
-def _send(item: EmailOutbox) -> None:
+@dataclass(frozen=True)
+class EmailData:
+    to_address: str
+    reply_to: str | None
+    subject: str
+    body: str
+
+
+@dataclass(frozen=True)
+class SendResult:
+    status: Literal["sent", "retry", "skipped"]
+    error: str | None = None
+
+
+def _send(item: EmailData) -> None:
     settings = get_settings()
     message = EmailMessage()
     message["From"] = formataddr((settings.smtp_from_name, settings.smtp_user))
@@ -42,41 +56,37 @@ def _send(item: EmailOutbox) -> None:
         smtp.send_message(message)
 
 
-def deliver(db: Session, items: list[EmailOutbox]) -> None:
-    """Отправляет письма и записывает результат. Ошибки не пробрасывает."""
+def send_one(item: EmailData) -> SendResult:
+    """Отправляет одно письмо без обращения к БД."""
     settings = get_settings()
+    if not settings.smtp_user:
+        logger.info("Почта не настроена, письмо не отправлено: %s → %s\n%s", item.subject, item.to_address, item.body)
+        return SendResult("skipped", "SMTP не настроен")
+    try:
+        _send(item)
+    except (OSError, smtplib.SMTPException) as error:
+        return SendResult("retry", str(error)[:500])
+    return SendResult("sent")
+
+
+def deliver(db: Session, items: list[EmailOutbox]) -> None:
+    """Ручная отправка через тот же захват и обработчик, что у worker'а."""
+    from app.services.worker import process_email
+
+    ids = [item.id for item in items]
+    now = datetime.now(timezone.utc)
+    while process_email(db, now, ids=ids).processed:
+        pass
     for item in items:
-        if not settings.smtp_user:
-            logger.info("Почта не настроена, письмо не отправлено: %s → %s\n%s", item.subject, item.to_address, item.body)
-            item.status = EmailStatus.SKIPPED.value
-            continue
-
-        item.attempts += 1
-        try:
-            _send(item)
-        except (OSError, smtplib.SMTPException) as error:
-            logger.warning("Письмо %s на %s не отправлено: %s", item.id, item.to_address, error)
-            item.last_error = str(error)[:500]
-            if item.attempts >= MAX_ATTEMPTS:
-                item.status = EmailStatus.FAILED.value
-        else:
-            item.status = EmailStatus.SENT.value
-            item.sent_at = datetime.now(timezone.utc)
-            item.last_error = None
-    db.commit()
-
-
-def deliver_by_ids(ids: list[int]) -> None:
-    """Фоновая задача после ответа API: своя сессия, потому что запросная уже закрыта."""
-    if not ids:
-        return
-    with SessionLocal() as db:
-        items = list(db.scalars(select(EmailOutbox).where(EmailOutbox.id.in_(ids))).all())
-        deliver(db, items)
+        db.refresh(item)
 
 
 def deliver_pending(db: Session) -> int:
     """Досылает все письма, которые ещё не ушли. Возвращает число попыток."""
-    items = list(db.scalars(select(EmailOutbox).where(EmailOutbox.status == EmailStatus.PENDING.value)).all())
-    deliver(db, items)
-    return len(items)
+    from app.services.worker import process_email
+
+    now = datetime.now(timezone.utc)
+    attempts = 0
+    while (result := process_email(db, now)).processed:
+        attempts += result.processed
+    return attempts

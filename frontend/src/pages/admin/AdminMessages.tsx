@@ -51,9 +51,11 @@ export function AdminMessages({ token, groups, onUnauthorized }: AdminMessagesPr
           onCancel={() => setComposing(false)}
           onSent={(message) => {
             setComposing(false)
-            setNotice(message.recipients_total
+            const sentNotice = message.recipients_total
               ? `Сообщение отправлено: получателей ${message.recipients_total}.`
-              : 'Сообщение сохранено, но из адресатов пока никто не заполнил профиль. Его увидят, когда зарегистрируются.')
+              : 'Сообщение сохранено, но из адресатов пока никто не заполнил профиль. Его увидят, когда зарегистрируются.'
+            setNotice(message.push.configured ? sentNotice
+              : `${sentNotice} Push не настроен: студенты увидят сообщение только в приложении.`)
           }}
           onUnauthorized={onUnauthorized}
         />
@@ -350,7 +352,11 @@ function MessageDetailDialog({
   const sendReminder = () => run(async () => {
     const result = await remind.mutateAsync(id)
     await detail.refetch()
-    setNotice(result.reminded ? `Напоминание отправлено: ${result.reminded}.` : 'Напоминать некому — все прочитали.')
+    setNotice(!result.reminded
+      ? 'Напоминать некому — все прочитали.'
+      : !result.push_configured
+        ? `Напоминание записано (${result.reminded}), но push не настроен — студенты увидят его только в приложении.`
+        : `Напоминание: ${result.reminded} студентам, на ${result.devices} устройств.`)
   })
 
   return (
@@ -369,6 +375,15 @@ function MessageDetailDialog({
             {message.last_reminded_at && <><dt>Напоминание</dt><dd>{messageDate(message.last_reminded_at)}</dd></>}
           </dl>
           <ReadProgress item={message} />
+
+          <p className="push-status" role="status">
+            {message.push.configured
+              ? <>Push: доставлено {message.push.sent} из {message.push.total} устройств
+                {message.push.pending > 0 && <> · ожидают {message.push.pending}</>}
+                {message.push.failed > 0 && <> · не доставлено {message.push.failed}</>}
+              </>
+              : 'Push не настроен: студенты увидят сообщение только в приложении'}
+          </p>
 
           {message.importance !== 'low' && (
             <button className="button button-secondary full" disabled={remind.isPending || pendingCount === 0} onClick={sendReminder}>

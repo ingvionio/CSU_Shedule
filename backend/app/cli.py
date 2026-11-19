@@ -7,11 +7,13 @@
     python -m app.cli send-emails                  # дослать неотправленные письма
     python -m app.cli send-emails --test <email>   # проверить настройки почты
     python -m app.cli generate-vapid               # ключи для push-уведомлений
+    python -m app.cli worker                       # доставка push и почты из очереди
 """
 
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from datetime import date, timedelta
 
@@ -204,6 +206,7 @@ def main() -> None:
     mail.add_argument("--test", metavar="EMAIL", help="отправить проверочное письмо")
 
     sub.add_parser("generate-vapid", help="сгенерировать ключи для push-уведомлений")
+    sub.add_parser("worker", help="доставлять push и почту из очереди")
 
     args = parser.parse_args()
 
@@ -221,6 +224,11 @@ def main() -> None:
         send_emails(args.test)
     elif args.command == "generate-vapid":
         generate_vapid()
+    elif args.command == "worker":
+        from app.services.worker import run
+
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+        run()
 
 
 if __name__ == "__main__":

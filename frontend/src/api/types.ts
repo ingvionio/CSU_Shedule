@@ -294,7 +294,10 @@ export type AdminMessage = {
   recipients_total: number
   read_count: number
   acknowledged_count: number
+  push: { configured: boolean; total: number; sent: number; pending: number; failed: number }
 }
+
+export type RemindOut = { reminded: number; devices: number; push_configured: boolean }
 
 export type RecipientStatus = {
   user_id: number

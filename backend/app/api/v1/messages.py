@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.v1.me import current_student
@@ -15,6 +15,7 @@ from app.schemas.message import (
     InboxMessageOut,
     InboxOut,
     MessageIn,
+    PushStatsOut,
     RecipientStatusOut,
     RemindOut,
     StudentOut,
@@ -45,20 +46,24 @@ def _inbox_out(recipient: MessageRecipient) -> InboxMessageOut:
     )
 
 
-def _admin_out(db: Session, message: Message, total: int, read: int, acknowledged: int) -> AdminMessageOut:
+def _admin_out(
+    db: Session, message: Message, total: int, read: int, acknowledged: int, push: PushStatsOut | None = None,
+    target_title: str | None = None,
+) -> AdminMessageOut:
     return AdminMessageOut(
         id=message.id,
         title=message.title,
         body=message.body,
         importance=message.importance,
         target=message.target,
-        target_title=messages_service.target_title(db, message.target),
+        target_title=target_title if target_title is not None else messages_service.target_title(db, message.target),
         created_by=message.created_by,
         sent_at=message.sent_at,
         last_reminded_at=message.last_reminded_at,
         recipients_total=total,
         read_count=read,
         acknowledged_count=acknowledged,
+        push=push if push is not None else messages_service.push_stats(db, [message.id])[message.id],
     )
 
 
@@ -116,22 +121,23 @@ def students(
 )
 def create_message(
     data: MessageIn,
-    background: BackgroundTasks,
     db: Session = Depends(get_db),
     admin: str = Depends(require_admin),
 ) -> AdminMessageOut:
     try:
-        message, push_to = messages_service.create_message(db, data, admin)
+        message = messages_service.create_message(db, data, admin)
     except messages_service.MessageError as error:
         raise _raise(error) from error
 
-    background.add_task(push_service.notify_message, message.id, push_to, reminder=False)
     return _admin_out(db, message, *messages_service.counts(db, message.id))
 
 
 @admin_router.get("/messages", response_model=list[AdminMessageOut], summary="Сообщения и прогресс прочтения")
 def admin_messages(db: Session = Depends(get_db)) -> list[AdminMessageOut]:
-    return [_admin_out(db, *row) for row in messages_service.admin_list(db)]
+    rows = messages_service.admin_list(db)
+    stats = messages_service.push_stats(db, [row[0].id for row in rows])
+    titles = messages_service.target_titles(db, [row[0] for row in rows])
+    return [_admin_out(db, *row, push=stats[row[0].id], target_title=titles[row[0].id]) for row in rows]
 
 
 @admin_router.get("/messages/{message_id}", response_model=AdminMessageDetailOut, summary="Получатели и их статусы")
@@ -158,14 +164,13 @@ def admin_message(message_id: int, db: Session = Depends(get_db)) -> AdminMessag
 
 
 @admin_router.post("/messages/{message_id}/remind", response_model=RemindOut, summary="Напомнить непрочитавшим")
-def remind(message_id: int, background: BackgroundTasks, db: Session = Depends(get_db)) -> RemindOut:
+def remind(message_id: int, db: Session = Depends(get_db)) -> RemindOut:
     try:
-        user_ids = messages_service.remind(db, message_id)
+        reminded, devices = messages_service.remind(db, message_id)
     except messages_service.MessageError as error:
         raise _raise(error) from error
 
-    background.add_task(push_service.notify_message, message_id, user_ids, reminder=True)
-    return RemindOut(reminded=len(user_ids))
+    return RemindOut(reminded=reminded, devices=devices, push_configured=push_service.is_configured())
 
 
 @admin_router.delete("/messages/{message_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Удалить сообщение")

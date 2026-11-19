@@ -1,9 +1,4 @@
-"""Рассылка сообщений студентам: адресация, прочтение, «Ознакомлен», напоминания.
-
-Инбокс — источник истины: push только сообщает о новом. Поэтому функции
-здесь возвращают id студентов, которым стоит отправить push, а саму
-отправку API ставит фоновой задачей.
-"""
+"""Рассылка сообщений студентам: адресация, прочтение, очередь уведомлений."""
 
 from __future__ import annotations
 
@@ -13,8 +8,9 @@ from sqlalchemy import and_, case, func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.models import Group, Message, MessageRecipient, User
-from app.schemas.message import MessageIn
+from app.models import Group, Message, MessageRecipient, PushDelivery, User
+from app.schemas.message import MessageIn, PushStatsOut
+from app.services import push
 
 IMPORTANCE_HIGH = "high"
 IMPORTANCE_LOW = "low"
@@ -52,7 +48,7 @@ def _pending_condition():
     )
 
 
-def target_title(db: Session, target: dict) -> str:
+def target_title(db: Session, target: dict, group_names: dict[int, str] | None = None) -> str:
     """Адресация человеческими словами — для списка в админке."""
     kind = target["type"]
     if kind == "all":
@@ -64,9 +60,19 @@ def target_title(db: Session, target: dict) -> str:
         courses = target.get("courses") or []
         return title + (f" ({', '.join(str(item) for item in sorted(courses))} курс)" if courses else "")
     if kind == "group":
-        names = db.scalars(select(Group.name).where(Group.id.in_(target["group_ids"])).order_by(Group.name)).all()
+        if group_names is None:
+            names = db.scalars(select(Group.name).where(Group.id.in_(target["group_ids"])).order_by(Group.name)).all()
+        else:
+            names = sorted(group_names[group_id] for group_id in set(target["group_ids"]) if group_id in group_names)
         return ("Группы " if len(names) > 1 else "Группа ") + ", ".join(names)
     return f"Студенты ({len(target['user_ids'])})"
+
+
+def target_titles(db: Session, messages: list[Message]) -> dict[int, str]:
+    group_ids = {group_id for message in messages if message.target["type"] == "group"
+                 for group_id in message.target["group_ids"]}
+    names = dict(db.execute(select(Group.id, Group.name).where(Group.id.in_(group_ids))).all()) if group_ids else {}
+    return {message.id: target_title(db, message.target, names) for message in messages}
 
 
 def _target_condition(target: dict):
@@ -90,11 +96,8 @@ def _matching_users(db: Session, target: dict) -> list[User]:
     return list(db.scalars(query).unique().all())
 
 
-def create_message(db: Session, data: MessageIn, admin: str, now: datetime | None = None) -> tuple[Message, list[int]]:
-    """Сохраняет сообщение и материализует получателей одной транзакцией.
-
-    Возвращает сообщение и id студентов для push (у неважных push нет).
-    """
+def create_message(db: Session, data: MessageIn, admin: str, now: datetime | None = None) -> Message:
+    """Сохраняет сообщение, получателей и очередь push одной транзакцией."""
     now = now or datetime.now(timezone.utc)
     target = data.target.model_dump(exclude_defaults=True)
     if target["type"] == "group" and db.scalar(
@@ -118,9 +121,10 @@ def create_message(db: Session, data: MessageIn, admin: str, now: datetime | Non
         MessageRecipient(message_id=message.id, user_id=user.id, group_id=user.group_id, created_at=now)
         for user in users
     )
+    if message.importance != IMPORTANCE_LOW and push.is_configured():
+        push.enqueue(db, message.id, [user.id for user in users], "message", now)
     db.commit()
-    push_to = [] if message.importance == IMPORTANCE_LOW else [user.id for user in users]
-    return message, push_to
+    return message
 
 
 def attach_recent_messages(db: Session, user: User, now: datetime) -> list[int]:
@@ -243,6 +247,26 @@ def counts(db: Session, message_id: int) -> tuple[int, int, int]:
     return tuple(row)
 
 
+def push_stats(db: Session, message_ids: list[int]) -> dict[int, PushStatsOut]:
+    """Одна агрегирующая выборка на список сообщений, оба вида доставок."""
+    configured = push.is_configured()
+    stats = {message_id: PushStatsOut(configured=configured) for message_id in message_ids}
+    if not message_ids:
+        return stats
+    rows = db.execute(
+        select(
+            PushDelivery.message_id,
+            func.count(PushDelivery.id),
+            func.sum(case((PushDelivery.status == "sent", 1), else_=0)),
+            func.sum(case((PushDelivery.status == "pending", 1), else_=0)),
+            func.sum(case((PushDelivery.status.in_(["failed", "gone", "skipped"]), 1), else_=0)),
+        ).where(PushDelivery.message_id.in_(message_ids)).group_by(PushDelivery.message_id)
+    ).all()
+    for message_id, total, sent, pending, failed in rows:
+        stats[message_id] = PushStatsOut(configured=configured, total=total, sent=sent, pending=pending, failed=failed)
+    return stats
+
+
 def admin_detail(db: Session, message_id: int) -> tuple[Message, list[tuple[MessageRecipient, str | None]]]:
     message = _get(db, message_id)
     rows = db.execute(
@@ -255,8 +279,8 @@ def admin_detail(db: Session, message_id: int) -> tuple[Message, list[tuple[Mess
     return message, [(recipient, group_name) for recipient, group_name in rows]
 
 
-def remind(db: Session, message_id: int, now: datetime | None = None) -> list[int]:
-    """Напоминание тем, кто не прочитал (у важных — не подтвердил). Возвращает id студентов."""
+def remind(db: Session, message_id: int, now: datetime | None = None) -> tuple[int, int]:
+    """Записывает напоминание непрочитавшим и возвращает число студентов и устройств."""
     now = now or datetime.now(timezone.utc)
     message = _get(db, message_id)
     if message.importance == IMPORTANCE_LOW:
@@ -276,13 +300,15 @@ def remind(db: Session, message_id: int, now: datetime | None = None) -> list[in
         ).unique().all()
     )
     if not pending:
-        return []
+        return 0, 0
 
     for recipient in pending:
         recipient.reminded_at = now
     message.last_reminded_at = now
+    user_ids = [recipient.user_id for recipient in pending]
+    devices = push.enqueue(db, message.id, user_ids, "reminder", now) if push.is_configured() else 0
     db.commit()
-    return [recipient.user_id for recipient in pending]
+    return len(user_ids), devices
 
 
 def delete_message(db: Session, message_id: int, now: datetime | None = None) -> None:

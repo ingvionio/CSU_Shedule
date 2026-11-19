@@ -6,8 +6,10 @@ from sqlalchemy import delete, select
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
-from app.models import Message, MessageRecipient, PushSubscription
+from app.models import Message, MessageRecipient, PushDelivery, PushSubscription
 from app.services import push as push_service
+from app.services.worker import process_push
+from datetime import datetime, timezone
 
 API = "/api/v1"
 
@@ -20,6 +22,7 @@ def subscription_body(name="a"):
 def _clean(db_schema):
     yield
     with SessionLocal() as session:
+        session.execute(delete(PushDelivery))
         session.execute(delete(PushSubscription))
         session.execute(delete(MessageRecipient))
         session.execute(delete(Message))
@@ -89,13 +92,16 @@ def test_доставка_и_удаление_отозванной_подпис�
     bare_client.post(f"{API}/me/push-subscriptions", json=subscription_body("phone"), headers=anya)
     bare_client.post(f"{API}/me/push-subscriptions", json=subscription_body("gone"), headers=anya)
 
-    # TestClient выполняет фоновые задачи сразу после ответа.
+    # API только пишет очередь; доставку запускает отдельный worker.
     response = bare_client.post(
         f"{API}/admin/messages",
         json={"title": "Перенос пары", "body": "На четверг", "importance": "high", "target": {"type": "all"}},
         headers=bare_admin_headers,
     )
     assert response.status_code == 201
+    assert sent == []
+    with SessionLocal() as session:
+        assert process_push(session, datetime.now(timezone.utc)).processed == 2
 
     assert len(sent) == 1
     endpoint, data = sent[0]
@@ -117,7 +123,9 @@ def test_напоминание_с_пометкой(bare_client, bare_admin_head
         headers=bare_admin_headers,
     ).json()
     bare_client.post(f"{API}/admin/messages/{message['id']}/remind", headers=bare_admin_headers)
-    assert sent[-1][1]["title"] == "Напоминание: Анкета"
+    with SessionLocal() as session:
+        process_push(session, datetime.now(timezone.utc))
+    assert sorted(data["title"] for _, data in sent) == ["Анкета", "Напоминание: Анкета"]
 
 
 def test_без_ключей_push_не_отправляется(bare_client, bare_admin_headers, test_groups, sent):
