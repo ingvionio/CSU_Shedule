@@ -34,10 +34,10 @@ WebView. Обе версии получают данные из FastAPI. Пуб�
 `android/local.properties`. Собранный пакет устанавливается на Android
 7.0+ (minSdk 24).
 
-1. Укажите в `frontend/.env.local` адрес FastAPI, доступный с телефона по
-   HTTPS. Например, `VITE_API_URL=https://api.example.org`, где
-   `api.example.org` нужно заменить адресом своего сервера. Клиент сам
-   добавляет `/api/v1`. Vite подставляет адрес при сборке.
+1. Укажите в `frontend/.env.production.local` адрес FastAPI, доступный
+   с телефона по HTTPS: `VITE_API_URL=https://iit-app.ru`. Этот файл
+   игнорируется Git (`*.local`). Клиент сам добавляет `/api/v1`.
+   Vite подставляет адрес при сборке.
 2. Добавьте `https://localhost` в `CORS_ORIGINS` бэкенда, сохранив
    уже разрешённые адреса фронтенда. В Android это локальный origin
    WebView. Относительные запросы `/api/v1` без `VITE_API_URL` попадут
@@ -58,8 +58,38 @@ WebView. Обе версии получают данные из FastAPI. Пуб�
 Скрипт собирает `dist/`, выполняет `cap sync android` и запускает Gradle
 `assembleDebug`. Результат — `android/app/build/outputs/apk/debug/app-debug.apk`
 относительно `frontend/`. APK предназначен для тестовой установки.
-Для обновления версии, которую уже распространяют, нужна отдельная
-release-сборка с подписью ключом приложения и увеличенным `versionCode`.
+Для распространения используйте release-сборку с постоянным ключом подписи.
+Один раз создайте ключ из каталога `frontend/android` (JDK должен быть в PATH):
+
+```powershell
+keytool -genkeypair -v -keystore release.jks -alias iit-app -keyalg RSA -keysize 2048 -validity 10000
+```
+
+Создайте `frontend/android/keystore.properties`:
+
+```properties
+storeFile=release.jks
+storePassword=ЗАМЕНИТЕ_ПАРОЛЕМ_ХРАНИЛИЩА
+keyAlias=iit-app
+keyPassword=ЗАМЕНИТЕ_ПАРОЛЕМ_КЛЮЧА
+```
+
+Относительный `storeFile` отсчитывается от `frontend/android`.
+Файл настроек, `*.jks` и `*.keystore` исключены из Git. Сохраните ключ и
+оба пароля навсегда в защищённой резервной копии: без них нельзя выпустить
+обновление установленного приложения. Для каждого обновления увеличивайте
+`versionCode` в `android/app/build.gradle` (сейчас 2, `versionName "1.1"`).
+
+Из каталога `frontend`:
+
+```powershell
+npm.cmd run build:apk:release
+```
+
+Скрипт выполняет build → cap sync → `assembleRelease`.
+Результат — `android/app/build/outputs/apk/release/app-release.apk`.
+Без `keystore.properties` release-сборка завершится понятной ошибкой;
+для `build:apk` / `assembleDebug` файл подписи не требуется.
 
 Сессия и локальный кэш APK отделены от браузера. Для получения расписания
 и входа на новом устройстве нужен доступ к API. После загрузки клиент

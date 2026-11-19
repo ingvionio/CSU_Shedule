@@ -1,0 +1,70 @@
+server {
+    listen 80;
+    server_name iit-app.ru;
+    return 301 https://iit-app.ru$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name iit-app.ru;
+
+    # Замените пути на пути сертификата Let's Encrypt на сервере.
+    ssl_certificate /etc/letsencrypt/live/REPLACE_WITH_DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/REPLACE_WITH_DOMAIN/privkey.pem;
+    root /REPLACE_WITH_FRONTEND_DIST;
+    index index.html;
+
+    gzip on;
+    gzip_vary on;
+    gzip_types text/plain text/css application/javascript application/json application/manifest+json image/svg+xml;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        # Перезаписываем, а не дописываем: бэкенд доверяет заголовку целиком
+        # (FORWARDED_ALLOW_IPS="*"), и присланный посетителем XFF обходил бы лимиты по IP.
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # Лимит Excel — 50 МБ; запас для multipart-запроса.
+        client_max_body_size 60m;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+    }
+
+    location = /sw.js {
+        add_header Cache-Control "no-cache" always;
+        try_files $uri =404;
+    }
+
+    location = /index.html {
+        add_header Cache-Control "no-cache" always;
+        try_files $uri =404;
+    }
+
+    location = /manifest.webmanifest {
+        add_header Cache-Control "no-cache" always;
+        try_files $uri =404;
+    }
+
+    location /download/ {
+        add_header Cache-Control "no-cache" always;
+        try_files $uri $uri/ =404;
+    }
+
+    location /assets/ {
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        try_files $uri =404;
+    }
+
+    location ~ ^/downloads/.*\.apk$ {
+        types { application/vnd.android.package-archive apk; }
+        default_type application/vnd.android.package-archive;
+        add_header Cache-Control "no-cache" always;
+        try_files $uri =404;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

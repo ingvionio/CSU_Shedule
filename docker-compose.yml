@@ -3,6 +3,8 @@ x-backend-env: &x-backend-env
   CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
   ADMIN_LOGIN: ${ADMIN_LOGIN:-admin}
   ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+  MOODLE_ENCRYPTION_KEY: ${MOODLE_ENCRYPTION_KEY:-}
+  MOODLE_BASE_URL: ${MOODLE_BASE_URL:-https://eu.iit.csu.ru}
   JWT_SECRET: ${JWT_SECRET:-change-me}
   SMTP_USER: ${SMTP_USER:-}
   SMTP_PASSWORD: ${SMTP_PASSWORD:-}

@@ -91,7 +91,8 @@ Postgres снаружи доступен на `localhost:5433` (не 5432 — ч
 | `backend/.env` | только при запуске бэкенда **без Docker**: `cp backend/.env.example backend/.env` и поправить `DATABASE_URL`. Без `ADMIN_PASSWORD` вход в админку выключен |
 | `frontend/.env.local` | только если бэкенд не на `localhost:8000`: `VITE_API_URL=...` |
 
-Перед выкладкой на сервер обязательно задать свои `ADMIN_PASSWORD` и `JWT_SECRET`.
+Выкладка на сервер — по [DEPLOY.md](DEPLOY.md): боевой `docker-compose.prod.yml`,
+шаблон окружения `deploy/.env.prod.example`, пример nginx и порядок обновления.
 
 ## Почта для обращений (Яндекс)
 
