@@ -124,7 +124,7 @@
 приложении.
 
 1. Сгенерировать ключи: `docker compose exec backend python -m app.cli generate-vapid`.
-2. Вставить вывод в `.env` в корне репозитория и выполнить `docker compose up -d`.
+2. Вставить вывод в `backend/.env` и выполнить `docker compose up -d`.
 3. Приложение должно открываться по **HTTPS**, иначе браузеры не дают
    подписаться на уведомления (исключение — `localhost` при разработке).
 

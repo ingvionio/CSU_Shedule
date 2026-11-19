@@ -21,6 +21,7 @@ FastAPI + SQLAlchemy + PostgreSQL. Отдаёт готовое расписан�
 ### Вариант 1: Docker Compose (из корня репозитория)
 
 ```bash
+cp backend/.env.example backend/.env    # настройки бэкенда, compose читает их через env_file
 docker compose up -d --build
 docker compose exec backend python -m alembic upgrade head
 docker compose exec backend python -m app.cli seed-semester
@@ -88,8 +89,8 @@ DATABASE_URL="sqlite+pysqlite:///./schedule.db" python -m app.cli init-db
 | GET/POST/DELETE | `/api/v1/admin/groups/{id}/editors` | назначить или отозвать редакторов |
 
 `/admin/*` требуют заголовок `Authorization: Bearer <token>`. Логин и пароль
-админа — `ADMIN_LOGIN` / `ADMIN_PASSWORD` в `.env` (в docker-compose по
-умолчанию `admin` / `admin`), секрет подписи — `JWT_SECRET`. Пустой
+админа — `ADMIN_LOGIN` / `ADMIN_PASSWORD` в `backend/.env` (в шаблоне
+`.env.example` — `admin` / `admin`), секрет подписи — `JWT_SECRET`. Пустой
 `ADMIN_PASSWORD` выключает вход.
 
 Структура ответа — в `03-schedule-json.md`. Интерактивная документация: `/docs`.

@@ -26,6 +26,9 @@
 ## Первый запуск
 
 ```bash
+# 0. Настройки бэкенда (один раз; без файла compose не стартует)
+cp backend/.env.example backend/.env
+
 # 1. База и API (из корня репозитория)
 docker compose up -d --build
 docker compose exec backend python -m alembic upgrade head      # схема БД
@@ -81,15 +84,26 @@ Postgres снаружи доступен на `localhost:5433` (не 5432 — ч
 
 ## Переменные окружения (.env)
 
-**Для запуска через Docker `.env` не нужен**: все переменные с значениями по
-умолчанию прописаны в `docker-compose.yml`. В гите лежат только шаблоны
+Все настройки бэкенда лежат в **`backend/.env`** — и для Docker, и для запуска
+без него. Шаблон с описанием каждой переменной — `backend/.env.example`:
+`cp backend/.env.example backend/.env`. Compose подключает файл через
+`env_file` и без него не стартует. В гите лежат только шаблоны
 `*.env.example`, сами `.env` игнорируются.
 
-| Где | Когда нужен |
+| Где | Что там |
 |---|---|
-| `.env` в корне | чтобы поменять пароль админа или секрет JWT для Docker: `ADMIN_LOGIN`, `ADMIN_PASSWORD`, `JWT_SECRET`, `BACKEND_PORT` — compose подхватит их сам. Почта для обращений: `SMTP_USER`, `SMTP_PASSWORD`, `PUBLIC_APP_URL`; push: `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` (см. ниже) |
-| `backend/.env` | только при запуске бэкенда **без Docker**: `cp backend/.env.example backend/.env` и поправить `DATABASE_URL`. Без `ADMIN_PASSWORD` вход в админку выключен |
+| `backend/.env` | пароль админа и секрет JWT (`ADMIN_LOGIN`, `ADMIN_PASSWORD`, `JWT_SECRET`), CORS, почта (`SMTP_USER`, `SMTP_PASSWORD`, `PUBLIC_APP_URL`), push (`VAPID_*`), Moodle (`MOODLE_*`). `DATABASE_URL` из файла нужен только без Docker — в Docker его перекрывает `docker-compose.yml`. Без `ADMIN_PASSWORD` вход в админку выключен |
 | `frontend/.env.local` | только если бэкенд не на `localhost:8000`: `VITE_API_URL=...` |
+
+`BACKEND_PORT` — переменная самого compose, а не бэкенда: задаётся в
+окружении команды (см. «Если порт 8000 занят»).
+
+**Обновление установки, где настройки лежали в `.env` в корне:** перенести
+строки в `backend/.env` (`cp backend/.env.example backend/.env` и вписать
+значения) и выполнить `docker compose up -d`. Переменные бэкенда из корневого
+`.env` больше не читаются. Особенно важно перенести `JWT_SECRET`: с другим
+секретом все выданные токены станут недействительны, а сохранённые пароли
+Moodle (если не задан `MOODLE_ENCRYPTION_KEY`) перестанут расшифровываться.
 
 Перед выкладкой на сервер обязательно задать свои `ADMIN_PASSWORD` и `JWT_SECRET`.
 
@@ -103,7 +117,7 @@ Postgres снаружи доступен на `localhost:5433` (не 5432 — ч
    для почты. Обычный пароль от ящика SMTP не принимает.
 3. В Яндекс Почте: «Настройки» → «Почтовые программы» → включить доступ
    по протоколу IMAP «С сервера imap.yandex.ru» (без этого SMTP отклоняет вход).
-4. В `.env` в корне:
+4. В `backend/.env`:
    ```
    SMTP_USER=csu-schedule@yandex.ru
    SMTP_PASSWORD=<пароль приложения>
@@ -122,7 +136,7 @@ Postgres снаружи доступен на `localhost:5433` (не 5432 — ч
 разделе «Сообщения».
 
 1. `docker compose exec backend python -m app.cli generate-vapid`
-2. Вывод вставить в `.env` в корне (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`,
+2. Вывод вставить в `backend/.env` (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`,
    `VAPID_SUBJECT=mailto:<почта для связи>`), затем `docker compose up -d`.
 3. Push работает только по **HTTPS** (локально — на `localhost`). На iPhone —
    только у приложения, добавленного на экран «Домой».
