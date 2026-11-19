@@ -5,8 +5,6 @@
  * Пишется только имя события — без текстов, логинов и паролей.
  */
 
-import { Capacitor } from '@capacitor/core'
-
 import { feedbackToken, readCache, readStudentSession, writeCache } from './cache'
 
 export type ClientEvent =
@@ -31,7 +29,9 @@ export function clientPlatform(): Platform {
   let native = false
   let standalone = false
   try {
-    native = Capacitor.isNativePlatform()
+    // В APK нативная часть Capacitor сама кладёт window.Capacitor — библиотеку в сборку не тянем.
+    const capacitor = (window as Window & { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor
+    native = capacitor?.isNativePlatform?.() === true
   } catch {
     native = false
   }
