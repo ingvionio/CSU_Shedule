@@ -140,7 +140,10 @@ src/
 
 ## ЛК продукта
 
-`/statistic` — статистика для команды (`pages/product/ProductStatistics.tsx`),
+`/statistic` — статистика для команды (`pages/product/ProductStatistics.tsx`,
+отдельный чанк через `React.lazy`): вкладки «Обзор» (период — пресеты или
+свои даты, графики из `pages/product/charts.tsx` на SVG без библиотек) и
+«Пользователи» (`#/users`, карточка — `#/users/ID`),
 отдельная точка входа `statistic/index.html`, как у `/download`. Ссылок из
 приложения нет, вход — `PRODUCT_LOGIN` / `PRODUCT_PASSWORD` бэкенда. События
 отправляет `api/analytics.ts` (`track`, `watchAppOpens`) пачками и без

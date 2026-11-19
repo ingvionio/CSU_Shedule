@@ -34,9 +34,10 @@ import type {
   GroupEditor,
   PersonalNote,
   NoteInput,
-  ProductPeriod,
   ProductSummary,
+  ProductUserDetail,
   ProductUserEvents,
+  ProductUserFilters,
   ProductUsers,
 } from './types'
 
@@ -124,12 +125,18 @@ export const api = {
 
   productLogin: (login: string, password: string) =>
     request<TokenResponse>('/auth/product/login', { method: 'POST', body: { login, password } }),
-  productSummary: (token: string, days: ProductPeriod) => request<ProductSummary>(`/product/summary?days=${days}`, { token }),
-  productUsers: (token: string, params: { q?: string; sort: 'last_seen' | 'created'; limit: number; offset: number }) => {
-    const query = new URLSearchParams({ sort: params.sort, limit: String(params.limit), offset: String(params.offset) })
-    if (params.q?.trim()) query.set('q', params.q.trim())
+  productSummary: (token: string, start: string, end: string) =>
+    request<ProductSummary>(`/product/summary?${new URLSearchParams({ start, end })}`, { token }),
+  productUsers: (token: string, filters: ProductUserFilters) => {
+    const query = new URLSearchParams({ sort: filters.sort, limit: String(filters.limit), offset: String(filters.offset) })
+    if (filters.q?.trim()) query.set('q', filters.q.trim())
+    if (filters.group_id) query.set('group_id', String(filters.group_id))
+    for (const key of ['last_seen_from', 'last_seen_to', 'created_from', 'created_to'] as const) {
+      if (filters[key]) query.set(key, filters[key]!)
+    }
     return request<ProductUsers>(`/product/users?${query}`, { token })
   },
+  productUser: (token: string, userId: number) => request<ProductUserDetail>(`/product/users/${userId}`, { token }),
   productUserEvents: (token: string, userId: number, before?: number | null) =>
     request<ProductUserEvents>(`/product/users/${userId}/events?limit=100${before ? `&before=${before}` : ''}`, { token }),
 
@@ -141,8 +148,9 @@ export const api = {
   deleteOverride: (token: string, id: number, batch: boolean) =>
     request<{ deleted: number }>(`/admin/overrides/${id}${batch ? '?batch=true' : ''}`, { method: 'DELETE', token }),
 
-  sendFeedback: (feedbackToken: string, body: FeedbackInput) =>
-    request<{ id: number; kind_title: string }>('/feedback', { method: 'POST', body, feedbackToken }),
+  /** Токен студента необязателен: с ним обращение попадает в статистику пользователя. */
+  sendFeedback: (feedbackToken: string, body: FeedbackInput, token?: string) =>
+    request<{ id: number; kind_title: string }>('/feedback', { method: 'POST', body, feedbackToken, token }),
   myFeedback: (feedbackToken: string) => request<MyFeedback[]>('/feedback/mine', { feedbackToken }),
 
   feedbackFolders: (token: string) => request<FeedbackFolder[]>('/admin/feedback/folders', { token }),

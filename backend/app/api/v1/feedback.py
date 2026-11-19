@@ -6,7 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, 
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
-from app.core.security import require_admin
+from app.core.security import optional_student, require_admin
 from app.models import FeedbackMessage, FeedbackRecipient, FeedbackReply
 from app.schemas.feedback import (
     AdminFeedbackOut,
@@ -24,6 +24,7 @@ from app.schemas.feedback import (
     ReplyOut,
 )
 from app.services import feedback as feedback_service
+from app.services import product_events
 from app.services.feedback import KIND_TITLES
 from app.services.mailer import deliver_by_ids
 
@@ -116,6 +117,7 @@ def create_feedback(
     request: Request,
     background: BackgroundTasks,
     token: str | None = TokenHeader,
+    student_id: int | None = Depends(optional_student),
     db: Session = Depends(get_db),
 ) -> FeedbackCreatedOut:
     try:
@@ -124,6 +126,16 @@ def create_feedback(
         )
     except feedback_service.FeedbackError as error:
         raise _raise(error) from error
+
+    # Токен устройства обращений — тот же ключ, что у статистики: без входа считаем по устройству.
+    product_events.record_server_event(
+        db,
+        product_events.FEEDBACK_SENT,
+        user_id=student_id,
+        device_key=token,
+        platform=request.headers.get("X-Client-Platform"),
+        app_version=request.headers.get("X-Client-Version"),
+    )
 
     background.add_task(deliver_by_ids, outbox_ids)
     return FeedbackCreatedOut(id=message.id, kind_title=KIND_TITLES[message.kind])

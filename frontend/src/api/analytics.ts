@@ -9,7 +9,9 @@ import { Capacitor } from '@capacitor/core'
 
 import { feedbackToken, readCache, readStudentSession, writeCache } from './cache'
 
-export type ClientEvent = 'landing_view' | 'login_click' | 'login_submit' | 'app_open' | 'apk_download'
+export type ClientEvent =
+  | 'landing_view' | 'login_click' | 'login_submit' | 'app_open' | 'apk_download'
+  | 'schedule_day_view' | 'schedule_week_view' | 'map_open' | 'help_open' | 'push_open'
 export type Platform = 'web' | 'pwa' | 'apk'
 
 declare const __APP_VERSION__: string

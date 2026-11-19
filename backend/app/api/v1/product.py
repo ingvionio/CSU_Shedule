@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -9,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.db import get_db
 from app.core.security import optional_student, require_product
-from app.schemas.product import EventsIn, ProductUserEventsOut, ProductUsersOut, SummaryOut
+from app.schemas.product import EventsIn, ProductUserDetailOut, ProductUserEventsOut, ProductUsersOut, SummaryOut
 from app.services import product_events, product_stats
 
 router = APIRouter()
@@ -38,27 +39,54 @@ def _raise(error: product_stats.ProductStatsError) -> None:
     raise HTTPException(error.status_code, str(error)) from error
 
 
-@product_router.get("/summary", response_model=SummaryOut, summary="Сводка: пользователи, DAU/WAU/MAU, воронка, APK")
-def get_summary(days: int = Query(30), db: Session = Depends(get_db)) -> dict:
+@product_router.get("/summary", response_model=SummaryOut, summary="Сводка за период: пользователи, воронка, функции, APK")
+def get_summary(
+    start: date | None = Query(None, description="первый день периода по Челябинску; по умолчанию — 30 дней до end"),
+    end: date | None = Query(None, description="последний день периода; по умолчанию — сегодня"),
+    db: Session = Depends(get_db),
+) -> dict:
     try:
-        return product_stats.summary(db, days)
+        return product_stats.summary(db, start, end)
     except product_stats.ProductStatsError as error:
         _raise(error)
 
 
-@product_router.get("/users", response_model=ProductUsersOut, summary="Пользователи и когда заходили")
+@product_router.get("/users", response_model=ProductUsersOut, summary="Пользователи с фильтрами")
 def get_users(
     q: str | None = Query(None, max_length=100),
     group_id: int | None = None,
-    sort: Literal["last_seen", "created"] = "last_seen",
+    last_seen_from: date | None = None,
+    last_seen_to: date | None = None,
+    created_from: date | None = Query(None, description="первый вход не раньше"),
+    created_to: date | None = Query(None, description="первый вход не позже"),
+    sort: Literal["last_seen", "created", "name"] = "last_seen",
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ) -> dict:
-    return product_stats.users(db, q=q, group_id=group_id, sort=sort, limit=limit, offset=offset)
+    return product_stats.users(
+        db,
+        q=q,
+        group_id=group_id,
+        last_seen_from=last_seen_from,
+        last_seen_to=last_seen_to,
+        created_from=created_from,
+        created_to=created_to,
+        sort=sort,
+        limit=limit,
+        offset=offset,
+    )
 
 
-@product_router.get("/users/{user_id}/events", response_model=ProductUserEventsOut, summary="События пользователя")
+@product_router.get("/users/{user_id}", response_model=ProductUserDetailOut, summary="Карточка пользователя")
+def get_user(user_id: int, db: Session = Depends(get_db)) -> dict:
+    try:
+        return product_stats.user_detail(db, user_id)
+    except product_stats.ProductStatsError as error:
+        _raise(error)
+
+
+@product_router.get("/users/{user_id}/events", response_model=ProductUserEventsOut, summary="Действия пользователя")
 def get_user_events(
     user_id: int,
     limit: int = Query(100, ge=1, le=500),

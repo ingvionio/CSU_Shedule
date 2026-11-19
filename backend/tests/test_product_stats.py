@@ -1,6 +1,6 @@
 """ЛК продукта: вход, приём событий, события входа Moodle и метрики."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import Mock
 
 import pytest
@@ -9,7 +9,8 @@ from sqlalchemy import delete, select
 from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.core.security import ROLE_STUDENT, issue_token
-from app.models import ProductEvent, User
+from app.models import EmailOutbox, FeedbackMessage, Message, MessageRecipient, ProductEvent, PushSubscription, User
+from tests.test_notes import notes_demo  # noqa: F401 — фикстура для события заметки
 from app.services import product_stats
 from app.services.feedback import secret_hash
 
@@ -25,8 +26,8 @@ def product(bare_client, monkeypatch):
         session.commit()
     yield bare_client
     with SessionLocal() as session:
-        session.execute(delete(ProductEvent))
-        session.execute(delete(User))
+        for model in (ProductEvent, PushSubscription, MessageRecipient, Message, EmailOutbox, FeedbackMessage, User):
+            session.execute(delete(model))
         session.commit()
 
 
@@ -137,6 +138,14 @@ def test_events_bad_token_is_anonymous(product, bare_admin_headers):
     assert [e.user_id for e in _stored()] == [None, None, None]
 
 
+def test_events_token_of_deleted_user_is_anonymous(product):
+    response = product.post(
+        "/api/v1/events", headers=_student_headers(987654), json={"device_key": DEVICE, "events": [{"name": "app_open"}]}
+    )
+    assert response.status_code == 204
+    assert [e.user_id for e in _stored()] == [None]
+
+
 def test_events_batch_size_and_limit(product, monkeypatch):
     too_many = {"device_key": DEVICE, "events": [{"name": "app_open"}] * 21}
     assert product.post("/api/v1/events", json=too_many).status_code == 422
@@ -204,7 +213,104 @@ def test_broken_event_write_does_not_break_login(product, test_groups, moodle, m
     assert _stored() == []
 
 
+# --- события в приложении ---
+
+
+def _named(user_id: int | None = None) -> list[str]:
+    return [e.name for e in _stored() if user_id is None or e.user_id == user_id]
+
+
+def _register(client, group_id: int, device: str) -> tuple[int, dict[str, str]]:
+    body = client.post(
+        "/api/v1/auth/student/register", json={"full_name": "Аня Андреева", "group_id": group_id, "device_key": device}
+    ).json()
+    return body["profile"]["id"], {"Authorization": f"Bearer {body['access_token']}"}
+
+
+def _send_message(client, headers, importance="high", title="Перенос пары") -> dict:
+    response = client.post(
+        "/api/v1/admin/messages",
+        headers=headers,
+        json={"title": title, "body": "На четверг", "importance": importance, "target": {"type": "all"}},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+@pytest.fixture
+def no_push(monkeypatch):
+    from app.services import push as push_service
+
+    monkeypatch.setattr(push_service, "notify_message", lambda *args, **kwargs: None)
+
+
+def test_client_screen_events_accepted(product):
+    names = ["schedule_day_view", "schedule_week_view", "map_open", "help_open", "push_open", "message_read"]
+    product.post("/api/v1/events", json={"device_key": DEVICE, "events": [{"name": n} for n in names]})
+    # message_read пишет только сервер — от клиента пропускается.
+    assert _named() == names[:-1]
+
+
+def test_message_events(product, bare_admin_headers, test_groups, no_push):
+    anya, headers = _register(product, test_groups["ТЕСТ ПИ 991"], "device-anya-events-01")
+    sent = _send_message(product, bare_admin_headers)
+    product.get(f"/api/v1/me/messages/{sent['id']}", headers=headers)
+    product.get(f"/api/v1/me/messages/{sent['id']}", headers=headers)  # повторное открытие — не новое событие
+    product.post(f"/api/v1/me/messages/{sent['id']}/acknowledge", headers=headers)
+    product.post(f"/api/v1/me/messages/{sent['id']}/acknowledge", headers=headers)
+    assert _named(anya) == ["message_received", "message_read", "message_ack"]
+    assert all(e.props == {"message_id": sent["id"]} for e in _stored() if e.user_id == anya)
+
+
+def test_ack_without_open_counts_read(product, bare_admin_headers, test_groups, no_push):
+    anya, headers = _register(product, test_groups["ТЕСТ ПИ 991"], "device-anya-events-02")
+    sent = _send_message(product, bare_admin_headers)
+    product.post(f"/api/v1/me/messages/{sent['id']}/acknowledge", headers=headers)
+    assert _named(anya) == ["message_received", "message_read", "message_ack"]
+
+
+def test_push_events(product, bare_admin_headers, test_groups, monkeypatch):
+    from app.services import push as push_service
+
+    monkeypatch.setattr(get_settings(), "vapid_public_key", "public-key")
+    monkeypatch.setattr(get_settings(), "vapid_private_key", "private-key")
+    monkeypatch.setattr(push_service, "_send", lambda subscription, data: None)
+    anya, headers = _register(product, test_groups["ТЕСТ ПИ 991"], "device-anya-events-03")
+    for name in ("phone", "laptop"):
+        body = {"endpoint": f"https://push.example.com/{name}", "keys": {"p256dh": "k", "auth": "a"}}
+        assert product.post("/api/v1/me/push-subscriptions", json=body, headers=headers).status_code == 201
+    _send_message(product, bare_admin_headers, importance="normal")
+    # Два устройства — одно событие доставки на студента.
+    assert _named(anya) == ["push_subscribed", "push_subscribed", "message_received", "push_sent"]
+
+
+def test_feedback_event(product, test_groups):
+    anya, headers = _register(product, test_groups["ТЕСТ ПИ 991"], "device-anya-events-04")
+    payload = {"kind": "methodist", "text": "Когда будет пересдача?"}
+    with_user = product.post("/api/v1/feedback", json=payload, headers={**headers, "X-Feedback-Token": "device-anya-events-04"})
+    anonymous = product.post("/api/v1/feedback", json=payload, headers={"X-Feedback-Token": "guest-device-000001"})
+    assert with_user.status_code == anonymous.status_code == 201
+    events = [(e.user_id, e.device_hash) for e in _stored() if e.name == "feedback_sent"]
+    assert events == [(anya, secret_hash("device-anya-events-04")), (None, secret_hash("guest-device-000001"))]
+
+
+def test_note_event(product, notes_demo):  # noqa: F811
+    from tests.test_notes import save
+
+    group, lesson, owner, _ = notes_demo
+    assert save(product, owner, group, lesson).status_code == 200
+    assert "note_saved" in _named()
+
+
 # --- метрики ---
+
+
+TODAY = date(2026, 11, 19)
+
+
+def _summary(days: int = 30, end: date = TODAY, now: datetime = NOW) -> dict:
+    with SessionLocal() as session:
+        return product_stats.summary(session, end - timedelta(days=days - 1), end, now=now)
 
 
 def test_active_users_and_local_day(product):
@@ -217,18 +323,38 @@ def test_active_users_and_local_day(product):
         ("app_open", NOW - timedelta(days=40), c, "d3", "apk"),
         ("landing_view", NOW, None, "d9", "web"),  # гость: не активный пользователь
     )
-    data = product_stats.summary(SessionLocal(), 30, now=NOW)
-    assert (data["dau"], data["wau"], data["mau"]) == (1, 2, 3)
+    data = _summary(30)
+    assert (data["dau"], data["wau"], data["mau"], data["active_users"]) == (1, 2, 3, 3)
     assert data["users_total"] == 3
     assert data["by_platform"] == {"web": 1, "pwa": 1, "apk": 1}
     assert data["daily"][-1]["dau"] == 1 and len(data["daily"]) == 30
+    # 7 дней: «В» заходил 20 дней назад — за период не активен, а MAU (по последнему дню) тот же.
+    week = _summary(7)
+    assert (week["active_users"], week["mau"]) == (2, 3)
+
+
+def test_custom_period_in_the_past(product):
+    user = _student("Прошлый")
+    _events(("app_open", datetime(2026, 9, 10, 6, tzinfo=timezone.utc), user, "d1", "web"))
+    with SessionLocal() as session:
+        data = product_stats.summary(session, date(2026, 9, 1), date(2026, 9, 30), now=NOW)
+    assert (data["days"], data["active_users"], data["dau"]) == (30, 1, 0)
+    assert _summary(30)["active_users"] == 0
+
+
+def test_period_validation(product, product_headers):
+    reversed_period = product.get("/api/v1/product/summary?start=2026-11-10&end=2026-11-01", headers=product_headers)
+    too_long = product.get("/api/v1/product/summary?start=2020-01-01&end=2026-11-01", headers=product_headers)
+    default = product.get("/api/v1/product/summary", headers=product_headers)
+    assert reversed_period.status_code == too_long.status_code == 422
+    assert default.status_code == 200 and default.json()["days"] == 30
 
 
 def test_late_utc_evening_is_next_local_day(product):
     user = _student("Ночной")
     late = datetime(2026, 11, 18, 23, 30, tzinfo=timezone.utc)  # 19.11 04:30 по Челябинску
     _events(("app_open", late, user, "d1", None))
-    data = product_stats.summary(SessionLocal(), 1, now=NOW)
+    data = _summary(1)
     assert data["dau"] == 1
     assert data["start_date"].isoformat() == "2026-11-19"
 
@@ -246,7 +372,7 @@ def test_funnel_counts_unique_devices(product):
         ("login_failed_auth", NOW, None, "d1", "web"),
         ("login_success", NOW, user, "d1", "web"),
     )
-    data = product_stats.summary(SessionLocal(), 7, now=NOW)
+    data = _summary(7)
     assert data["funnel"] == {"landing_view": 2, "login_click": 1, "login_submit": 1, "login_success": 1}
     assert data["login_failures"] == {"auth": 1, "group": 0, "other": 0}
 
@@ -261,47 +387,119 @@ def test_apk_downloads_and_installs(product):
         ("landing_view", NOW, None, "a2", "apk"),
         ("app_open", NOW, None, "w1", "web"),
     )
-    data = product_stats.summary(SessionLocal(), 7, now=NOW)
+    data = _summary(7)
     assert (data["apk_downloads"], data["apk_installs"], data["apk_installs_total"]) == (2, 2, 3)
 
 
-def test_summary_rejects_unknown_period(product, product_headers):
-    assert product.get("/api/v1/product/summary?days=5", headers=product_headers).status_code == 422
+def test_features(product):
+    a, b = _student("А"), _student("Б")
+    _events(
+        ("schedule_week_view", NOW, a, "d1", "web"),
+        ("schedule_week_view", NOW, a, "d1", "web"),
+        ("schedule_week_view", NOW, b, "d2", "web"),
+        ("feedback_sent", NOW, None, "d3", "web"),
+        ("message_ack", NOW - timedelta(days=40), a, None, None),
+    )
+    features = {f["name"]: (f["events"], f["users"]) for f in _summary(30)["features"]}
+    assert features["schedule_week_view"] == (3, 2)
+    assert features["feedback_sent"] == (1, 0)
+    assert features["message_ack"] == (0, 0)
+    assert features["map_open"] == (0, 0)
 
 
-def test_users_list_and_events(product, product_headers, test_groups):
+def test_retention(product):
+    # Пришли 1.10: один вернулся на 1-й неделе (9.10), второй — нет; третий пришёл 15.11 — его неделя не закончилась.
+    first = datetime(2026, 10, 1, 5, tzinfo=timezone.utc)
+    back, gone = _student("Вернулся", created_at=first), _student("Ушёл", created_at=first)
+    fresh = _student("Новичок", created_at=datetime(2026, 11, 15, 5, tzinfo=timezone.utc))
+    _events(
+        ("login_success", first, back, "d1", "web"),
+        ("login_success", first, gone, "d2", "web"),
+        ("app_open", datetime(2026, 10, 9, 5, tzinfo=timezone.utc), back, "d1", "web"),
+        ("login_success", datetime(2026, 11, 15, 5, tzinfo=timezone.utc), fresh, "d3", "web"),
+    )
+    with SessionLocal() as session:
+        data = product_stats.summary(session, date(2026, 9, 21), TODAY, now=NOW)
+    week = {r["week"]: (r["eligible"], r["returned"]) for r in data["retention"]}
+    assert week == {1: (2, 1), 2: (2, 0), 4: (2, 0)}
+
+
+def test_groups_coverage_and_push_share(product, test_groups):
+    pi = test_groups["ТЕСТ ПИ 991"]
+    a = _student("А", pi)
+    _student("Б", pi, created_at=NOW - timedelta(days=60))
+    _events(("app_open", NOW, a, "d1", "web"))
+    with SessionLocal() as session:
+        session.add(PushSubscription(user_id=a, endpoint="https://push.example.com/x", p256dh="k", auth="a"))
+        session.commit()
+    data = _summary(30)
+    groups = {g["name"]: (g["users"], g["new"], g["active"]) for g in data["groups"]}
+    assert groups["ТЕСТ ПИ 991"] == (2, 1, 1)
+    assert groups["ТЕСТ БИ 991"] == (0, 0, 0)
+    assert data["users_with_push"] == 1
+
+
+# --- пользователи ---
+
+
+def test_users_list_filters_and_card(product, product_headers, test_groups):
     group_id = test_groups["ТЕСТ ПИ 991"]
-    old = _student("Старов Олег", group_id, created_at=NOW - timedelta(days=50))
-    fresh = _student("Новикова Анна", created_at=NOW - timedelta(days=1))
+    old = _student("Старов Олег", group_id, created_at=datetime(2026, 9, 5, 5, tzinfo=timezone.utc))
+    fresh = _student("Новикова Анна", created_at=datetime.now(timezone.utc) - timedelta(days=1))
     recent = datetime.now(timezone.utc) - timedelta(hours=2)
     _events(
         ("login_success", recent - timedelta(hours=1), old, "d1", "web"),
         ("app_open", recent, old, "d1", "apk"),
+        ("schedule_week_view", recent, old, "d1", "apk"),
     )
 
-    response = product.get("/api/v1/product/users", headers=product_headers)
-    assert response.status_code == 200
-    body = response.json()
-    assert body["total"] == 2
-    first = body["items"][0]
-    assert first["id"] == old
-    assert first["group"] == {"name": "ТЕСТ ПИ 991", "course": 1}
+    def ids(**params):
+        body = product.get("/api/v1/product/users", params=params, headers=product_headers).json()
+        return [item["id"] for item in body["items"]], body["total"]
+
+    assert ids() == ([old, fresh], 2)
+    assert ids(sort="created")[0] == [fresh, old]
+    assert ids(sort="name")[0] == [fresh, old]
+    assert ids(q="Новикова") == ([fresh], 1)
+    assert ids(group_id=group_id) == ([old], 1)
+    assert ids(created_from="2026-09-01", created_to="2026-09-30") == ([old], 1)
+    assert ids(last_seen_to="2026-09-30") == ([], 0)
+    assert old in ids(last_seen_from=product_stats.local_date(recent).isoformat())[0]
+
+    first = product.get("/api/v1/product/users", headers=product_headers).json()["items"][0]
+    assert first["group"] == {"id": group_id, "name": "ТЕСТ ПИ 991", "course": 1}
     assert first["last_platform"] == "apk" and first["active_days_30"] >= 1
 
-    by_created = product.get("/api/v1/product/users?sort=created", headers=product_headers).json()
-    assert [item["id"] for item in by_created["items"]] == [fresh, old]
-    found = product.get("/api/v1/product/users", params={"q": "Новикова"}, headers=product_headers).json()
-    assert [item["id"] for item in found["items"]] == [fresh]
-    in_group = product.get(f"/api/v1/product/users?group_id={group_id}", headers=product_headers).json()
-    assert in_group["total"] == 1
+    card = product.get(f"/api/v1/product/users/{old}", headers=product_headers).json()
+    assert card["counts"] == {"login_success": 1, "app_open": 1, "schedule_week_view": 1}
+    assert card["push_enabled"] is False
 
-    page = product.get(f"/api/v1/product/users/{old}/events?limit=1", headers=product_headers).json()
-    assert [e["name"] for e in page["items"]] == ["app_open"]
-    assert page["next_before"] is not None
+    page = product.get(f"/api/v1/product/users/{old}/events?limit=2", headers=product_headers).json()
+    assert [e["name"] for e in page["items"]] == ["schedule_week_view", "app_open"]
     rest = product.get(
-        f"/api/v1/product/users/{old}/events?limit=1&before={page['next_before']}", headers=product_headers
+        f"/api/v1/product/users/{old}/events?limit=2&before={page['next_before']}", headers=product_headers
     ).json()
-    assert [e["name"] for e in rest["items"]] == ["login_success"]
-    assert rest["next_before"] is None
+    assert [e["name"] for e in rest["items"]] == ["login_success"] and rest["next_before"] is None
 
+    assert product.get("/api/v1/product/users/999999", headers=product_headers).status_code == 404
     assert product.get("/api/v1/product/users/999999/events", headers=product_headers).status_code == 404
+
+
+def test_user_events_ordered_by_time(product, product_headers):
+    user = _student("Хронолог")
+    # Вставлены не по порядку: лента всё равно от новых к старым по времени.
+    _events(
+        ("app_open", NOW, user, "d1", "web"),
+        ("message_read", NOW - timedelta(days=2), user, None, None),
+        ("map_open", NOW - timedelta(days=1), user, "d1", "web"),
+    )
+    page = product.get(f"/api/v1/product/users/{user}/events?limit=2", headers=product_headers).json()
+    rest = product.get(f"/api/v1/product/users/{user}/events?limit=2&before={page['next_before']}", headers=product_headers).json()
+    assert [e["name"] for e in page["items"] + rest["items"]] == ["app_open", "map_open", "message_read"]
+
+
+def test_message_title_in_user_events(product, product_headers, bare_admin_headers, test_groups, no_push):
+    anya, _ = _register(product, test_groups["ТЕСТ ПИ 991"], "device-anya-events-05")
+    _send_message(product, bare_admin_headers, importance="normal")
+    items = product.get(f"/api/v1/product/users/{anya}/events", headers=product_headers).json()["items"]
+    assert [(e["name"], e["detail"]) for e in items] == [("message_received", "Перенос пары")]

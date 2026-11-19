@@ -10,7 +10,7 @@ const require = createRequire(import.meta.url)
 function load(relative, globals = {}) {
   const file = new URL(relative, import.meta.url)
   const source = readFileSync(file, 'utf8').replaceAll('import.meta.env', '({})')
-  const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText
+  const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText
   const exports = {}
   vm.runInNewContext(code, {
     exports,
@@ -61,4 +61,24 @@ test('funnel conversion is relative to the previous step', () => {
   assert.equal(conversion(25, 100), '25%')
   assert.equal(conversion(1, 3), '33%')
   assert.equal(conversion(5, 0), '—')
+})
+
+test('period presets end today and count days inclusively', () => {
+  const { presetPeriod, periodError, addDays, daysBetween, todayLocal } = load('../src/pages/product/period.ts')
+  assert.deepEqual({ ...presetPeriod('week', '2026-11-19') }, { start: '2026-11-13', end: '2026-11-19', preset: 'week' })
+  assert.equal(presetPeriod('today', '2026-11-19').start, '2026-11-19')
+  assert.equal(addDays('2026-03-01', -1), '2026-02-28')
+  assert.equal(daysBetween('2026-01-01', '2026-12-31'), 365)
+  assert.equal(periodError('2026-11-10', '2026-11-01'), 'Начало позже конца')
+  assert.equal(periodError('2020-01-01', '2026-11-01'), 'Не больше 731 дней')
+  assert.equal(periodError('2026-11-01', '2026-11-10'), null)
+  // 23:30 UTC 18.11 — уже 19.11 в Челябинске.
+  assert.equal(todayLocal(new Date('2026-11-18T23:30:00Z')), '2026-11-19')
+})
+
+test('nice scale covers the max with round steps', () => {
+  const ts2 = load('../src/pages/product/charts.tsx', { ResizeObserver: class {} })
+  assert.deepEqual({ ...ts2.niceScale(0) }, { top: 4, step: 1 })
+  assert.deepEqual({ ...ts2.niceScale(7) }, { top: 8, step: 2 })
+  assert.deepEqual({ ...ts2.niceScale(130) }, { top: 150, step: 50 })
 })

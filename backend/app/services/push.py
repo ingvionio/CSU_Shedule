@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.models import Message, PushSubscription
+from app.services import product_events
 
 logger = logging.getLogger(__name__)
 
@@ -83,10 +84,12 @@ def deliver(db: Session, message: Message, user_ids: list[int], reminder: bool) 
     subscriptions = db.scalars(select(PushSubscription).where(PushSubscription.user_id.in_(user_ids))).all()
     data = payload(message, reminder)
     sent = 0
+    delivered_to: set[int] = set()
     for subscription in subscriptions:
         try:
             _send(subscription, data)
             sent += 1
+            delivered_to.add(subscription.user_id)
         except WebPushException as error:
             status = error.response.status_code if error.response is not None else None
             if status in GONE_STATUSES:
@@ -95,6 +98,9 @@ def deliver(db: Session, message: Message, user_ids: list[int], reminder: bool) 
                 logger.warning("Push %s не доставлен (%s): %s", subscription.id, status, error)
         except OSError as error:
             logger.warning("Push %s не доставлен: %s", subscription.id, error)
+    # Для статистики: одно событие на студента, сколько бы у него ни было устройств.
+    for user_id in delivered_to:
+        product_events.add_event(db, product_events.PUSH_SENT, user_id=user_id, message_id=message.id)
     db.commit()
     return sent
 

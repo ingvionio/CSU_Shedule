@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.api.v1.me import current_student
 from app.core.db import get_db
 from app.models import Group, PersonalNote, User
-from app.services import schedule
+from app.services import product_events, schedule
 
 router = APIRouter(prefix="/me/notes")
 
@@ -80,6 +80,7 @@ def save_note(data: NoteIn, user: User = Depends(current_student), db: Session =
         db.rollback()
         raise HTTPException(409, "Заметка уже создана. Обновите страницу") from error
     db.refresh(item)
+    product_events.record_server_event(db, product_events.NOTE_SAVED, user_id=user.id)
     return item
 
 

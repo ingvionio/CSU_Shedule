@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.models import Group, Message, MessageRecipient, User
 from app.schemas.message import MessageIn
+from app.services import product_events
 
 IMPORTANCE_HIGH = "high"
 IMPORTANCE_LOW = "low"
@@ -118,6 +119,8 @@ def create_message(db: Session, data: MessageIn, admin: str, now: datetime | Non
         MessageRecipient(message_id=message.id, user_id=user.id, group_id=user.group_id, created_at=now)
         for user in users
     )
+    for user in users:
+        product_events.add_event(db, product_events.MESSAGE_RECEIVED, user_id=user.id, now=now, message_id=message.id)
     db.commit()
     push_to = [] if message.importance == IMPORTANCE_LOW else [user.id for user in users]
     return message, push_to
@@ -148,6 +151,7 @@ def attach_recent_messages(db: Session, user: User, now: datetime) -> list[int]:
         if match is None:
             continue
         db.add(MessageRecipient(message_id=message.id, user_id=user.id, group_id=user.group_id, created_at=now))
+        product_events.add_event(db, product_events.MESSAGE_RECEIVED, user_id=user.id, now=now, message_id=message.id)
         attached.append(message.id)
     db.flush()
     return attached
@@ -190,6 +194,7 @@ def open_message(db: Session, user_id: int, message_id: int, now: datetime | Non
     recipient = _recipient(db, user_id, message_id)
     if recipient.read_at is None:
         recipient.read_at = now or datetime.now(timezone.utc)
+        product_events.add_event(db, product_events.MESSAGE_READ, user_id=user_id, now=recipient.read_at, message_id=message_id)
         db.commit()
     return recipient
 
@@ -199,6 +204,10 @@ def acknowledge(db: Session, user_id: int, message_id: int, now: datetime | None
     if not requires_ack(recipient.message):
         raise MessageError("это сообщение не требует подтверждения")
     now = now or datetime.now(timezone.utc)
+    if recipient.read_at is None:
+        product_events.add_event(db, product_events.MESSAGE_READ, user_id=user_id, now=now, message_id=message_id)
+    if recipient.acknowledged_at is None:
+        product_events.add_event(db, product_events.MESSAGE_ACK, user_id=user_id, now=now, message_id=message_id)
     recipient.read_at = recipient.read_at or now
     recipient.acknowledged_at = recipient.acknowledged_at or now
     db.commit()

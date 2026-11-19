@@ -183,7 +183,7 @@ npm run dev        # http://localhost:5173
 | GET / POST / DELETE | `/api/v1/admin/messages…`, `/api/v1/admin/users` | рассылка и прочтения — см. `06-messages.md` |
 | POST | `/api/v1/events` | события статистики от клиента (публичный, токен студента необязателен) |
 | POST | `/api/v1/auth/product/login` | вход в ЛК продукта → JWT роли `product` |
-| GET | `/api/v1/product/summary?days=1\|7\|30\|90`, `/api/v1/product/users`, `/api/v1/product/users/{id}/events` | статистика ЛК продукта — см. `backend/README.md` |
+| GET | `/api/v1/product/summary?start=&end=`, `/api/v1/product/users`, `/api/v1/product/users/{id}`, `/api/v1/product/users/{id}/events` | статистика ЛК продукта — см. `backend/README.md` |
 
 Правила изменений подробно — в `backend/README.md`, раздел «Временные изменения».
 
@@ -268,7 +268,10 @@ npm run dev        # http://localhost:5173
   воронка «лендинг → „Войти через Moodle“ → форма → вход» по устройствам,
   причины неудачных входов, скачивания и установки APK, DAU/WAU/MAU, список
   пользователей и когда каждый заходил. Дни — по Челябинску (UTC+5).
-  Метрики добавляются постепенно. Задача — `tasks/008-product-statistics.md`.
+  Вторая версия (20.11.2026): любой период (пресеты и свои даты), графики,
+  вкладка «Пользователи» с фильтрами и карточкой; события расписания, карты,
+  справки, сообщений, push, вопросов и заметок; удержание и охват групп.
+  Задача — `tasks/008-product-statistics.md`.
 * **Excel не коммитится** (так же, как задано в `backend/.gitignore`).
   Сквозные тесты берут файл из корня репозитория и пропускаются, если его нет.
 
