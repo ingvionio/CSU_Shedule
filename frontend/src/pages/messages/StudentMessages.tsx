@@ -14,17 +14,22 @@ type StudentMessagesProps = {
   onChooseGroup: () => void
   /** Сообщение, которое нужно открыть сразу (нажали на push-уведомление). */
   requestedId: number | null
+  /** Запрос из уведомления исполнен: иначе окно открывалось бы при каждом заходе во вкладку. */
+  onRequestHandled: () => void
 }
 
-export function StudentMessages({ group, onChooseGroup, requestedId }: StudentMessagesProps) {
+export function StudentMessages({ group, onChooseGroup, requestedId, onRequestHandled }: StudentMessagesProps) {
   const session = useStudentSession()
   const inbox = useInbox(session !== null)
   const [openId, setOpenId] = useState<number | null>(requestedId)
   const opened = inbox.data?.messages.find((item) => item.id === openId) ?? null
 
   useEffect(() => {
-    if (requestedId !== null) setOpenId(requestedId)
-  }, [requestedId])
+    // До входа запрос нужен App, чтобы после входа перейти к сообщению.
+    if (requestedId === null || !session) return
+    setOpenId(requestedId)
+    onRequestHandled()
+  }, [requestedId, session, onRequestHandled])
 
   if (!session) return <ProfileForm group={group} onChooseGroup={onChooseGroup} />
 
@@ -89,15 +94,12 @@ function PushToggle() {
         <span>
           <strong>{push.state === 'on' ? 'Уведомления включены' : 'Уведомления выключены'}</strong>
           <small>{note ?? (push.state === 'on'
-            ? 'Пришлём уведомление о новом сообщении на это устройство.'
+            ? 'Пришлём уведомление о новом сообщении на это устройство. Отключить их можно в настройках телефона или браузера.'
             : 'Включите, чтобы узнавать о новых сообщениях сразу.')}</small>
         </span>
       </div>
       {push.state === 'off' && (
         <button className="button button-primary" disabled={push.busy} onClick={push.enable}>Включить</button>
-      )}
-      {push.state === 'on' && (
-        <button className="button button-secondary" disabled={push.busy} onClick={push.disable}>Выключить</button>
       )}
       {push.error && <p className="form-error" role="alert">{push.error}</p>}
     </div>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from 'react'
 import { ChevronDown, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 
@@ -62,6 +62,7 @@ export function App() {
   const mobileCards = useSyncExternalStore(subscribeMobileCards, () => mobileCardsQuery.matches)
   const studentSession = useStudentSession()
   const [requestedMessage, setRequestedMessage] = useState(() => messageFromUrl(window.location.href))
+  const clearRequestedMessage = useCallback(() => setRequestedMessage(null), [])
   const [view, setView] = useNavigation(studentSession !== null)
   const [groupId, setGroupId] = useState<number | null>(() => studentSession ? studentSession.profile.group_id : readSelectedGroup())
   const [adminGroupId, setAdminGroupId] = useState<number | null>(null)
@@ -519,7 +520,7 @@ export function App() {
               {view === 'feedback' && <StudentFeedback groupId={groupId} />}
 
               {view === 'messages' && (
-                <StudentMessages group={selectedGroup} onChooseGroup={() => nav('group')} requestedId={requestedMessage} />
+                <StudentMessages group={selectedGroup} onChooseGroup={() => nav('group')} requestedId={requestedMessage} onRequestHandled={clearRequestedMessage} />
               )}
 
               {groupId === null && (view === 'day' || view === 'week') && !groups.isLoading && !groups.isError && (
