@@ -5,10 +5,10 @@ export type PresetId = 'today' | 'week' | 'month' | 'quarter' | 'year' | 'custom
 
 export const PRESETS: { id: Exclude<PresetId, 'custom'>; label: string; days: number }[] = [
   { id: 'today', label: 'Сегодня', days: 1 },
-  { id: 'week', label: '7 дней', days: 7 },
-  { id: 'month', label: '30 дней', days: 30 },
-  { id: 'quarter', label: '90 дней', days: 90 },
-  { id: 'year', label: 'Год', days: 365 },
+  { id: 'week', label: 'Последние 7 дней', days: 7 },
+  { id: 'month', label: 'Последние 30 дней', days: 30 },
+  { id: 'quarter', label: 'Последние 90 дней', days: 90 },
+  { id: 'year', label: 'Последние 12 месяцев', days: 365 },
 ]
 
 export const MAX_DAYS = 731
@@ -43,4 +43,10 @@ export function periodError(start: string, end: string): string | null {
   if (start > end) return 'Начало позже конца'
   if (daysBetween(start, end) > MAX_DAYS) return `Не больше ${MAX_DAYS} дней`
   return null
+}
+
+/** Предыдущий период той же длины — для сравнения. */
+export function previousPeriod(period: { start: string; end: string }): { start: string; end: string } {
+  const days = daysBetween(period.start, period.end)
+  return { start: addDays(period.start, -days), end: addDays(period.start, -1) }
 }
