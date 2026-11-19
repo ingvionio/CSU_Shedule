@@ -1,6 +1,6 @@
 import { ContextHelp } from '../../ContextHelp'
 import { useEffect, useState, type FormEvent } from 'react'
-import { BellOff, BellRing, CheckCircle2, RefreshCw, UserRound, X } from 'lucide-react'
+import { BellOff, CheckCircle2, RefreshCw, UserRound, X } from 'lucide-react'
 
 import { usePush, type PushState } from '../../api/push'
 import { useInbox, useInboxMutations } from '../../api/queries'
@@ -84,18 +84,17 @@ const PUSH_NOTES: Partial<Record<PushState, string>> = {
 
 function PushToggle() {
   const push = usePush()
-  if (push.state === 'checking' || push.state === 'unconfigured') return null
+  // Включённым уведомлениям плашка не нужна: отключают их в настройках телефона или браузера.
+  if (push.state === 'checking' || push.state === 'unconfigured' || push.state === 'on') return null
 
   const note = PUSH_NOTES[push.state]
   return (
     <div className="push-card">
       <div>
-        {push.state === 'on' ? <BellRing size={18} /> : <BellOff size={18} />}
+        <BellOff size={18} />
         <span>
-          <strong>{push.state === 'on' ? 'Уведомления включены' : 'Уведомления выключены'}</strong>
-          <small>{note ?? (push.state === 'on'
-            ? 'Пришлём уведомление о новом сообщении на это устройство. Отключить их можно в настройках телефона или браузера.'
-            : 'Включите, чтобы узнавать о новых сообщениях сразу.')}</small>
+          <strong>Уведомления выключены</strong>
+          <small>{note ?? 'Включите, чтобы узнавать о новых сообщениях сразу.'}</small>
         </span>
       </div>
       {push.state === 'off' && (
