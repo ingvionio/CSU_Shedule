@@ -112,6 +112,7 @@ npm run dev        # http://localhost:5173
 | `app/core/security.py` | вход админа (логин/пароль из `.env`), JWT админа и студента |
 | `app/services/moodle.py`, `app/services/students.py` | вход Moodle с определением группы и резервная регистрация по ФИО, группе и ключу устройства |
 | `app/services/messages.py` | рассылка: адресация, досылка, прочтение, «Ознакомлен», напоминания |
+| `app/services/product_events.py`, `app/services/product_stats.py` | ЛК продукта: приём событий и метрики |
 | `app/services/push.py` | подписки и отправка Web Push (pywebpush) |
 | `app/services/groups.py` | направление (поток) из названия группы |
 | `app/api/v1/me.py`, `app/api/v1/messages.py` | `/me` студента, инбокс и раздел методиста |
@@ -152,6 +153,8 @@ npm run dev        # http://localhost:5173
 | `src/pages/feedback/StudentFeedback.tsx` | раздел «Вопросы» у студента: форма и «Мои обращения» |
 | `src/pages/feedback/labels.ts` | подписи адресатов, тем и статусов, подсказки «кому писать» |
 | `src/pages/admin/AdminImports.tsx` | проверка и загрузка Excel, история импортов |
+| `src/api/analytics.ts` | события статистики: платформа, `app_open`, отправка пачками |
+| `src/pages/product/ProductStatistics.tsx` | ЛК продукта `/statistic`: вход, сводка, воронка, пользователи |
 
 ## API
 
@@ -178,6 +181,9 @@ npm run dev        # http://localhost:5173
 | POST | `/api/v1/auth/student/register` | резервная регистрация по ФИО и группе → студенческий JWT |
 | GET / POST / DELETE | `/api/v1/me…` | профиль, инбокс, «Ознакомлен», push-подписки — см. `06-messages.md` |
 | GET / POST / DELETE | `/api/v1/admin/messages…`, `/api/v1/admin/users` | рассылка и прочтения — см. `06-messages.md` |
+| POST | `/api/v1/events` | события статистики от клиента (публичный, токен студента необязателен) |
+| POST | `/api/v1/auth/product/login` | вход в ЛК продукта → JWT роли `product` |
+| GET | `/api/v1/product/summary?days=1\|7\|30\|90`, `/api/v1/product/users`, `/api/v1/product/users/{id}/events` | статистика ЛК продукта — см. `backend/README.md` |
 
 Правила изменений подробно — в `backend/README.md`, раздел «Временные изменения».
 
@@ -253,6 +259,16 @@ npm run dev        # http://localhost:5173
   Подготовлено к Moodle: обращения привяжутся к пользователю по токену.
 * **Письма через очередь** `email_outbox`: сбой SMTP не теряет обращение.
   Без `SMTP_USER` письма только пишутся в лог.
+* **ЛК продукта (19.11.2026).** Статистика — не в
+  админке методиста, а в отдельном «ЛК продукта» на странице `/statistic`
+  без ссылок из приложения, со своим логином и паролем (`PRODUCT_LOGIN`,
+  `PRODUCT_PASSWORD`). Внешние счётчики (Яндекс Метрика и т. п.) не
+  подключаем: считаем сами по событиям в своей базе — так видны настоящие
+  студенты, а не браузеры, и данные не уходят третьим лицам. Первая версия:
+  воронка «лендинг → „Войти через Moodle“ → форма → вход» по устройствам,
+  причины неудачных входов, скачивания и установки APK, DAU/WAU/MAU, список
+  пользователей и когда каждый заходил. Дни — по Челябинску (UTC+5).
+  Метрики добавляются постепенно. Задача — `tasks/008-product-statistics.md`.
 * **Excel не коммитится** (так же, как задано в `backend/.gitignore`).
   Сквозные тесты берут файл из корня репозитория и пропускаются, если его нет.
 

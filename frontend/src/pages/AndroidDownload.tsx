@@ -1,6 +1,8 @@
 import { Download } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 
+import { track } from '../api/analytics'
+
 export const ANDROID_APK_URL = '/downloads/raspisanie-iit.apk'
 
 export function AndroidDownload() {
@@ -10,6 +12,7 @@ export function AndroidDownload() {
   useEffect(() => {
     if (attempted.current) return
     attempted.current = true
+    track('apk_download')
     downloadLink.current?.click()
   }, [])
 

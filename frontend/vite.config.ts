@@ -3,12 +3,17 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
+import packageJson from './package.json'
+
 export default defineConfig({
+  // Версия сборки уходит в статистику (X-Client-Version, события ЛК продукта).
+  define: { __APP_VERSION__: JSON.stringify(packageJson.version) },
   build: {
     rollupOptions: {
       input: {
         app: fileURLToPath(new URL('./index.html', import.meta.url)),
         download: fileURLToPath(new URL('./download/index.html', import.meta.url)),
+        statistic: fileURLToPath(new URL('./statistic/index.html', import.meta.url)),
       },
     },
   },

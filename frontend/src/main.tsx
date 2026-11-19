@@ -5,6 +5,7 @@ import { registerSW } from 'virtual:pwa-register'
 
 import { App } from './App'
 import { AndroidDownload } from './pages/AndroidDownload'
+import { ProductStatistics } from './pages/product/ProductStatistics'
 import './styles.css'
 
 // Service worker: офлайн-статика и push-уведомления. Новая версия ставится сама.
@@ -20,11 +21,13 @@ const queryClient = new QueryClient({
 })
 
 const isDownloadPage = /^\/download(?:\/index\.html|\/)?$/.test(window.location.pathname)
+// ЛК продукта: открывается только по прямому адресу, ссылок из приложения нет.
+const isStatisticPage = /^\/statistic(?:\/index\.html|\/)?$/.test(window.location.pathname)
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      {isDownloadPage ? <AndroidDownload /> : <App />}
+      {isStatisticPage ? <ProductStatistics /> : isDownloadPage ? <AndroidDownload /> : <App />}
     </QueryClientProvider>
   </React.StrictMode>,
 )

@@ -30,7 +30,7 @@ cleanupOutdatedCaches()
 // В dev прекэш пустой, index.html в нём нет — офлайн там и не нужен.
 if (import.meta.env.PROD) {
   registerRoute(new NavigationRoute(createHandlerBoundToURL('index.html'), {
-    denylist: [/^\/api\//, /^\/download(?:\/|$)/, /^\/downloads\//],
+    denylist: [/^\/api\//, /^\/download(?:\/|$)/, /^\/statistic(?:\/|$)/, /^\/downloads\//],
   }))
 }
 

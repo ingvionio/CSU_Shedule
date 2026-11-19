@@ -423,3 +423,41 @@ export type ImportHistory = {
   errors_count: number
   warnings_count: number
 }
+
+/* --- ЛК продукта (/statistic) --- */
+
+export type ProductPeriod = 1 | 7 | 30 | 90
+
+export type ProductSummary = {
+  days: ProductPeriod
+  start_date: string
+  end_date: string
+  users_total: number
+  users_new: number
+  dau: number
+  wau: number
+  mau: number
+  funnel: { landing_view: number; login_click: number; login_submit: number; login_success: number }
+  login_failures: { auth: number; group: number; other: number }
+  apk_downloads: number
+  apk_installs: number
+  apk_installs_total: number
+  by_platform: Record<string, number>
+  daily: { date: string; dau: number; new_users: number; landing_devices: number; login_success: number }[]
+}
+
+export type ProductUser = {
+  id: number
+  full_name: string
+  group: { name: string; course: number } | null
+  created_at: string
+  last_seen_at: string | null
+  active_days_30: number
+  last_platform: string | null
+}
+
+export type ProductUsers = { total: number; items: ProductUser[] }
+
+export type ProductEvent = { id: number; occurred_at: string; name: string; platform: string | null; app_version: string | null }
+
+export type ProductUserEvents = { user: ProductUser; items: ProductEvent[]; next_before: number | null }

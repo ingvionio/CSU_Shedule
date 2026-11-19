@@ -34,7 +34,13 @@ import type {
   GroupEditor,
   PersonalNote,
   NoteInput,
+  ProductPeriod,
+  ProductSummary,
+  ProductUserEvents,
+  ProductUsers,
 } from './types'
+
+import { APP_VERSION, clientPlatform } from './analytics'
 
 const BASE_URL = (import.meta.env.VITE_API_URL ?? '') + '/api/v1'
 
@@ -54,7 +60,9 @@ type RequestOptions = {
 }
 
 async function request<T>(path: string, { method = 'GET', body, token, feedbackToken }: RequestOptions = {}): Promise<T> {
-  const headers: Record<string, string> = {}
+  // Платформа и версия нужны статистике входов (ЛК продукта).
+  const headers: Record<string, string> = { 'X-Client-Platform': clientPlatform() }
+  if (APP_VERSION) headers['X-Client-Version'] = APP_VERSION
   const isForm = body instanceof FormData
   if (body !== undefined && !isForm) headers['Content-Type'] = 'application/json'
   if (token) headers.Authorization = `Bearer ${token}`
@@ -113,6 +121,17 @@ export const api = {
     params.set('week', String(week))
     return request<WeekSchedule>(`/admin/stream-schedule?${params}`, { token })
   },
+
+  productLogin: (login: string, password: string) =>
+    request<TokenResponse>('/auth/product/login', { method: 'POST', body: { login, password } }),
+  productSummary: (token: string, days: ProductPeriod) => request<ProductSummary>(`/product/summary?days=${days}`, { token }),
+  productUsers: (token: string, params: { q?: string; sort: 'last_seen' | 'created'; limit: number; offset: number }) => {
+    const query = new URLSearchParams({ sort: params.sort, limit: String(params.limit), offset: String(params.offset) })
+    if (params.q?.trim()) query.set('q', params.q.trim())
+    return request<ProductUsers>(`/product/users?${query}`, { token })
+  },
+  productUserEvents: (token: string, userId: number, before?: number | null) =>
+    request<ProductUserEvents>(`/product/users/${userId}/events?limit=100${before ? `&before=${before}` : ''}`, { token }),
 
   adminLogin: (login: string, password: string) =>
     request<TokenResponse>('/auth/admin/login', { method: 'POST', body: { login, password } }),

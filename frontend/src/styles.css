@@ -719,3 +719,37 @@ button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visibl
 .button-logout { background: #c92a2a; color: white; }
 .button-logout:hover { background: #a61e1e; }
 .content { padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px)); }
+
+/* ЛК продукта (/statistic): статистика для команды, не кабинет методиста. */
+.product-page { width: min(1100px, 100%); margin: 0 auto; padding: 24px 16px 48px; }
+.product-login { width: min(420px, 100%); margin: clamp(24px, 10vh, 90px) auto 0; padding: 22px 18px; border: 1px solid var(--line); border-radius: 19px; background: var(--surface); }
+.product-dashboard { display: flex; min-width: 0; flex-direction: column; gap: 14px; }
+.product-header { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.product-header h1 { margin-top: 5px; font-size: 24px; }
+.product-header .muted { margin-top: 4px; }
+.product-header-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.product-periods { grid-template-columns: repeat(4, 1fr); max-width: 480px; }
+.product-section { display: flex; min-width: 0; flex-direction: column; gap: 10px; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.product-section h2 { font-size: 16px; }
+.product-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+.product-tile { display: flex; flex-direction: column; gap: 4px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: #fafbfc; }
+.product-tile span { color: var(--muted); font-size: 11px; font-weight: 600; }
+.product-tile strong { font-size: 26px; font-variant-numeric: tabular-nums; }
+.product-tile small { color: var(--muted); font-size: 10px; }
+.product-platforms { margin: 0; }
+.product-funnel { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; counter-reset: step; }
+.product-funnel li { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 12px 12px 12px 40px; border: 1px solid var(--line); border-radius: 12px; background: var(--purple-soft); counter-increment: step; }
+.product-funnel li::before { content: counter(step); position: absolute; top: 12px; left: 12px; display: grid; width: 20px; height: 20px; place-items: center; border-radius: 50%; background: var(--purple); color: #fff; font-size: 11px; font-weight: 700; }
+.product-funnel span { color: #3d4d5a; font-size: 11px; font-weight: 600; }
+.product-funnel strong { font-size: 24px; font-variant-numeric: tabular-nums; }
+.product-funnel small { color: var(--muted); font-size: 11px; }
+.product-table td { font-variant-numeric: tabular-nums; }
+.product-search { display: flex; flex-wrap: wrap; gap: 8px; }
+.product-search .text-field { flex: 1 1 220px; width: auto; }
+.product-search .select-field { flex: 0 1 260px; width: auto; }
+.product-user-link { padding: 0; border: 0; background: none; color: var(--purple); font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
+.product-user-link:hover { text-decoration: underline; }
+.product-pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.product-pager .muted { margin-right: auto; }
+.product-user-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.product-user-heading .button { min-height: 38px; padding: 0 10px; }

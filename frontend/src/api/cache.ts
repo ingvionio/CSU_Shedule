@@ -64,6 +64,23 @@ export function clearAdminSession(): void {
   removeCache(ADMIN_KEY)
 }
 
+const PRODUCT_KEY = 'product-session'
+
+/** Сессия ЛК продукта — отдельно от админки методиста. Истёкшая не возвращается. */
+export function readProductSession(): AdminSession | null {
+  const session = readCache<AdminSession>(PRODUCT_KEY)
+  if (!session?.token || new Date(session.expires_at).getTime() <= Date.now()) return null
+  return session
+}
+
+export function writeProductSession(session: AdminSession): void {
+  writeCache(PRODUCT_KEY, session)
+}
+
+export function clearProductSession(): void {
+  removeCache(PRODUCT_KEY)
+}
+
 const FEEDBACK_TOKEN_KEY = 'feedback-token'
 let memoryFeedbackToken: string | null = null
 

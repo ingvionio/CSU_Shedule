@@ -18,6 +18,7 @@ import { Landing } from './pages/Landing'
 import { Help } from './pages/Help'
 import { CampusMap } from './pages/CampusMap'
 import { MoodleLogin } from './pages/MoodleLogin'
+import { track, watchAppOpens } from './api/analytics'
 import { StudentFeedback } from './pages/feedback/StudentFeedback'
 import { StudentMessages } from './pages/messages/StudentMessages'
 import { GroupHomeworkPanel } from './pages/homework/GroupHomeworkPanel'
@@ -67,6 +68,12 @@ export function App() {
   const [now, setNow] = useState(() => new Date())
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+
+  // Статистика ЛК продукта: заход в приложение (запуск или возврат после паузы).
+  useEffect(() => watchAppOpens(), [])
+  useEffect(() => {
+    if (view === 'landing') track('landing_view')
+  }, [view])
 
   // Меню ☰ закрывается нажатием в любом месте вне меню и клавишей Esc.
   // Кнопку ☰ не считаем «вне»: её нажатие и так переключает меню.

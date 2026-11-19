@@ -8,11 +8,14 @@ import ts from 'typescript'
 const require = createRequire(import.meta.url)
 function load(relative, reactOverrides = {}) {
   const file = new URL(relative, import.meta.url)
-  const code = ts.transpileModule(readFileSync(file, 'utf8'), { compilerOptions: {
+  // import.meta в CommonJS-контексте vm недоступен; env в тестах пустой.
+  const source = readFileSync(file, 'utf8').replaceAll('import.meta.env', '({})')
+  const code = ts.transpileModule(source, { compilerOptions: {
     module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX,
   } }).outputText
   const exports = {}
-  vm.runInNewContext(code, { exports, require: name => {
+  // Таймеры не запускаются: события статистики в тестах никуда не уходят.
+  vm.runInNewContext(code, { exports, setTimeout: () => 0, clearTimeout: () => {}, require: name => {
     if (name === 'react') return { ...require(name), useState: value => [value, () => {}], ...reactOverrides }
     if (name.startsWith('.')) {
       const tsFile = new URL(`${name}.ts`, file)
