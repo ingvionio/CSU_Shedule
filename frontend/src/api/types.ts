@@ -423,3 +423,66 @@ export type ImportHistory = {
   errors_count: number
   warnings_count: number
 }
+
+/* --- ЛК продукта (/statistic) --- */
+
+export type ProductSummary = {
+  start_date: string
+  end_date: string
+  days: number
+  users_total: number
+  users_new: number
+  active_users: number
+  dau: number
+  wau: number
+  mau: number
+  users_with_push: number
+  funnel: { landing_view: number; login_click: number; login_submit: number; login_success: number }
+  login_failures: { auth: number; group: number; other: number }
+  apk_downloads: number
+  apk_installs: number
+  apk_installs_total: number
+  by_platform: Record<string, number>
+  features: { name: string; events: number; users: number }[]
+  retention: { week: number; eligible: number; returned: number }[]
+  groups: { id: number; name: string; course: number; users: number; new: number; active: number }[]
+  daily: { date: string; dau: number; new_users: number; landing_devices: number; login_success: number }[]
+}
+
+export type ProductUser = {
+  id: number
+  full_name: string
+  group: { id: number; name: string; course: number } | null
+  created_at: string
+  last_seen_at: string | null
+  active_days_30: number
+  last_platform: string | null
+}
+
+export type ProductUsers = { total: number; items: ProductUser[] }
+
+export type ProductUserFilters = {
+  q?: string
+  group_id?: number | null
+  last_seen_from?: string
+  last_seen_to?: string
+  created_from?: string
+  created_to?: string
+  sort: 'last_seen' | 'created' | 'name' | 'group'
+  order: 'asc' | 'desc'
+  limit: number
+  offset: number
+}
+
+export type ProductUserDetail = { user: ProductUser; counts: Record<string, number>; push_enabled: boolean }
+
+export type ProductEvent = {
+  id: number
+  occurred_at: string
+  name: string
+  platform: string | null
+  app_version: string | null
+  detail: string | null
+}
+
+export type ProductUserEvents = { items: ProductEvent[]; next_before: number | null }

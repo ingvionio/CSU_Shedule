@@ -138,6 +138,21 @@ src/
 фильтр по статусу, карточка обращения (ответ, статус, перенос в другую папку,
 заметка) и «Адресаты и почта».
 
+## ЛК продукта
+
+`/statistic` — статистика для команды (`pages/product/ProductStatistics.tsx`,
+отдельный чанк через `React.lazy`, тёмная тема и свои стили в
+`pages/product/product.css`): разделы «Обзор» (период — выпадающий список с
+пресетами и своими датами, показатели с изменением к прошлому периоду, один
+график по дням из `pages/product/charts.tsx`, остальное — таблицы) и
+«Пользователи» (`#/users`, карточка — `#/users/ID`),
+отдельная точка входа `statistic/index.html`, как у `/download`. Ссылок из
+приложения нет, вход — `PRODUCT_LOGIN` / `PRODUCT_PASSWORD` бэкенда. События
+отправляет `api/analytics.ts` (`track`, `watchAppOpens`) пачками и без
+повторов; все запросы к API несут `X-Client-Platform` и `X-Client-Version`
+(версия из `package.json`). На хостинге `/statistic/` должен отдавать
+`statistic/index.html` из сборки, как `/download/`.
+
 ## Чего ещё нет
 
 React Router.

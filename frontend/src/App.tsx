@@ -18,6 +18,7 @@ import { Landing } from './pages/Landing'
 import { Help } from './pages/Help'
 import { CampusMap } from './pages/CampusMap'
 import { MoodleLogin } from './pages/MoodleLogin'
+import { track, watchAppOpens, type ClientEvent } from './api/analytics'
 import { StudentFeedback } from './pages/feedback/StudentFeedback'
 import { StudentMessages } from './pages/messages/StudentMessages'
 import { GroupHomeworkPanel } from './pages/homework/GroupHomeworkPanel'
@@ -67,6 +68,20 @@ export function App() {
   const [now, setNow] = useState(() => new Date())
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+
+  // Статистика ЛК продукта: заход в приложение (запуск или возврат после паузы).
+  useEffect(() => watchAppOpens(), [])
+  useEffect(() => {
+    const screenEvents: Partial<Record<typeof view, ClientEvent>> = {
+      landing: 'landing_view', day: 'schedule_day_view', week: 'schedule_week_view', map: 'map_open', help: 'help_open',
+    }
+    const event = screenEvents[view]
+    if (event) track(event)
+  }, [view])
+  // Приложение открыли нажатием на push-уведомление (ссылка /?message=ID).
+  useEffect(() => {
+    if (messageFromUrl(window.location.href) !== null) track('push_open')
+  }, [])
 
   // Меню ☰ закрывается нажатием в любом месте вне меню и клавишей Esc.
   // Кнопку ☰ не считаем «вне»: её нажатие и так переключает меню.

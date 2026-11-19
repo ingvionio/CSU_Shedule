@@ -1,4 +1,5 @@
 import { ArrowRight, BellRing, CalendarDays, Check, ClipboardList, Download, MapPin, MessageCircleQuestion, MessagesSquare, NotebookPen } from 'lucide-react'
+import { track } from '../api/analytics'
 import { ANDROID_APK_URL } from './AndroidDownload'
 
 const features = [
@@ -14,6 +15,10 @@ const features = [
 export function Landing({ authenticated, onStart, onHelp, onAdmin }: {
   authenticated: boolean; onStart: () => void; onHelp: () => void; onAdmin: () => void
 }) {
+  const start = () => {
+    if (!authenticated) track('login_click')
+    onStart()
+  }
   return <div className="landing">
     <section className="landing-hero" aria-labelledby="landing-title">
       <div className="landing-copy">
@@ -21,7 +26,7 @@ export function Landing({ authenticated, onStart, onHelp, onAdmin }: {
         <h1 id="landing-title">Всё для учёбы<br />в <em>одном месте.</em></h1>
         <p>Расписание ИИТ — ваш учебный день под рукой. От первой пары до последней заметки: меньше поисков, больше времени на главное.</p>
         <div className="landing-actions">
-          <button className="button button-primary landing-cta" onClick={onStart}>{authenticated ? 'Открыть приложение' : 'Войти через Moodle'}<ArrowRight size={18} /></button>
+          <button className="button button-primary landing-cta" onClick={start}>{authenticated ? 'Открыть приложение' : 'Войти через Moodle'}<ArrowRight size={18} /></button>
           <a className="button button-secondary landing-cta" href={ANDROID_APK_URL} download>
             Скачать для Android <Download size={18} aria-hidden="true" />
           </a>
