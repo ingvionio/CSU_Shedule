@@ -5,6 +5,7 @@ import { BellRing, Plus, RefreshCw, Send, Trash2, X } from 'lucide-react'
 
 import { ApiError } from '../../api/client'
 import { useAdminMessage, useAdminMessages, useDirections, useMessageMutations, useStudents } from '../../api/queries'
+import { useDialogFocus } from '../../dialogFocus'
 import type { AdminMessage, Group, Importance, MessageTarget, MessageTargetType, Student } from '../../types'
 import { IMPORTANCE_HINTS, IMPORTANCE_TITLES, TARGET_TITLES, messageDate } from '../messages/labels'
 
@@ -330,6 +331,7 @@ function MessageDetailDialog({
   }, [detail.error, onUnauthorized])
 
   const message = detail.data
+  const dialog = useDialogFocus<HTMLDivElement>(onClose)
   const needsAck = message?.importance === 'high'
   const isPending = (item: { read_at: string | null; acknowledged_at: string | null }) =>
     needsAck ? !item.acknowledged_at : !item.read_at
@@ -355,7 +357,8 @@ function MessageDetailDialog({
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="confirm-modal feedback-dialog" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+      <div className="confirm-modal feedback-dialog" role="dialog" aria-modal="true" aria-label={message?.title ?? 'Сообщение студентам'}
+        onClick={(event) => event.stopPropagation()} {...dialog}>
         <button className="modal-close" aria-label="Закрыть" onClick={onClose}><X size={17} /></button>
         {detail.isLoading && <div className="state-note">Загружаем…</div>}
         {detail.isError && !isUnauthorized(detail.error) && <p className="form-error">{(detail.error as Error).message}</p>}

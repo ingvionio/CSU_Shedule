@@ -5,6 +5,7 @@ import { Mail, RefreshCw, Send, X } from 'lucide-react'
 
 import { ApiError } from '../../api/client'
 import { useAdminFeedback, useFeedbackFolders, useFeedbackMutations, useFeedbackRecipients } from '../../api/queries'
+import { useDialogFocus } from '../../dialogFocus'
 import type { AdminFeedback as Feedback, FeedbackKind, FeedbackRecipient, FeedbackStatus } from '../../types'
 import { KIND_TITLES, STATUS_TITLES, feedbackDate } from '../feedback/labels'
 
@@ -128,6 +129,7 @@ function FeedbackDialog({
   const [notice, setNotice] = useState('')
   const { update, reply } = useFeedbackMutations(token)
   const busy = update.isPending || reply.isPending
+  const dialog = useDialogFocus<HTMLDivElement>(onClose)
 
   useEffect(() => {
     setNote(item.admin_note ?? '')
@@ -157,9 +159,10 @@ function FeedbackDialog({
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="confirm-modal feedback-dialog" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+      <div className="confirm-modal feedback-dialog" role="dialog" aria-modal="true" aria-labelledby="feedback-dialog-title"
+        onClick={(event) => event.stopPropagation()} {...dialog}>
         <button className="modal-close" aria-label="Закрыть" onClick={onClose}><X size={17} /></button>
-        <span className="eyebrow">ОБРАЩЕНИЕ №{item.id}</span>
+        <span className="eyebrow" id="feedback-dialog-title">ОБРАЩЕНИЕ №{item.id}</span>
 
         <dl className="feedback-meta">
           <dt>Группа</dt><dd>{item.group_name ?? '—'}</dd>

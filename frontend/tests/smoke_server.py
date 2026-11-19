@@ -7,12 +7,14 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 import json
+import os
 
 DIST = Path(__file__).resolve().parents[1] / 'dist'
 GROUP = {'id': 1, 'name': 'ТЕСТ ПИ 101', 'course': 1, 'direction': 'ПИ'}
 PROFILE = {'id': 1, 'full_name': 'Тестовый студент', 'group_id': 1, 'group_name': GROUP['name'], 'moodle_username': 'fixture'}
 WEEK = {'number': 11, 'parity': 'odd', 'start_date': '2026-11-09', 'end_date': '2026-11-14', 'is_current': True, 'prev': 10, 'next': 12}
 LESSON = {'id': 'l-1', 'note_key': 'fixture-note', 'start_time': '09:00', 'end_time': '10:30', 'slot': 1, 'subject': 'Тестовое занятие', 'type': {'code': 'lecture', 'name': 'Лекция'}, 'room': '331', 'teacher': 'Тестовый преподаватель', 'subgroup': None, 'status': 'regular', 'change': None}
+LONG_LESSON = {**LESSON, 'id': 'l-2', 'note_key': 'long-fixture-note', 'subject': 'ДлинноеНазваниеДисциплиныДляПроверкиПереноса' * 4}
 MESSAGE = {'id': 12, 'title': 'Тестовое важное сообщение', 'body': 'Проверка открытия из push-ссылки и подтверждения.', 'importance': 'high', 'sent_at': '2026-11-09T09:00:00Z', 'read_at': None, 'acknowledged_at': None, 'requires_ack': True, 'is_unread': True}
 HOMEWORK = {'id': 1, 'group_id': 1, 'lesson_id': 1, 'lesson_date': '2026-11-09', 'subject': LESSON['subject'], 'title': 'Тестовое задание', 'body': 'Прочитать условие.', 'due_date': '2026-11-10', 'source': 'from_class', 'status': 'published', 'version': 1, 'created_by': 1, 'created_by_name': 'Редактор группы', 'updated_by': 1, 'updated_by_name': 'Редактор группы', 'created_at': '2026-11-09T09:00:00Z', 'updated_at': '2026-11-09T09:00:00Z', 'completed_by_me': False}
 NOTES = []
@@ -40,7 +42,7 @@ class Handler(SimpleHTTPRequestHandler):
         payloads = {
             '/groups': [GROUP], '/time-slots': [{'number': 1, 'start_time': '09:00', 'end_time': '10:30'}],
             '/weeks/current': {**WEEK, 'semester': {'id': 1, 'title': 'Тестовый семестр', 'total_weeks': 18}},
-            '/groups/1/schedule': {'group': GROUP, 'week': WEEK, 'generated_at': '2026-11-09T09:00:00Z', 'days': [{'date': f'2026-11-{9+i:02}', 'weekday': i+1, 'is_today': i == 0, 'lessons': [LESSON] if i == 0 else []} for i in range(6)]},
+            '/groups/1/schedule': {'group': GROUP, 'week': WEEK, 'generated_at': '2026-11-09T09:00:00Z', 'days': [{'date': f'2026-11-{9+i:02}', 'weekday': i+1, 'is_today': i == 0, 'lessons': [LESSON, LONG_LESSON] if i == 0 else []} for i in range(6)]},
             '/me/messages': {'unread_count': int(MESSAGE['is_unread']), 'messages': [MESSAGE]},
             '/me/homework': {'can_edit': False, 'items': [HOMEWORK]}, '/me/notes': NOTES,
             '/push/config': {'public_key': None}, '/feedback/mine': FEEDBACK,
@@ -79,5 +81,6 @@ class Handler(SimpleHTTPRequestHandler):
         self.respond({'detail': 'Это демонстрационный режим. Изменение данных здесь недоступно.'}, 400)
 
 if __name__ == '__main__':
-    print('Mock UI only: http://127.0.0.1:4175/ — fixture / fixture', flush=True)
-    ThreadingHTTPServer(('127.0.0.1', 4175), Handler).serve_forever()
+    port = int(os.environ.get('SMOKE_PORT', '4175'))
+    print(f'Mock UI only: http://127.0.0.1:{port}/ — fixture / fixture', flush=True)
+    ThreadingHTTPServer(('127.0.0.1', port), Handler).serve_forever()

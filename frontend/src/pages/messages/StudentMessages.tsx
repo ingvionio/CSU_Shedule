@@ -5,6 +5,7 @@ import { BellOff, BellRing, CheckCircle2, RefreshCw, UserRound, X } from 'lucide
 import { usePush, type PushState } from '../../api/push'
 import { useInbox, useInboxMutations } from '../../api/queries'
 import { registerStudent, useStudentSession } from '../../api/student'
+import { useDialogFocus } from '../../dialogFocus'
 import type { Group, InboxMessage } from '../../types'
 import { IMPORTANCE_TITLES, messageDate } from './labels'
 
@@ -114,6 +115,7 @@ function MessageBadge({ item }: { item: InboxMessage }) {
 function MessageDialog({ item, onClose }: { item: InboxMessage; onClose: () => void }) {
   const { open, acknowledge } = useInboxMutations()
   const [error, setError] = useState('')
+  const dialog = useDialogFocus<HTMLDivElement>(onClose)
 
   // Открытие сообщения — это и есть «прочитано».
   useEffect(() => {
@@ -131,10 +133,11 @@ function MessageDialog({ item, onClose }: { item: InboxMessage; onClose: () => v
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="confirm-modal feedback-dialog" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+      <div className="confirm-modal feedback-dialog" role="dialog" aria-modal="true" aria-labelledby="student-message-title"
+        onClick={(event) => event.stopPropagation()} {...dialog}>
         <button className="modal-close" aria-label="Закрыть" onClick={onClose}><X size={17} /></button>
         <span className="eyebrow">{IMPORTANCE_TITLES[item.importance].toUpperCase()} · {messageDate(item.sent_at)}</span>
-        <h2>{item.title}</h2>
+        <h2 id="student-message-title">{item.title}</h2>
         <p className="feedback-text">{item.body}</p>
 
         {item.requires_ack && (item.acknowledged_at

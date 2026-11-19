@@ -114,6 +114,7 @@ export function Header({
   onMenu,
   onHome,
   accountAction,
+  menu,
 }: {
   title: string
   onBack?: () => void
@@ -121,6 +122,7 @@ export function Header({
   onMenu?: () => void
   onHome?: () => void
   accountAction?: { label: string; onClick: () => void }
+  menu?: ReactNode
 }) {
   return (
     <header className={`topbar${accountAction ? ' topbar-with-account' : ''}`}>
@@ -132,11 +134,12 @@ export function Header({
         {subtitle && <span>{subtitle}</span>}
       </div>
       <div className="topbar-actions">
-      {accountAction && <button type="button" className="topbar-account" onClick={accountAction.onClick}>{accountAction.label}</button>}
-      {onMenu
-        ? <button className="icon-button" aria-label="Меню" onClick={onMenu}><Menu size={20} /></button>
-        : <span className="icon-button placeholder" aria-hidden="true" />}
+        {accountAction && <button type="button" className="topbar-account" onClick={accountAction.onClick}>{accountAction.label}</button>}
+        {onMenu
+          ? <button className="icon-button" aria-label="Меню" aria-expanded={Boolean(menu)} aria-controls={menu ? 'role-switch-menu' : undefined} onClick={onMenu}><Menu size={20} /></button>
+          : <span className="icon-button placeholder" aria-hidden="true" />}
       </div>
+      {menu}
     </header>
   )
 }
@@ -212,14 +215,15 @@ function lessonsCount(count: number): string {
   return `${count} пар`
 }
 
-export function DaySchedule({ day, renderLessonExtras, onLessonClick }: {
+export function DaySchedule({ day, id, renderLessonExtras, onLessonClick }: {
   day: Day
+  id?: string
   renderLessonExtras?: (lesson: Lesson, day: Day) => ReactNode
   onLessonClick?: (lesson: Lesson, day: Day) => void
 }) {
   return (
-    <section className="day-section">
-      <div className="day-heading">
+    <section className="day-section" id={id} tabIndex={id ? -1 : undefined}>
+      <div className="day-heading" aria-current={day.is_today ? 'date' : undefined}>
         <div>
           <h2>{WEEKDAY_NAMES[day.weekday - 1]}</h2>
           <span>{dayLabel(day.date)}</span>
@@ -242,6 +246,7 @@ export function WeekGrid({
   slots,
   currentMinutes,
   onLessonClick,
+  canOpenLesson,
   onEmptySlotClick,
   notedKeys,
   homeworkCounts,
@@ -250,6 +255,7 @@ export function WeekGrid({
   slots: TimeSlot[]
   currentMinutes: number
   onLessonClick?: (lesson: Lesson, day: Day) => void
+  canOpenLesson?: (lesson: Lesson) => boolean
   onEmptySlotClick?: (day: Day, slot: TimeSlot) => void
   notedKeys?: Set<string>
   homeworkCounts?: Map<string, number>
@@ -272,7 +278,7 @@ export function WeekGrid({
   }
 
   return (
-    <div className="week-grid-scroll">
+    <div className="week-grid-scroll" role="region" aria-label="Сетка расписания на неделю" tabIndex={0}>
       <div className="week-grid" style={{ gridTemplateRows: `auto repeat(${slots.length}, 1fr)` }}>
         <div className="grid-corner" />
         {days.map((day, index) => (
@@ -314,33 +320,37 @@ export function WeekGrid({
               }
             }}
           >
-            {lessons.map((lesson) => (
-              <div
-                key={lesson.id}
-                className={`grid-lesson ${statusClass(lesson.status)} ${onLessonClick ? 'grid-lesson-selectable' : ''}`}
-                title={`${lesson.start_time}–${lesson.end_time} · ${lesson.subject} · ${lesson.type.name}`
-                  + `${lesson.teacher ? ` · ${lesson.teacher}` : ''}${lesson.online_url ? ' · Онлайн' : lesson.room ? ` · ауд. ${lesson.room}` : ''}`
-                  + (lesson.stream_diff?.length ? `\nУ групп по-разному\n${lesson.stream_diff.join('\n')}` : '')}
-                role={onLessonClick ? 'button' : undefined}
-                tabIndex={onLessonClick ? 0 : undefined}
-                onClick={onLessonClick ? () => onLessonClick(lesson, day) : undefined}
-                onKeyDown={onLessonClick ? (event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault()
-                    onLessonClick(lesson, day)
-                  }
-                } : undefined}
-              >
-                <b>{lesson.start_time}</b>
-                {lesson.stream_diff?.length ? <strong className="stream-diff-mark">У групп по-разному</strong> : null}
-                <span>{lesson.subject}</span>
-                <small>{lesson.type.name}{lesson.subgroup !== null ? ` · ${lesson.subgroup} п/гр` : ''}</small>
-                <small>{[lesson.teacher, lesson.online_url ? 'Онлайн' : lesson.room].filter(Boolean).join(' · ')}</small>
-                {STATUS_LABELS[lesson.status] && <em>{STATUS_LABELS[lesson.status]}</em>}
-                {lesson.note_key && notedKeys?.has(lesson.note_key) && <small className="private-note-mark">Моя заметка</small>}
-                {homeworkCounts?.has(`${day.date}:${lesson.id}`) && <small className="lesson-homework-badge">Домашка · {homeworkCounts.get(`${day.date}:${lesson.id}`)}</small>}
-              </div>
-            ))}
+            {lessons.map((lesson) => {
+              const open = onLessonClick && (canOpenLesson?.(lesson) ?? true) ? () => onLessonClick(lesson, day) : undefined
+              return (
+                <div
+                  key={lesson.id}
+                  className={`grid-lesson ${statusClass(lesson.status)} ${open ? 'grid-lesson-selectable' : ''}`}
+                  title={`${lesson.start_time}–${lesson.end_time} · ${lesson.subject} · ${lesson.type.name}`
+                    + `${lesson.teacher ? ` · ${lesson.teacher}` : ''}${lesson.online_url ? ' · Онлайн' : lesson.room ? ` · ауд. ${lesson.room}` : ''}`
+                    + (lesson.stream_diff?.length ? `\nУ групп по-разному\n${lesson.stream_diff.join('\n')}` : '')}
+                  role={open ? 'button' : undefined}
+                  tabIndex={open ? 0 : undefined}
+                  aria-haspopup={open ? 'dialog' : undefined}
+                  onClick={open}
+                  onKeyDown={open ? (event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      open()
+                    }
+                  } : undefined}
+                >
+                  <b>{lesson.start_time}</b>
+                  {lesson.stream_diff?.length ? <strong className="stream-diff-mark">У групп по-разному</strong> : null}
+                  <span>{lesson.subject}</span>
+                  <small>{lesson.type.name}{lesson.subgroup !== null ? ` · ${lesson.subgroup} п/гр` : ''}</small>
+                  <small>{[lesson.teacher, lesson.online_url ? 'Онлайн' : lesson.room].filter(Boolean).join(' · ')}</small>
+                  {STATUS_LABELS[lesson.status] && <em>{STATUS_LABELS[lesson.status]}</em>}
+                  {lesson.note_key && notedKeys?.has(lesson.note_key) && <small className="private-note-mark">Моя заметка</small>}
+                  {homeworkCounts?.has(`${day.date}:${lesson.id}`) && <small className="lesson-homework-badge">Домашка · {homeworkCounts.get(`${day.date}:${lesson.id}`)}</small>}
+                </div>
+              )
+            })}
           </div>
         }))}
         {lineVisible && (

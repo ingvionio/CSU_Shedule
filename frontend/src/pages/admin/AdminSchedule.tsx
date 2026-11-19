@@ -5,6 +5,7 @@ import { CalendarDays, ChevronLeft, ChevronRight, X } from 'lucide-react'
 
 import { ApiError } from '../../api/client'
 import { useCatalog, useLessonTypes, useOverrideMutations, useStreamSchedule } from '../../api/queries'
+import { useDialogFocus } from '../../dialogFocus'
 import { WeekGrid, changeDetails, dayLabel, OnlineLessonLink } from '../../ScheduleComponents'
 import type { Day, Group, Lesson, OverrideInput, OverrideKind, TimeSlot, WeekSchedule } from '../../types'
 
@@ -146,6 +147,7 @@ export function AdminSchedule({
     setAction(null)
     setError('')
   }
+  const dialog = useDialogFocus<HTMLElement>(busy ? undefined : closeDialog, selectedCell !== null)
 
   const chooseTargetGroup = (id: number) => {
     setTargetGroupIds([id])
@@ -307,13 +309,16 @@ export function AdminSchedule({
       {showStream && <p className="stream-schedule-caption">Показаны только пары, общие для всех выбранных групп ({requestGroupIds.length})</p>}
       {showStream && streamSchedule.isError && <p className="form-error" role="alert">{streamSchedule.error.message}</p>}
       {schedule
-        ? <WeekGrid
+        ? <>
+          <p className="muted admin-grid-hint">Прокрутите сетку вправо, чтобы увидеть остальные дни.</p>
+          <WeekGrid
             days={days}
             slots={slots}
             currentMinutes={currentMinutes}
             onLessonClick={openLesson}
             onEmptySlotClick={openEmptySlot}
           />
+        </>
         : !(showStream && streamSchedule.isError) && <div className="state-note">Загружаем расписание {showStream ? 'потока' : 'группы'}…</div>}
 
       {catalog.data && <>
@@ -326,7 +331,7 @@ export function AdminSchedule({
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => {
           if (event.target === event.currentTarget) closeDialog()
         }}>
-          <section className="confirm-modal admin-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="admin-dialog-title">
+          <section className="confirm-modal admin-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="admin-dialog-title" {...dialog}>
             <button className="modal-close" aria-label="Закрыть" onClick={closeDialog}><X size={18} /></button>
             <span className="eyebrow">{targetLabel}</span>
             <h2 id="admin-dialog-title">

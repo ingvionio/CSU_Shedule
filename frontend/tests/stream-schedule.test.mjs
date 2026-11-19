@@ -65,6 +65,7 @@ function harness() {
   const { AdminSchedule } = load('../src/pages/admin/AdminSchedule.tsx', {
     react: hooks, '../../api/queries': queries, '../../api/client': { ApiError: class extends Error {} },
     '../../ContextHelp': { ContextHelp: () => null }, './helpContent': { adminHelpItems: [] },
+    '../../dialogFocus': { useDialogFocus: () => ({}) },
     '../../ScheduleComponents': components,
   })
   const props = { groups, groupId: 1, weekNumber: 12, schedule: normal, days: normal.days,

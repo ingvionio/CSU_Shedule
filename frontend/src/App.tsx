@@ -5,7 +5,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { clearAdminSession, readAdminSession, readSelectedGroup, writeAdminSession, writeSelectedGroup } from './api/cache'
 import { useCurrentWeek, useGroups, useHomework, useInbox, usePersonalNotes, useSchedule, useTimeSlots } from './api/queries'
 import { forgetMoodle, logoutStudent, useStudentSession } from './api/student'
-import { BottomNav, DaySchedule, Header, PersonalNotePreview, WeekGrid, dayNumber, weekRangeLabel } from './ScheduleComponents'
+import { BottomNav, DaySchedule, Header, PersonalNotePreview, WeekGrid, dayLabel, dayNumber, weekRangeLabel } from './ScheduleComponents'
 import { AdminLogin } from './pages/admin/AdminLogin'
 import { AdminFeedback } from './pages/admin/AdminFeedback'
 import { AdminSchedule } from './pages/admin/AdminSchedule'
@@ -27,10 +27,15 @@ import type { AdminSession, Day, Group, Lesson, StudentSession, View } from './t
 
 const WEEKDAY_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
 const COURSES = [1, 2, 3, 4]
-const mobileCardsQuery = window.matchMedia('(max-width: 600px)')
-const subscribeMobileCards = (notify: () => void) => {
+const mobileCardsQuery = window.matchMedia('(width < 600px)')
+const weeklyCardsQuery = window.matchMedia('(width < 900px)')
+const subscribeScheduleLayout = (notify: () => void) => {
   mobileCardsQuery.addEventListener('change', notify)
-  return () => mobileCardsQuery.removeEventListener('change', notify)
+  weeklyCardsQuery.addEventListener('change', notify)
+  return () => {
+    mobileCardsQuery.removeEventListener('change', notify)
+    weeklyCardsQuery.removeEventListener('change', notify)
+  }
 }
 const ADMIN_SUBTITLES = {
   schedule: 'Управление расписанием',
@@ -55,7 +60,8 @@ function messageFromUrl(url: string): number | null {
 }
 
 export function App() {
-  const mobileCards = useSyncExternalStore(subscribeMobileCards, () => mobileCardsQuery.matches)
+  const mobileCards = useSyncExternalStore(subscribeScheduleLayout, () => mobileCardsQuery.matches)
+  const weeklyCards = useSyncExternalStore(subscribeScheduleLayout, () => weeklyCardsQuery.matches)
   const studentSession = useStudentSession()
   const [requestedMessage, setRequestedMessage] = useState(() => messageFromUrl(window.location.href))
   const [view, setView] = useNavigation(studentSession !== null)
@@ -68,6 +74,37 @@ export function App() {
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
+  useEffect(() => {
+    const viewport = window.visualViewport
+    if (!viewport) return
+    const root = document.documentElement
+    const reset = () => {
+      root.removeAttribute('data-keyboard-open')
+      root.style.removeProperty('--keyboard-top')
+      root.style.removeProperty('--keyboard-height')
+    }
+    const update = () => {
+      const editing = document.activeElement?.matches('textarea, input:not([type="checkbox"], [type="radio"], [type="file"])')
+      // Safari оставляет размер layout viewport прежним при открытии клавиатуры.
+      if (editing && viewport.scale === 1 && window.innerHeight - viewport.height > 100) {
+        root.setAttribute('data-keyboard-open', '')
+        root.style.setProperty('--keyboard-top', `${viewport.offsetTop}px`)
+        root.style.setProperty('--keyboard-height', `${viewport.height}px`)
+      } else if (root.hasAttribute('data-keyboard-open')) {
+        reset()
+      }
+    }
+    viewport.addEventListener('resize', update)
+    viewport.addEventListener('scroll', update)
+    document.addEventListener('focusin', update)
+    return () => {
+      viewport.removeEventListener('resize', update)
+      viewport.removeEventListener('scroll', update)
+      document.removeEventListener('focusin', update)
+      reset()
+    }
+  }, [])
+
   // Меню ☰ закрывается нажатием в любом месте вне меню и клавишей Esc.
   // Кнопку ☰ не считаем «вне»: её нажатие и так переключает меню.
   useEffect(() => {
@@ -78,7 +115,10 @@ export function App() {
       setMenuOpen(false)
     }
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setMenuOpen(false)
+      if (event.key === 'Escape') {
+        menuRef.current?.closest('header')?.querySelector<HTMLButtonElement>('[aria-controls="role-switch-menu"]')?.focus()
+        setMenuOpen(false)
+      }
     }
     document.addEventListener('pointerdown', onPointerDown)
     document.addEventListener('keydown', onKeyDown)
@@ -333,6 +373,25 @@ export function App() {
 
   const publicView = view === 'landing' || view === 'help' || view === 'feedback'
   const needsLogin = !studentSession && view !== 'admin' && !publicView
+  const noteAction = studentSession && personalNotes.isSuccess ? openNote : undefined
+
+  const renderLessonExtras = (lesson: Lesson, day: Day) => {
+    const count = homeworkCounts.get(`${day.date}:${lesson.id}`)
+    const note = lesson.note_key ? notesByKey.get(lesson.note_key) : undefined
+    return <>
+      {count !== undefined && <span className="lesson-homework-badge">Домашка · {count}</span>}
+      {view === 'week' && note && <span className="week-note-mark">Моя заметка</span>}
+      {view === 'day' && note && (
+        <PersonalNotePreview body={note.body} onOpen={mobileCards ? undefined : () => openNote(lesson, day)} />
+      )}
+      {view === 'day' && !mobileCards && (
+        <button className="button button-secondary personal-note-button" disabled={!noteAction || !lesson.note_key}
+          onClick={() => openNote(lesson, day)}>
+          {note ? 'Изменить мою заметку' : 'Моя заметка'}
+        </button>
+      )}
+    </>
+  }
 
   return (
     <>
@@ -369,28 +428,28 @@ export function App() {
           onHome={() => nav(studentSession ? 'day' : 'landing')}
           accountAction={!studentSession && publicView ? { label: 'Войти', onClick: () => nav('login') } : undefined}
           onMenu={() => setMenuOpen((open) => !open)}
+          menu={menuOpen && (
+            <div className="role-switch-menu" id="role-switch-menu" ref={menuRef}>
+              <span>МЕНЮ</span>
+              {studentSession && (
+                <div style={{ padding: '6px 12px', fontSize: '12px', color: '#666', borderBottom: '1px solid #eee' }}>
+                  <div style={{ fontWeight: 600, color: '#212529' }}>{studentSession.profile.full_name}</div>
+                  <div>Группа: {studentSession.profile.group_name ?? 'не определена'}</div>
+                </div>
+              )}
+              <button onClick={() => nav('landing')}>О проекте</button>
+              <button onClick={() => nav('help')}>Помощь</button>
+              <button onClick={() => nav('admin')}>Администрирование расписания</button>
+              {studentSession && <button onClick={handleStudentLogout}>Выйти из аккаунта</button>}
+              {studentSession && (
+                <button onClick={handleForgetMoodle} style={{ color: '#c92a2a' }}>
+                  Сбросить пароль Moodle
+                </button>
+              )}
+              {adminSession && <button onClick={logoutAdmin}>Выйти из админки</button>}
+            </div>
+          )}
         />
-        {menuOpen && (
-          <div className="role-switch-menu" ref={menuRef}>
-            <span>МЕНЮ</span>
-            {studentSession && (
-              <div style={{ padding: '6px 12px', fontSize: '12px', color: '#666', borderBottom: '1px solid #eee' }}>
-                <div style={{ fontWeight: 600, color: '#212529' }}>{studentSession.profile.full_name}</div>
-                <div>Группа: {studentSession.profile.group_name ?? 'не определена'}</div>
-              </div>
-            )}
-            <button onClick={() => nav('landing')}>О проекте</button>
-            <button onClick={() => nav('help')}>Помощь</button>
-            <button onClick={() => nav('admin')}>Администрирование расписания</button>
-            {studentSession && <button onClick={handleStudentLogout}>Выйти из аккаунта</button>}
-            {studentSession && (
-              <button onClick={handleForgetMoodle} style={{ color: '#c92a2a' }}>
-                Сбросить пароль Moodle
-              </button>
-            )}
-            {adminSession && <button onClick={logoutAdmin}>Выйти из админки</button>}
-          </div>
-        )}
 
         <main className="content">
           {view === 'landing' ? <Landing authenticated={Boolean(studentSession)} onStart={() => nav(studentSession ? 'day' : 'login')} onHelp={() => nav('help')} onAdmin={() => nav('admin')} />
@@ -526,29 +585,31 @@ export function App() {
                           </span>
                         </h1>
                       </div>
-                      <button type="button" className="today-button" onClick={goToToday}>Сегодня</button>
-                      <button
-                        className="icon-button outlined"
-                        aria-label="Предыдущая неделя"
-                        disabled={week?.prev == null}
-                        onClick={() => moveWeek(-1)}
-                      >
-                        <ChevronLeft size={18} />
-                      </button>
-                      <button
-                        className="icon-button outlined"
-                        aria-label="Следующая неделя"
-                        disabled={week?.next == null}
-                        onClick={() => moveWeek(1)}
-                      >
-                        <ChevronRight size={18} />
-                      </button>
+                      <div className="week-actions">
+                        <button type="button" className="today-button" onClick={goToToday}>Сегодня</button>
+                        <button
+                          className="icon-button outlined"
+                          aria-label="Предыдущая неделя"
+                          disabled={week?.prev == null}
+                          onClick={() => moveWeek(-1)}
+                        >
+                          <ChevronLeft size={18} />
+                        </button>
+                        <button
+                          className="icon-button outlined"
+                          aria-label="Следующая неделя"
+                          disabled={week?.next == null}
+                          onClick={() => moveWeek(1)}
+                        >
+                          <ChevronRight size={18} />
+                        </button>
+                      </div>
                     </div>
                     <div className="segmented">
-                      <button className={view === 'day' ? 'active' : ''} onClick={() => setView('day')}>
+                      <button className={view === 'day' ? 'active' : ''} aria-pressed={view === 'day'} onClick={() => setView('day')}>
                         На день
                       </button>
-                      <button className={view === 'week' ? 'active' : ''} onClick={() => setView('week')}>
+                      <button className={view === 'week' ? 'active' : ''} aria-pressed={view === 'week'} onClick={() => setView('week')}>
                         На неделю
                       </button>
                     </div>
@@ -567,76 +628,74 @@ export function App() {
 
                   {!schedule.data && schedule.isLoading && <div className="state-note">Загружаем неделю…</div>}
 
-                  {schedule.data &&
-                    (view === 'week' ? (
-                      <WeekGrid days={days} slots={timeSlots.data ?? []} currentMinutes={currentMinutes} />
-                    ) : (
-                      <>
-                        <div className="week-picker-clip">
-                          <div
-                            key={week?.number}
-                            className={`date-strip week-picker ${dragging ? 'dragging' : `slide-${slideDirection}`}`}
-                            style={dragging ? { transform: `translateX(${dragX}px)` } : undefined}
-                            onPointerDown={handleDragStart}
-                            onPointerMove={handleDragMove}
-                            onPointerUp={handleDragEnd}
-                            onPointerCancel={handleDragEnd}
-                          >
-                            {days.map((day, index) => (
-                              <button
-                                className={`date-cell ${selectedDay === index ? 'active' : ''} ${day.is_today ? 'today' : ''}`}
-                                key={day.date}
-                                aria-current={day.is_today ? 'date' : undefined}
-                                aria-pressed={selectedDay === index}
-                                onClick={() => {
-                                  if (!ignoreDateClick.current) setSelectedDay(index)
-                                }}
-                              >
-                                <span>{day.is_today ? 'Сегодня' : WEEKDAY_SHORT[index]}</span>
-                                <strong>{dayNumber(day.date)}</strong>
-                              </button>
-                            ))}
+                  {schedule.data && (
+                    <div className={view === 'day' ? 'schedule-layout schedule-layout-day' : 'schedule-layout'}>
+                      <div className="schedule-lessons">
+                        {(view === 'day' || weeklyCards) && (
+                          <div className="week-picker-clip">
+                            <div
+                              key={week?.number}
+                              className={`date-strip week-picker ${dragging ? 'dragging' : `slide-${slideDirection}`}`}
+                              style={dragging ? { transform: `translateX(${dragX}px)` } : undefined}
+                              onPointerDown={handleDragStart}
+                              onPointerMove={handleDragMove}
+                              onPointerUp={handleDragEnd}
+                              onPointerCancel={handleDragEnd}
+                            >
+                              {days.map((day, index) => (
+                                <button
+                                  className={`date-cell ${view === 'day' && selectedDay === index ? 'active' : ''} ${day.is_today ? 'today' : ''}`}
+                                  key={day.date}
+                                  aria-label={view === 'week' ? `К расписанию на ${dayLabel(day.date)}` : undefined}
+                                  aria-current={day.is_today ? 'date' : undefined}
+                                  aria-pressed={view === 'day' ? selectedDay === index : undefined}
+                                  onClick={() => {
+                                    if (ignoreDateClick.current) return
+                                    if (view === 'day') setSelectedDay(index)
+                                    else {
+                                      const section = document.getElementById(`week-day-${day.date}`)
+                                      section?.focus({ preventScroll: true })
+                                      section?.scrollIntoView({ block: 'start' })
+                                    }
+                                  }}
+                                >
+                                  <span>{day.is_today ? 'Сегодня' : WEEKDAY_SHORT[index]}</span>
+                                  <strong>{dayNumber(day.date)}</strong>
+                                </button>
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                        {days[selectedDay] && (
-                          <DaySchedule
-                            day={days[selectedDay]}
-                            onLessonClick={mobileCards && studentSession && personalNotes.isSuccess ? openNote : undefined}
-                            renderLessonExtras={
-                              studentSession
-                                ? (lesson, day) => (
-                                    <>
-                                      {homeworkCounts.has(`${day.date}:${lesson.id}`) && (
-                                        <span className="lesson-homework-badge">
-                                          Домашка · {homeworkCounts.get(`${day.date}:${lesson.id}`)}
-                                        </span>
-                                      )}
-                                      {lesson.note_key && notesByKey.get(lesson.note_key) && (
-                                        <PersonalNotePreview
-                                          key={notesByKey.get(lesson.note_key)!.id}
-                                          body={notesByKey.get(lesson.note_key)!.body}
-                                          onOpen={mobileCards ? undefined : () => openNote(lesson, day)}
-                                        />
-                                      )}
-                                      {!mobileCards && (
-                                        <button
-                                          className="button button-secondary personal-note-button"
-                                          disabled={!personalNotes.isSuccess || !lesson.note_key}
-                                          onClick={() => openNote(lesson, day)}
-                                        >
-                                          {lesson.note_key && notesByKey.has(lesson.note_key)
-                                            ? 'Изменить мою заметку'
-                                            : 'Моя заметка'}
-                                        </button>
-                                      )}
-                                    </>
-                                  )
-                                : undefined
-                            }
-                          />
                         )}
-                      </>
-                    ))}
+                        {view === 'week' ? (
+                          weeklyCards ? (
+                            <div className="week-days">
+                              {days.map((day) => (
+                                <DaySchedule key={day.date} id={`week-day-${day.date}`} day={day} onLessonClick={noteAction}
+                                  renderLessonExtras={studentSession ? renderLessonExtras : undefined} />
+                              ))}
+                            </div>
+                          ) : (
+                            <WeekGrid days={days} slots={timeSlots.data ?? []} currentMinutes={currentMinutes}
+                              homeworkCounts={homeworkCounts} notedKeys={new Set(notesByKey.keys())}
+                              onLessonClick={noteAction} canOpenLesson={(lesson) => Boolean(lesson.note_key)} />
+                          )
+                        ) : days[selectedDay] && (
+                          <DaySchedule day={days[selectedDay]} onLessonClick={mobileCards ? noteAction : undefined}
+                            renderLessonExtras={studentSession ? renderLessonExtras : undefined} />
+                        )}
+                      </div>
+
+                      {studentSession && (
+                        <GroupHomeworkPanel
+                          groupId={groupId}
+                          weekStart={schedule.data.week.start_date}
+                          weekEnd={schedule.data.week.end_date}
+                          days={days}
+                          selectedDay={selectedDay}
+                        />
+                      )}
+                    </div>
+                  )}
 
                   {schedule.data && schedule.isStale && !navigator.onLine && (
                     <div className="state-note muted">
@@ -648,16 +707,6 @@ export function App() {
                         minute: '2-digit',
                       })}
                     </div>
-                  )}
-
-                  {schedule.data && studentSession && (
-                    <GroupHomeworkPanel
-                      groupId={groupId}
-                      weekStart={schedule.data.week.start_date}
-                      weekEnd={schedule.data.week.end_date}
-                      days={days}
-                      selectedDay={selectedDay}
-                    />
                   )}
 
                   {personalNotes.isError && studentSession && (
