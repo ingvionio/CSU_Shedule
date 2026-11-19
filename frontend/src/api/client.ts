@@ -128,7 +128,9 @@ export const api = {
   productSummary: (token: string, start: string, end: string) =>
     request<ProductSummary>(`/product/summary?${new URLSearchParams({ start, end })}`, { token }),
   productUsers: (token: string, filters: ProductUserFilters) => {
-    const query = new URLSearchParams({ sort: filters.sort, limit: String(filters.limit), offset: String(filters.offset) })
+    const query = new URLSearchParams({
+      sort: filters.sort, order: filters.order, limit: String(filters.limit), offset: String(filters.offset),
+    })
     if (filters.q?.trim()) query.set('q', filters.q.trim())
     if (filters.group_id) query.set('group_id', String(filters.group_id))
     for (const key of ['last_seen_from', 'last_seen_to', 'created_from', 'created_to'] as const) {

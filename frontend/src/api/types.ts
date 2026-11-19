@@ -468,7 +468,8 @@ export type ProductUserFilters = {
   last_seen_to?: string
   created_from?: string
   created_to?: string
-  sort: 'last_seen' | 'created' | 'name'
+  sort: 'last_seen' | 'created' | 'name' | 'group'
+  order: 'asc' | 'desc'
   limit: number
   offset: number
 }

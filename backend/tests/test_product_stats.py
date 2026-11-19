@@ -460,6 +460,12 @@ def test_users_list_filters_and_card(product, product_headers, test_groups):
     assert ids() == ([old, fresh], 2)
     assert ids(sort="created")[0] == [fresh, old]
     assert ids(sort="name")[0] == [fresh, old]
+    assert ids(sort="name", order="desc")[0] == [old, fresh]
+    assert ids(sort="created", order="asc")[0] == [old, fresh]
+    # Без группы — в конце при любом направлении.
+    assert ids(sort="group")[0] == [old, fresh]
+    assert ids(sort="group", order="desc")[0] == [old, fresh]
+    assert product.get("/api/v1/product/users?order=sideways", headers=product_headers).status_code == 422
     assert ids(q="Новикова") == ([fresh], 1)
     assert ids(group_id=group_id) == ([old], 1)
     assert ids(created_from="2026-09-01", created_to="2026-09-30") == ([old], 1)

@@ -40,7 +40,8 @@ FEATURE_EVENTS = (
     ev.PUSH_SUBSCRIBED,
 )
 RETENTION_WEEKS = (1, 2, 4)
-USER_SORTS = ("last_seen", "created", "name")
+USER_SORTS = ("last_seen", "created", "name", "group")
+USER_ORDERS = ("asc", "desc")
 
 
 class ProductStatsError(Exception):
@@ -369,6 +370,7 @@ def users(
     created_from: date | None = None,
     created_to: date | None = None,
     sort: str = "last_seen",
+    order: str | None = None,
     limit: int = 50,
     offset: int = 0,
     now: datetime | None = None,
@@ -377,6 +379,10 @@ def users(
     now = now or datetime.now(timezone.utc)
     if sort not in USER_SORTS:
         raise ProductStatsError("неизвестная сортировка", 422)
+    # По умолчанию — как ожидают от столбца: даты от новых, текст по алфавиту.
+    order = order or ("asc" if sort in ("name", "group") else "desc")
+    if order not in USER_ORDERS:
+        raise ProductStatsError("порядок сортировки — asc или desc", 422)
     last_event = _last_event_subquery()
     seen = func.coalesce(last_event.c.last_at, User.last_seen_at, User.created_at)
     query = _students().outerjoin(last_event, last_event.c.user_id == User.id)
@@ -394,12 +400,13 @@ def users(
         query = query.where(User.created_at < local_midnight_utc(created_to + timedelta(days=1)))
 
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
-    order = {
-        "last_seen": (seen.desc(), User.id.desc()),
-        "created": (User.created_at.desc(), User.id.desc()),
-        "name": (User.full_name.asc(), User.id.asc()),
-    }[sort]
-    page = list(db.scalars(query.order_by(*order).limit(limit).offset(offset)).unique())
+    if sort == "group":
+        query = query.outerjoin(Group, Group.id == User.group_id)
+    column = {"last_seen": seen, "created": User.created_at, "name": User.full_name, "group": Group.name}[sort]
+    direction = column.asc() if order == "asc" else column.desc()
+    # Пустые значения (нет группы) — всегда в конце; при равенстве — по ФИО.
+    ordering = (column.is_(None), direction, User.full_name.asc(), User.id.asc())
+    page = list(db.scalars(query.order_by(*ordering).limit(limit).offset(offset)).unique())
     return {"total": total, "items": _user_rows(db, page, now)}
 
 

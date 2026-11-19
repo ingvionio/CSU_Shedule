@@ -221,11 +221,11 @@ function Kpi({ label, value, previous, hint }: { label: string; value: number | 
   )
 }
 
+/** Метрики графика и их итог за период: у «активных» и «лендинга» — уникальные за весь период, а не сумма дней. */
 const METRICS = [
-  { key: 'dau', label: 'Активные' },
-  { key: 'new_users', label: 'Новые' },
-  { key: 'login_success', label: 'Входы' },
-  { key: 'landing_devices', label: 'Лендинг' },
+  { key: 'dau', label: 'Активные', total: (data: ProductSummary) => data.active_users, unit: 'уникальных за период' },
+  { key: 'new_users', label: 'Новые', total: (data: ProductSummary) => data.users_new, unit: 'за период' },
+  { key: 'landing_devices', label: 'Лендинг', total: (data: ProductSummary) => data.funnel.landing_view, unit: 'устройств за период' },
 ] as const
 
 function Overview({ token, period, onPeriod, onLogout }: {
@@ -250,7 +250,7 @@ function Overview({ token, period, onPeriod, onLogout }: {
       <header className="pl-header">
         <div>
           <h1>Обзор</h1>
-          <p>Сравнение с предыдущими {period.preset === 'today' ? 'сутками' : 'днями той же длины'} · время по Челябинску</p>
+          <p>Изменение — к предыдущему периоду той же длины</p>
         </div>
         <PeriodPicker period={period} onChange={onPeriod} />
       </header>
@@ -270,23 +270,25 @@ function OverviewBody({ data, previous }: { data: ProductSummary; previous: Prod
     ['Вошли', data.funnel.login_success],
   ] as const
   const funnelTop = Math.max(funnel[0][1], 1)
-  const logins = previous?.daily.reduce((sum, day) => sum + day.login_success, 0)
-  const loginsNow = data.daily.reduce((sum, day) => sum + day.login_success, 0)
+  const current = METRICS.find((item) => item.key === metric)!
   const platforms = Object.entries(data.by_platform).sort((a, b) => b[1] - a[1])
 
   return (
     <>
       <section className="pl-kpis" aria-label="Ключевые показатели">
-        <Kpi label="Активные пользователи" value={data.active_users} previous={previous?.active_users} />
-        <Kpi label="Новые пользователи" value={data.users_new} previous={previous?.users_new} />
-        <Kpi label="Входы через Moodle" value={loginsNow} previous={logins} />
-        <Kpi label="DAU / WAU / MAU" value={`${data.dau} / ${data.wau} / ${data.mau}`} hint={`на ${formatDay(data.end_date)}`} />
-        <Kpi label="Всего пользователей" value={data.users_total} hint={`уведомления у ${percent(data.users_with_push, data.users_total)}`} />
+        <Kpi label="Активные пользователи" value={data.active_users} previous={previous?.active_users} hint="заходили в приложение" />
+        <Kpi label="Новые пользователи" value={data.users_new} previous={previous?.users_new} hint="вошли впервые" />
+        <Kpi label="Всего пользователей" value={data.users_total} hint="на сегодня" />
+        <Kpi label="С уведомлениями" value={percent(data.users_with_push, data.users_total)} hint={`${data.users_with_push} из ${data.users_total}`} />
       </section>
 
       <section className="pl-card">
         <div className="pl-card-head">
-          <h2>Динамика</h2>
+          <div className="pl-chart-total">
+            <h2>{current.label}</h2>
+            <strong>{current.total(data)}</strong>
+            <span className="pl-muted">{current.unit}</span>
+          </div>
           <div className="pl-segmented" role="tablist" aria-label="Метрика">
             {METRICS.map((item) => (
               <button key={item.key} role="tab" aria-selected={metric === item.key} className={metric === item.key ? 'active' : ''}
@@ -294,7 +296,7 @@ function OverviewBody({ data, previous }: { data: ProductSummary; previous: Prod
             ))}
           </div>
         </div>
-        <AreaChart label={METRICS.find((item) => item.key === metric)!.label}
+        <AreaChart label={current.label}
           dates={data.daily.map((day) => day.date)} values={data.daily.map((day) => day[metric])} />
       </section>
 
@@ -406,7 +408,23 @@ function OverviewBody({ data, previous }: { data: ProductSummary; previous: Prod
 
 /* --- Пользователи --- */
 
-const EMPTY_FILTERS: ProductUserFilters = { sort: 'last_seen', limit: PAGE, offset: 0 }
+const EMPTY_FILTERS: ProductUserFilters = { sort: 'last_seen', order: 'desc', limit: PAGE, offset: 0 }
+
+type SortKey = ProductUserFilters['sort']
+
+/** Заголовок столбца, как в проводнике: щелчок сортирует, повторный — в обратную сторону. */
+function SortHeader({ label, column, filters, onSort, className }: {
+  label: string; column: SortKey; filters: ProductUserFilters; onSort: (column: SortKey) => void; className?: string
+}) {
+  const active = filters.sort === column
+  return (
+    <th className={className} aria-sort={active ? (filters.order === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <button type="button" className={`pl-sort ${active ? 'active' : ''}`} onClick={() => onSort(column)}>
+        {label}<span aria-hidden="true">{active ? (filters.order === 'asc' ? '▲' : '▼') : ''}</span>
+      </button>
+    </th>
+  )
+}
 
 function UsersPage({ token, onLogout, onOpen }: { token: string; onLogout: () => void; onOpen: (id: number) => void }) {
   const [draft, setDraft] = useState<ProductUserFilters>(EMPTY_FILTERS)
@@ -429,6 +447,13 @@ function UsersPage({ token, onLogout, onOpen }: { token: string; onLogout: () =>
     setFilters(EMPTY_FILTERS)
   }
   const page = (offset: number) => setFilters((current) => ({ ...current, offset }))
+  const sortBy = (column: SortKey) => {
+    const order = filters.sort === column
+      ? (filters.order === 'asc' ? 'desc' : 'asc')
+      : (column === 'name' || column === 'group' ? 'asc' : 'desc')
+    setDraft((current) => ({ ...current, sort: column, order }))
+    setFilters((current) => ({ ...current, sort: column, order, offset: 0 }))
+  }
 
   return (
     <>
@@ -464,13 +489,6 @@ function UsersPage({ token, onLogout, onOpen }: { token: string; onLogout: () =>
             <input className="pl-input" type="date" aria-label="Первый вход по" value={draft.created_to ?? ''} onChange={(event) => set({ created_to: event.target.value })} />
           </span>
         </div>
-        <label className="pl-field">Сортировка
-          <select className="pl-input" value={draft.sort} onChange={(event) => set({ sort: event.target.value as ProductUserFilters['sort'] })}>
-            <option value="last_seen">Последний заход</option>
-            <option value="created">Первый вход</option>
-            <option value="name">ФИО</option>
-          </select>
-        </label>
         <div className="pl-filter-actions">
           <button className="pl-button pl-button-primary">Применить</button>
           <button type="button" className="pl-button" onClick={reset}>Сбросить</button>
@@ -483,7 +501,14 @@ function UsersPage({ token, onLogout, onOpen }: { token: string; onLogout: () =>
           <div className="pl-scroll">
             <table className="pl-table pl-table-rows">
               <thead>
-                <tr><th>Студент</th><th>Группа</th><th>Последний заход</th><th>Первый вход</th><th className="num">Дней за 30</th><th>Платформа</th></tr>
+                <tr>
+                  <SortHeader label="Студент" column="name" filters={filters} onSort={sortBy} />
+                  <SortHeader label="Группа" column="group" filters={filters} onSort={sortBy} />
+                  <SortHeader label="Последний заход" column="last_seen" filters={filters} onSort={sortBy} />
+                  <SortHeader label="Первый вход" column="created" filters={filters} onSort={sortBy} />
+                  <th className="num">Дней за 30</th>
+                  <th>Платформа</th>
+                </tr>
               </thead>
               <tbody>
                 {users.data.items.map((user) => (

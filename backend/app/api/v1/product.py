@@ -59,7 +59,8 @@ def get_users(
     last_seen_to: date | None = None,
     created_from: date | None = Query(None, description="первый вход не раньше"),
     created_to: date | None = Query(None, description="первый вход не позже"),
-    sort: Literal["last_seen", "created", "name"] = "last_seen",
+    sort: Literal["last_seen", "created", "name", "group"] = "last_seen",
+    order: Literal["asc", "desc"] | None = Query(None, description="по умолчанию: даты — desc, ФИО и группа — asc"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -73,6 +74,7 @@ def get_users(
         created_from=created_from,
         created_to=created_to,
         sort=sort,
+        order=order,
         limit=limit,
         offset=offset,
     )

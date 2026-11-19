@@ -156,3 +156,13 @@ body.pl-body { background: #0e1014; }
   .pl-popover { grid-template-columns: 1fr; }
   .pl-popover ul { border-right: 0; border-bottom: 1px solid var(--pl-line); }
 }
+
+/* Итог за период у графика */
+.pl-chart-total { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.pl-chart-total h2 { width: 100%; color: var(--pl-muted); font-weight: 500; }
+.pl-chart-total strong { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+
+/* Сортировка по заголовку столбца, как в проводнике */
+.pl-sort { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+.pl-sort:hover, .pl-sort.active { color: var(--pl-text); }
+.pl-sort span { min-width: 8px; font-size: 9px; }
