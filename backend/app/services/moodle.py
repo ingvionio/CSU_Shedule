@@ -28,8 +28,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.models import Group, User
+from app.services.groups import MASTER_DIRECTIONS, direction_of, level_of
 
 logger = logging.getLogger(__name__)
+
+COURSE_DIRECTIONS = {d.upper(): d for d in (*MASTER_DIRECTIONS, "ПрИ", "ПИ", "БИ", "КБ")}
+GROUP_SEPARATOR = r"\s*[-–—]?\s*"
+COURSE_GROUP_TAG = re.compile(
+    rf"\b({'|'.join(COURSE_DIRECTIONS)}){GROUP_SEPARATOR}(\d{{1,3}})\b",
+    re.IGNORECASE,
+)
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -389,19 +397,15 @@ def extract_student_group_info(
     else:
         current_courses = [t for _, t in course_items]
 
-    # Ищем теги направлений: ПрИ, ПИ, БИ, КБ с цифрой курса (1-4) или группы (101-402)
-    # Направление ПрИ проверяем раньше ПИ!
-    tag_pattern = re.compile(r"\b(ПрИ|ПИ|БИ|КБ)[-–—]?(\d{1,3})\b", re.IGNORECASE)
-
     dir_course_scores: Counter[tuple[str, int]] = Counter()
 
     for text in current_courses:
-        raw_tags = tag_pattern.findall(text)
+        raw_tags = COURSE_GROUP_TAG.findall(text)
         if not raw_tags:
             continue
         parsed_tags: list[tuple[str, int, int]] = []
         for d, num_str in raw_tags:
-            d_norm = d.upper().replace("РИ", "рИ")
+            d_norm = COURSE_DIRECTIONS[d.upper()]
             num = int(num_str)
             course_digit = num if num < 10 else num // 100
             parsed_tags.append((d_norm, course_digit, num))
@@ -418,9 +422,9 @@ def extract_student_group_info(
     if not dir_course_scores:
         # Fallback: поиск по всем курсам без учета года
         all_text = " \n ".join(t for _, t in course_items)
-        raw_tags = tag_pattern.findall(all_text)
+        raw_tags = COURSE_GROUP_TAG.findall(all_text)
         for d, num_str in raw_tags:
-            d_norm = d.upper().replace("РИ", "рИ")
+            d_norm = COURSE_DIRECTIONS[d.upper()]
             num = int(num_str)
             course_digit = num if num < 10 else num // 100
             dir_course_scores[(d, course_digit)] += 1
@@ -432,14 +436,15 @@ def extract_student_group_info(
 
     # Определяем номер подгруппы (индекс группы: 1, 2, 3...)
     all_current_text = " \n ".join(current_courses)
-    curr_sub_matches = re.findall(rf"\b{re.escape(best_dir)}[-–—]?{best_course}(\d{{2}})\b", all_current_text, re.IGNORECASE)
+    group_prefix = rf"\b{re.escape(best_dir)}{GROUP_SEPARATOR}"
+    curr_sub_matches = re.findall(rf"{group_prefix}{best_course}(\d{{2}})\b", all_current_text, re.IGNORECASE)
 
     group_idx = 1
     if curr_sub_matches:
         group_idx = Counter(int(m) for m in curr_sub_matches).most_common(1)[0][0]
     else:
         all_text = " \n ".join(t for _, t in course_items)
-        hist_sub_matches = re.findall(rf"\b{re.escape(best_dir)}[-–—]?\d(\d{{2}})\b", all_text, re.IGNORECASE)
+        hist_sub_matches = re.findall(rf"{group_prefix}\d(\d{{2}})\b", all_text, re.IGNORECASE)
         if hist_sub_matches:
             group_idx = Counter(int(m) for m in hist_sub_matches).most_common(1)[0][0]
 
@@ -470,9 +475,12 @@ def match_student_group(
     direction, course_num, group_idx = extract_student_group_info(courses, profile_html)
 
     if direction and course_num:
+        level = level_of(direction)
         canonical_short = f"{direction}-{course_num}{group_idx:02d}"
-        canonical_long = f"ИТ{course_num}-{direction}б-{course_num}{group_idx}"
-        candidates_norm = {normalize_group_key(canonical_short), normalize_group_key(canonical_long)}
+        candidates_norm = {normalize_group_key(canonical_short)}
+        if level == "bachelor":
+            canonical_long = f"ИТ{course_num}-{direction}б-{course_num}{group_idx}"
+            candidates_norm.add(normalize_group_key(canonical_long))
 
         # 1. Поиск прямого соответствия каноническому названию группы в known_groups
         for g in known_groups:
@@ -483,7 +491,7 @@ def match_student_group(
         # 2. Поиск по направлению и курсу среди known_groups
         matched_by_course_and_dir = [
             g for g in known_groups
-            if g.course == course_num and (
+            if g.course == course_num and level_of(direction_of(g.name) or g.direction) == level and (
                 (g.direction and g.direction.upper() == direction.upper())
                 or direction.lower() in g.name.lower()
             )
@@ -602,8 +610,6 @@ async def authenticate_and_detect_student(
             if existing is not None:
                 detected_group = existing
             else:
-                from app.services.groups import direction_of
-
                 c_match = re.search(r"(\d)", explicit_name)
                 c_num = int(c_match.group(1)) if c_match else 1
                 detected_group = Group(

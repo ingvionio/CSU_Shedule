@@ -164,6 +164,29 @@ def test_match_student_group_multiyear_and_stream():
     assert matched == g_pri401
 
 
+@pytest.mark.parametrize(
+    ("direction", "separator"),
+    [("МПИ", "-"), ("МПрИ", " "), ("МИТ", "–"), ("МБИ", " ")],
+)
+def test_match_student_group_prefers_current_masters_courses(direction, separator):
+    bachelor = Group(id=1, name="БИ 201", course=2, direction="БИ")
+    other_master = Group(id=2, name=f"{direction} 201", course=2, direction=direction)
+    master = Group(id=3, name=f"{direction} 202", course=2, direction=direction)
+    courses = [
+        {"fullname": "Экономика (БИ-201) 2023-2024"},
+        {"fullname": f"Исследовательский семинар ({direction.lower()}{separator}202) 2026-2027"},
+    ]
+
+    assert match_student_group(courses, "", [bachelor, other_master, master]) == master
+
+
+def test_match_student_group_does_not_treat_master_as_bachelor_alias():
+    master = Group(id=1, name="МПИ-202", course=2, direction="МПИ")
+    courses = [{"fullname": "Программирование (ПИ-202) 2026-2027"}]
+
+    assert match_student_group(courses, "", [master]) is None
+
+
 def test_match_student_group_long_name_alias():
     # База содержит группу в формате "ИТ4-ПрИб-41"
     g_long = Group(id=20, name="ИТ4-ПрИб-41", course=4, direction="ПрИ")
