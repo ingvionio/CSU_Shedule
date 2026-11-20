@@ -8,8 +8,11 @@ from datetime import datetime, timedelta, timezone
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.db import get_db
+from app.models import User
 
 ALGORITHM = "HS256"
 ROLE_ADMIN = "admin"
@@ -53,12 +56,13 @@ def authenticate_product(login: str, password: str) -> tuple[str, datetime]:
     return _authenticate(login, password, settings.product_login, settings.product_password, ROLE_PRODUCT)
 
 
-def _payload(credentials: HTTPAuthorizationCredentials | None, missing: str) -> dict:
+def _payload(credentials: HTTPAuthorizationCredentials | None, missing: str, *, verify_exp: bool = True) -> dict:
     if credentials is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, missing)
 
     try:
-        return jwt.decode(credentials.credentials, get_settings().jwt_secret, algorithms=[ALGORITHM])
+        return jwt.decode(credentials.credentials, get_settings().jwt_secret, algorithms=[ALGORITHM],
+                          options={"verify_exp": verify_exp, "require": ["sub", "role", "exp"]})
     except jwt.ExpiredSignatureError as error:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "сессия истекла, войдите снова") from error
     except jwt.InvalidTokenError as error:
@@ -73,12 +77,45 @@ async def require_admin(credentials: HTTPAuthorizationCredentials | None = Depen
     return payload["sub"]
 
 
-async def require_student(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> int:
-    """Зависимость для эндпоинтов /me. Возвращает id студента."""
-    payload = _payload(credentials, "нужен профиль студента")
+async def _student_session(credentials: HTTPAuthorizationCredentials | None, db: AsyncSession, *, verify_exp: bool = True) -> User:
+    from app.services.moodle import MoodleAuthError
+    from app.services.moodle_sessions import require_session
+
+    payload = _payload(credentials, "нужен вход через Moodle", verify_exp=verify_exp)
     if payload.get("role") != ROLE_STUDENT:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "доступно только студенту")
-    return int(payload["sub"])
+    try:
+        user_id = int(payload["sub"])
+        sid = payload.get("sid")
+        if not isinstance(sid, str):
+            raise ValueError("Отсутствует серверная сессия")
+        return await require_session(db, user_id, sid)
+    except (KeyError, ValueError, TypeError, MoodleAuthError):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "сессия завершена, войдите через Moodle") from None
+
+
+async def require_student(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> int:
+    return (await _student_session(credentials, db)).id
+
+
+async def refreshable_student(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> User:
+    # Истечение JWT допустимо только здесь: подпись, sid и срок общей сессии проверяются всегда.
+    return await _student_session(credentials, db, verify_exp=False)
+
+
+def issue_student_token(user: User) -> tuple[str, datetime]:
+    from app.services.moodle_sessions import session_expires_at
+
+    expires_at = session_expires_at(user)
+    token = jwt.encode({"sub": str(user.id), "role": ROLE_STUDENT, "sid": user.moodle_session_id,
+                        "exp": expires_at}, get_settings().jwt_secret, algorithm=ALGORITHM)
+    return token, expires_at
 
 
 async def require_product(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> str:
@@ -89,17 +126,13 @@ async def require_product(credentials: HTTPAuthorizationCredentials | None = Dep
     return payload["sub"]
 
 
-async def optional_student(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> int | None:
-    """id студента, если передан его действующий токен; иначе None, без ошибки."""
+async def optional_student(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> int | None:
     if credentials is None:
         return None
     try:
-        payload = jwt.decode(credentials.credentials, get_settings().jwt_secret, algorithms=[ALGORITHM])
-    except jwt.InvalidTokenError:
-        return None
-    if payload.get("role") != ROLE_STUDENT:
-        return None
-    try:
-        return int(payload["sub"])
-    except (KeyError, TypeError, ValueError):
+        return (await _student_session(credentials, db)).id
+    except HTTPException:
         return None

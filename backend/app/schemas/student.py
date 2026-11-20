@@ -8,13 +8,6 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-class StudentRegisterIn(BaseModel):
-    full_name: str = Field(min_length=3, max_length=200, description="ФИО — персональные данные")
-    group_id: int
-    # Случайный ключ устройства (тот же, что у обращений). По нему находится профиль.
-    device_key: str = Field(min_length=16, max_length=128)
-
-
 class MoodleLoginIn(BaseModel):
     """Вход через учетную запись Moodle ИИТ ЧелГУ."""
 
@@ -41,6 +34,10 @@ class StudentTokenOut(BaseModel):
 
 class MeOut(StudentProfileOut):
     unread_count: int
+
+
+class StudentRefreshIn(BaseModel):
+    active: bool = False
 
 
 class PushKeysIn(BaseModel):

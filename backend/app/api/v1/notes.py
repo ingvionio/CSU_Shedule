@@ -80,8 +80,9 @@ async def save_note(data: NoteIn, user: User = Depends(current_student), db: Asy
         await db.rollback()
         raise HTTPException(409, "Заметка уже создана. Обновите страницу") from error
     await db.refresh(item)
+    response = NoteOut.model_validate(item)
     await product_events.record_server_event(db, product_events.NOTE_SAVED, user_id=user.id)
-    return item
+    return response
 
 
 @router.delete("/{note_id}", status_code=204)

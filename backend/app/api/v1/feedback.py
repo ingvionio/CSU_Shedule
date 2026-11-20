@@ -127,6 +127,7 @@ async def create_feedback(
     except feedback_service.FeedbackError as error:
         raise _raise(error) from error
 
+    response = FeedbackCreatedOut(id=message.id, kind_title=KIND_TITLES[message.kind])
     # Токен устройства обращений — тот же ключ, что у статистики: без входа считаем по устройству.
     await product_events.record_server_event(
         db,
@@ -138,7 +139,7 @@ async def create_feedback(
     )
 
     background.add_task(deliver_by_ids, outbox_ids)
-    return FeedbackCreatedOut(id=message.id, kind_title=KIND_TITLES[message.kind])
+    return response
 
 
 @router.get("/feedback/mine", response_model=list[MyFeedbackOut], summary="Мои обращения и ответы на них")

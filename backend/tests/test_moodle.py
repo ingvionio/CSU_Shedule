@@ -98,7 +98,7 @@ async def test_invalid_moodle_id_cannot_overwrite_existing_account(invalid_id):
             )
 
             with pytest.raises(MoodleError, match="идентификатор"):
-                await save_or_update_student(db, data, "password", None, None)
+                await save_or_update_student(db, data, None, None)
 
             db.expire_all()
             stored = await db.get(User, victim_id)

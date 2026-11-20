@@ -2,6 +2,7 @@ import os
 import unicodedata
 from collections.abc import AsyncIterator
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 # База для тестов — отдельный SQLite-файл, настройки читаются при импорте app.core.db.
 TEST_DB = Path(__file__).parent / "test_api.db"
@@ -9,6 +10,7 @@ os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{TEST_DB.as_posix()}"
 os.environ["ADMIN_LOGIN"] = "admin"
 os.environ["ADMIN_PASSWORD"] = "secret"
 os.environ["JWT_SECRET"] = "test-secret"
+os.environ["MOODLE_ENCRYPTION_KEY"] = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
 
 # backend/.env разработчика (настоящий SMTP, ключи push, Moodle) в тестах не
 # читаем: иначе тесты слали бы реальные письма и зависели от чужих настроек.
@@ -40,6 +42,12 @@ def _find_excel() -> Path:
 
 
 EXCEL = _find_excel()
+
+
+@pytest.fixture(autouse=True)
+def no_background_moodle(monkeypatch):
+    # Фоновый worker проверяется отдельно; обычные API-тесты не запускают сеть и таймеры.
+    monkeypatch.setattr("app.services.moodle_sessions.run_worker", AsyncMock())
 
 
 @pytest.fixture(scope="session")

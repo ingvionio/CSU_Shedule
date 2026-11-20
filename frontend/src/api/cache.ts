@@ -103,8 +103,7 @@ export function feedbackToken(): string {
 const STUDENT_KEY = 'student-session'
 
 /**
- * Профиль студента на устройстве. Возвращается и с истёкшим токеном:
- * по профилю фронт сам зарегистрируется заново (см. `studentToken`).
+ * Истёкший JWT можно обменять только при действующей общей серверной сессии.
  */
 export function readStudentSession(): StudentSession | null {
   const session = readCache<StudentSession>(STUDENT_KEY)

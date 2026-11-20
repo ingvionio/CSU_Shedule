@@ -5,27 +5,18 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import get_settings
 from app.core.db import get_db
-from app.core.security import (
-    ROLE_STUDENT,
-    AuthError,
-    authenticate_admin,
-    authenticate_product,
-    issue_token,
-    require_student,
-)
+from app.core.security import AuthError, authenticate_admin, authenticate_product, issue_student_token, refreshable_student
 from app.models import User
 from app.schemas.admin import LoginIn, TokenOut
 from app.schemas.student import (
     MoodleLoginIn,
     StudentProfileOut,
-    StudentRegisterIn,
+    StudentRefreshIn,
     StudentTokenOut,
 )
 from app.services import moodle as moodle_service
-from app.services import product_events
-from app.services import students as students_service
+from app.services import moodle_sessions, product_events
 
 router = APIRouter()
 
@@ -62,19 +53,18 @@ async def moodle_login(
         user, _ = await moodle_service.save_or_update_student(
             db=db,
             moodle_data=moodle_data,
-            plain_password=data.password,
             device_key=data.device_key,
             ip=request.client.host if request.client else None,
         )
     except moodle_service.MoodleError as err:
-        # Неудачный вход мог успеть что-то добавить в сессию — событие пишем с чистого листа.
         await db.rollback()
         await product_events.record_server_event(db, _login_failure_event(err), user_id=None, **client)
         raise HTTPException(err.status_code, str(err)) from err
 
+    token, expires_at = issue_student_token(user)
+    response = StudentTokenOut(access_token=token, expires_at=expires_at, profile=profile_out(user))
     await product_events.record_server_event(db, product_events.LOGIN_SUCCESS, user_id=user.id, **client)
-    token, expires_at = issue_token(str(user.id), ROLE_STUDENT, get_settings().student_jwt_ttl_hours)
-    return StudentTokenOut(access_token=token, expires_at=expires_at, profile=profile_out(user))
+    return response
 
 
 def _login_failure_event(error: moodle_service.MoodleError) -> str:
@@ -85,31 +75,32 @@ def _login_failure_event(error: moodle_service.MoodleError) -> str:
     return product_events.LOGIN_FAILED_OTHER
 
 
-@router.post("/auth/moodle/forget", summary="Сбросить сохраненный пароль и сессию Moodle")
+@router.post("/auth/moodle/forget", summary="Завершить общую сессию на всех устройствах")
 async def moodle_forget(
-    user_id: int = Depends(require_student),
+    user: User = Depends(refreshable_student),
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict[str, str]:
-    user = await students_service.get_student(db, user_id)
-    user.moodle_encrypted_password = None
-    user.moodle_session_cookie = None
-    user.moodle_sesskey = None
-    user.moodle_session_expires_at = None
-    user.moodle_auth_error = True
-    await db.commit()
+    await moodle_sessions.revoke_session(db, user.id, user.moodle_session_id)
     return {"status": "ok"}
 
 
-@router.post("/auth/student/register", response_model=StudentTokenOut, summary="Резервная регистрация студента: ФИО и группа")
-async def student_register(data: StudentRegisterIn, request: Request, db: AsyncSession = Depends(get_db, scope="function")) -> StudentTokenOut:
-    try:
-        user, _ = await students_service.register(
-            db, data.full_name, data.group_id, data.device_key, request.client.host if request.client else None
-        )
-    except students_service.StudentError as error:
-        raise HTTPException(error.status_code, str(error)) from error
+@router.post("/auth/student/register", deprecated=True, summary="Устаревший способ входа отключён")
+async def student_register() -> None:
+    raise HTTPException(status.HTTP_410_GONE, "Вход по ФИО и группе отключён. Войдите через Moodle")
 
-    token, expires_at = issue_token(str(user.id), ROLE_STUDENT, get_settings().student_jwt_ttl_hours)
+
+@router.post("/auth/student/refresh", response_model=StudentTokenOut, summary="Обновить токен действующей общей сессии")
+async def student_refresh(
+    data: StudentRefreshIn,
+    user: User = Depends(refreshable_student),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> StudentTokenOut:
+    try:
+        if data.active:
+            user = await moodle_sessions.record_activity(db, user)
+    except moodle_service.MoodleAuthError as error:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(error)) from error
+    token, expires_at = issue_student_token(user)
     return StudentTokenOut(access_token=token, expires_at=expires_at, profile=profile_out(user))
 
 

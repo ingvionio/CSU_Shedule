@@ -1,11 +1,13 @@
+import base64
 from functools import lru_cache
 
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL, make_url
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore", hide_input_in_errors=True)
 
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/csu_schedule"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
@@ -41,11 +43,6 @@ class Settings(BaseSettings):
     feedback_rate_limit_per_hour: int = 5
     feedback_ip_rate_limit_per_hour: int = 40
 
-    # Студенты: профиль ФИО + группа. Токен живёт долго; истёк — фронт
-    # регистрируется заново тем же ключом устройства и получает того же пользователя.
-    student_jwt_ttl_hours: int = 24 * 60
-    # Новых профилей с одного IP за час (общий Wi-Fi вуза — лимит мягкий).
-    student_register_ip_limit_per_hour: int = 60
     # Сообщения группе/курсу/потоку за столько дней достаются и тем,
     # кто зарегистрировался или сменил группу после отправки.
     messages_late_join_days: int = 14
@@ -61,9 +58,19 @@ class Settings(BaseSettings):
 
     # Интеграция с Moodle ИИТ ЧелГУ (eu.iit.csu.ru)
     moodle_base_url: str = "https://eu.iit.csu.ru"
-    moodle_encryption_key: str = ""
+    moodle_encryption_key: SecretStr
     moodle_mock: bool = False
-    moodle_session_ttl_hours: int = 3
+
+    @field_validator("moodle_encryption_key")
+    @classmethod
+    def validate_moodle_key(cls, value: SecretStr) -> SecretStr:
+        try:
+            decoded = base64.b64decode(value.get_secret_value(), validate=True)
+        except ValueError:
+            raise ValueError("MOODLE_ENCRYPTION_KEY должен быть ключом из 32 случайных байт в base64") from None
+        if len(decoded) != 32:
+            raise ValueError("MOODLE_ENCRYPTION_KEY должен содержать ровно 32 байта")
+        return value
 
     @property
     def cors_origin_list(self) -> list[str]:

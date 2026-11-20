@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 
 import { clearAdminSession, readAdminSession, readSelectedGroup, writeAdminSession, writeSelectedGroup } from './api/cache'
 import { useCurrentWeek, useGroups, useHomework, useInbox, usePersonalNotes, useSchedule, useTimeSlots } from './api/queries'
-import { forgetMoodle, logoutStudent, useStudentSession } from './api/student'
+import { logoutStudent, useStudentActivity, useStudentSession } from './api/student'
 import { BottomNav, DaySchedule, Header, PersonalNotePreview, WeekGrid, dayNumber, weekRangeLabel } from './ScheduleComponents'
 import { AdminLogin } from './pages/admin/AdminLogin'
 import { AdminFeedback } from './pages/admin/AdminFeedback'
@@ -56,6 +56,7 @@ function messageFromUrl(url: string): number | null {
 }
 
 export function App() {
+  useStudentActivity()
   const mobileCards = useSyncExternalStore(subscribeMobileCards, () => mobileCardsQuery.matches)
   const studentSession = useStudentSession()
   const [requestedMessage, setRequestedMessage] = useState(() => messageFromUrl(window.location.href))
@@ -67,6 +68,7 @@ export function App() {
   const followCurrentWeek = useRef(true)
   const [now, setNow] = useState(() => new Date())
   const [menuOpen, setMenuOpen] = useState(false)
+  const [sessionError, setSessionError] = useState('')
   const menuRef = useRef<HTMLDivElement>(null)
 
   // Статистика ЛК продукта: заход в приложение (запуск или возврат после паузы).
@@ -217,6 +219,7 @@ export function App() {
   }
 
   const handleMoodleLogin = (session: StudentSession) => {
+    setSessionError('')
     setGroupId(session.profile.group_id)
     if (session.profile.group_id) {
       setGroupId(session.profile.group_id)
@@ -232,16 +235,17 @@ export function App() {
     queryClient.invalidateQueries({ queryKey: ['inbox'] })
   }
 
-  const handleStudentLogout = () => {
-    logoutStudent()
-    setGroupId(null)
-    setRequestedMessage(null)
-    setView('landing', true)
-    setMenuOpen(false)
-  }
-
-  const handleForgetMoodle = async () => {
-    await forgetMoodle()
+  const handleStudentLogout = async () => {
+    setSessionError('')
+    try {
+      await logoutStudent()
+    } catch (error) {
+      setSessionError(`Не удалось выйти на всех устройствах. ${(error as Error).message}`)
+      return
+    }
+    queryClient.removeQueries({ queryKey: ['inbox'] })
+    queryClient.removeQueries({ queryKey: ['homework'] })
+    queryClient.removeQueries({ queryKey: ['personal-notes'] })
     setGroupId(null)
     setRequestedMessage(null)
     setView('landing', true)
@@ -397,17 +401,13 @@ export function App() {
             <button onClick={() => nav('landing')}>О проекте</button>
             <button onClick={() => nav('help')}>Помощь</button>
             <button onClick={() => nav('admin')}>Администрирование расписания</button>
-            {studentSession && <button onClick={handleStudentLogout}>Выйти из аккаунта</button>}
-            {studentSession && (
-              <button onClick={handleForgetMoodle} style={{ color: '#c92a2a' }}>
-                Сбросить пароль Moodle
-              </button>
-            )}
+            {studentSession && <button onClick={handleStudentLogout}>Выйти на всех устройствах</button>}
             {adminSession && <button onClick={logoutAdmin}>Выйти из админки</button>}
           </div>
         )}
 
         <main className="content">
+          {sessionError && <div className="form-error" role="alert">{sessionError}</div>}
           {view === 'landing' ? <Landing authenticated={Boolean(studentSession)} onStart={() => nav(studentSession ? 'day' : 'login')} onHelp={() => nav('help')} onAdmin={() => nav('admin')} />
           : view === 'help' ? <Help authenticated={Boolean(studentSession)} onNavigate={nav} />
           : needsLogin ? (
@@ -456,8 +456,8 @@ export function App() {
                       <button className="button button-primary" onClick={() => nav('day')}>
                         К расписанию
                       </button>
-                      <button className="button button-logout" onClick={handleForgetMoodle}>
-                        Выйти из Moodle
+                      <button className="button button-logout" onClick={handleStudentLogout}>
+                        Выйти на всех устройствах
                       </button>
                     </div>
                   </section>
@@ -521,7 +521,7 @@ export function App() {
               {view === 'feedback' && <StudentFeedback groupId={groupId} />}
 
               {view === 'messages' && (
-                <StudentMessages group={selectedGroup} onChooseGroup={() => nav('group')} requestedId={requestedMessage} />
+                <StudentMessages requestedId={requestedMessage} />
               )}
 
               {groupId === null && (view === 'day' || view === 'week') && !groups.isLoading && !groups.isError && (

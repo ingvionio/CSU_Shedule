@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -13,10 +14,19 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    from app.services.moodle_sessions import run_worker
+
+    worker = asyncio.create_task(run_worker(), name="moodle-sessions")
     try:
         yield
     finally:
-        await engine.dispose()
+        worker.cancel()
+        try:
+            await worker
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await engine.dispose()
 
 
 app = FastAPI(

@@ -6,6 +6,7 @@ from sqlalchemy import delete
 
 from app.core.db import SessionLocal
 import pytest
+from tests.moodle_helpers import login_student
 
 from app.models import GroupEditor, GroupHomework, HomeworkCompletion, HomeworkRevision, User
 
@@ -24,7 +25,7 @@ async def _clean_homework(db_schema):
 
 
 async def student(client, group_id, name, device):
-    response = await client.post(f"{API}/auth/student/register", json={"full_name": name, "group_id": group_id, "device_key": device})
+    response = await login_student(client, group_id, name, device)
     assert response.status_code == 200, response.text
     body = response.json()
     return body["profile"]["id"], {"Authorization": f"Bearer {body['access_token']}"}

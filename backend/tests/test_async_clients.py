@@ -55,7 +55,7 @@ async def test_moodle_wait_does_not_block_api_and_client_is_closed(bare_client, 
             return httpx.Response(303, headers={"Location": "/my/", "Set-Cookie": "MoodleSession=value; Path=/"})
         assert "MoodleSession=value" in request.headers["cookie"]
         if path == "/my/":
-            return httpx.Response(200, text='{"sesskey": "key"}')
+            return httpx.Response(200, text='{"sesskey": "key", "sessiontimeout": 7200}')
         if path == "/user/profile.php" and "id" not in request.url.params:
             return httpx.Response(302, headers={"Location": "/user/profile.php?id=123456"})
         if path == "/user/profile.php":

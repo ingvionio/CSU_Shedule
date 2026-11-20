@@ -11,6 +11,7 @@ from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.models import Message, MessageRecipient, PushSubscription
 from app.services import push as push_service
+from tests.moodle_helpers import login_student
 
 API = "/api/v1"
 
@@ -53,9 +54,7 @@ def sent(monkeypatch) -> list[tuple[str, dict]]:
 
 
 async def student(client, group_id, device):
-    response = await client.post(
-        f"{API}/auth/student/register", json={"full_name": "Аня Андреева", "group_id": group_id, "device_key": device}
-    )
+    response = await login_student(client, group_id, "Аня Андреева", device)
     body = response.json()
     return body["profile"]["id"], {"Authorization": f"Bearer {body['access_token']}"}
 

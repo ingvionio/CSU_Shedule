@@ -179,8 +179,8 @@ export const api = {
     request<StudentTokenResponse>('/auth/moodle/login', { method: 'POST', body: { username, password, device_key } }),
   moodleForget: (token: string) =>
     request<{ status: string }>('/auth/moodle/forget', { method: 'POST', token }),
-  studentRegister: (full_name: string, group_id: number, device_key: string) =>
-    request<StudentTokenResponse>('/auth/student/register', { method: 'POST', body: { full_name, group_id, device_key } }),
+  studentRefresh: (token: string, active = false) =>
+    request<StudentTokenResponse>('/auth/student/refresh', { method: 'POST', token, body: { active } }),
   me: (token: string) => request<StudentProfile & { unread_count: number }>('/me', { token }),
   inbox: (token: string) => request<Inbox>('/me/messages', { token }),
   openMessage: (token: string, id: number) => request<InboxMessage>(`/me/messages/${id}`, { token }),

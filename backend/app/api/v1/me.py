@@ -43,8 +43,9 @@ async def subscribe_push(
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> PushSubscriptionOut:
     subscription = await push_service.subscribe(db, user.id, data.endpoint, data.keys.p256dh, data.keys.auth, user_agent)
+    response = PushSubscriptionOut(id=subscription.id)
     await product_events.record_server_event(db, product_events.PUSH_SUBSCRIBED, user_id=user.id)
-    return PushSubscriptionOut(id=subscription.id)
+    return response
 
 
 @router.delete("/push-subscriptions/{subscription_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Отписаться")

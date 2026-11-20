@@ -1,22 +1,19 @@
 import { ContextHelp } from '../../ContextHelp'
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState } from 'react'
 import { BellOff, BellRing, CheckCircle2, RefreshCw, UserRound, X } from 'lucide-react'
 
 import { usePush, type PushState } from '../../api/push'
 import { useInbox, useInboxMutations } from '../../api/queries'
-import { registerStudent, useStudentSession } from '../../api/student'
-import type { Group, InboxMessage } from '../../types'
+import { useStudentSession } from '../../api/student'
+import type { InboxMessage } from '../../types'
 import { IMPORTANCE_TITLES, messageDate } from './labels'
 
 type StudentMessagesProps = {
-  group: Group | undefined
-  /** Группа не выбрана — отправить на экран выбора. */
-  onChooseGroup: () => void
   /** Сообщение, которое нужно открыть сразу (нажали на push-уведомление). */
   requestedId: number | null
 }
 
-export function StudentMessages({ group, onChooseGroup, requestedId }: StudentMessagesProps) {
+export function StudentMessages({ requestedId }: StudentMessagesProps) {
   const session = useStudentSession()
   const inbox = useInbox(session !== null)
   const [openId, setOpenId] = useState<number | null>(requestedId)
@@ -26,7 +23,7 @@ export function StudentMessages({ group, onChooseGroup, requestedId }: StudentMe
     if (requestedId !== null) setOpenId(requestedId)
   }, [requestedId])
 
-  if (!session) return <ProfileForm group={group} onChooseGroup={onChooseGroup} />
+  if (!session) return <div className="state-note">Войдите через Moodle, чтобы читать сообщения.</div>
 
   return (
     <section className="feedback-screen">
@@ -145,63 +142,5 @@ function MessageDialog({ item, onClose }: { item: InboxMessage; onClose: () => v
         {error && <p className="form-error" role="alert">{error}</p>}
       </div>
     </div>
-  )
-}
-
-function ProfileForm({ group, onChooseGroup }: { group: Group | undefined; onChooseGroup: () => void }) {
-  const [name, setName] = useState('')
-  const [consent, setConsent] = useState(false)
-  const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  const submit = async (event: FormEvent) => {
-    event.preventDefault()
-    if (!group) return
-    setBusy(true)
-    setError('')
-    try {
-      await registerStudent(name, group.id)
-    } catch (reason) {
-      setError((reason as Error).message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <form className="screen-card selection-screen feedback-form" onSubmit={submit}>
-      <div className="eyebrow">СООБЩЕНИЯ</div>
-      <h1>Кто вы?</h1>
-      <p className="muted">
-        Методист отправляет сообщения группе, курсу или лично вам. Укажите фамилию и имя — по ним
-        методист увидит, что вы прочитали важное сообщение. Профиль привязан к этому устройству.
-      </p>
-
-      <label className="field-label" htmlFor="profile-name">Фамилия и имя</label>
-      <input
-        id="profile-name"
-        className="text-field"
-        maxLength={200}
-        autoComplete="name"
-        placeholder="Иванов Иван"
-        value={name}
-        onChange={(event) => setName(event.target.value)}
-      />
-
-      <span className="field-label">Группа</span>
-      {group
-        ? <button type="button" className="select-field" onClick={onChooseGroup}>{group.name}<span className="optional">изменить</span></button>
-        : <button type="button" className="button button-secondary full" onClick={onChooseGroup}>Выбрать группу</button>}
-
-      <label className="feedback-consent">
-        <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} />
-        <span>Согласен(на) на обработку ФИО и группы, чтобы получать сообщения и подтверждать прочтение</span>
-      </label>
-
-      {error && <p className="form-error" role="alert">{error}</p>}
-      <button className="button button-primary full" disabled={busy || !group || !consent || name.trim().length < 3}>
-        {busy ? 'Сохраняем…' : 'Получать сообщения'}
-      </button>
-    </form>
   )
 }
