@@ -162,7 +162,7 @@ async def test_cleanup_preserves_profile_and_never_touches_expired_moodle(login,
         assert user.moodle_session_id is None
 
 
-@pytest.mark.parametrize("outcome", ["ok", "network", "auth", "invalid-response"])
+@pytest.mark.parametrize("outcome", ["ok", "network", "auth", "auth-legacy", "invalid-response"])
 async def test_worker_refresh_and_error_classification(login, monkeypatch, bare_client, outcome):
     body, headers = await login()
     now = datetime.now(timezone.utc)
@@ -172,9 +172,12 @@ async def test_worker_refresh_and_error_classification(login, monkeypatch, bare_
         active_at = moodle_sessions.as_utc(user.session_last_active_at)
         await db.commit()
     monkeypatch.setattr(get_settings(), "moodle_mock", False)
+    if outcome == "auth-legacy":
+        monkeypatch.setattr(moodle_sessions, "REVOKE_ON_MOODLE_KEEPALIVE_AUTH_ERROR", True)
     errors = {
         "network": moodle.MoodleError("Нет связи", 502),
         "auth": moodle.MoodleAuthError("Сессия истекла"),
+        "auth-legacy": moodle.MoodleAuthError("Сессия истекла"),
         "invalid-response": moodle.MoodleError("Некорректный ответ", 502),
     }
     touch = AsyncMock(return_value=600, side_effect=errors.get(outcome))
@@ -183,7 +186,7 @@ async def test_worker_refresh_and_error_classification(login, monkeypatch, bare_
     touch.assert_awaited_once_with("mock_sesskey_123")
     async with SessionLocal() as db:
         user = await db.get(User, body["profile"]["id"])
-        if outcome == "auth":
+        if outcome == "auth-legacy":
             assert user.moodle_session_id is None
             assert user.moodle_encrypted_cookies is None
         else:
@@ -193,7 +196,12 @@ async def test_worker_refresh_and_error_classification(login, monkeypatch, bare_
             if outcome == "ok":
                 assert user.moodle_timeout_seconds == 600
                 assert moodle_sessions.as_utc(user.moodle_refresh_at) <= now + timedelta(seconds=300)
-    assert (await bare_client.get(f"{API}/me", headers=headers)).status_code == (401 if outcome == "auth" else 200)
+            if outcome == "auth":
+                assert moodle_sessions.as_utc(user.moodle_refresh_at) == now + timedelta(hours=1)
+    expected_status = 401 if outcome == "auth-legacy" else 200
+    assert (await bare_client.get(f"{API}/me", headers=headers)).status_code == expected_status
+    result = await bare_client.post(f"{API}/auth/student/refresh", headers=headers, json={"active": True})
+    assert result.status_code == expected_status
 
 
 async def test_late_worker_cannot_restore_logged_out_session(login, monkeypatch, bare_client):

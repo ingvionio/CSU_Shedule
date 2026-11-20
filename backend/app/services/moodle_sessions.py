@@ -20,6 +20,8 @@ from app.services.moodle import MoodleAuthError, MoodleClient, MoodleError, Mood
 logger = logging.getLogger(__name__)
 IDLE_TTL = timedelta(days=5)
 POLL_SECONDS = 5
+# Временно сохраняем сессию приложения при отказе Moodle в продлении.
+REVOKE_ON_MOODLE_KEEPALIVE_AUTH_ERROR = False
 
 
 def as_utc(value: datetime) -> datetime:
@@ -142,8 +144,11 @@ async def _refresh_one(user_id: int, now: datetime) -> None:
                 "moodle_session_expires_at": now + timedelta(seconds=seconds),
                 "moodle_timeout_seconds": seconds, "moodle_refresh_at": now + refresh_interval(seconds),
             }
-        except (ValueError, MoodleAuthError):
-            values = _revoked_values()
+        except (ValueError, MoodleAuthError) as error:
+            if isinstance(error, MoodleAuthError) and not REVOKE_ON_MOODLE_KEEPALIVE_AUTH_ERROR:
+                values = {"moodle_refresh_at": now + timedelta(hours=1)}
+            else:
+                values = _revoked_values()
         except MoodleError:
             values = {"moodle_refresh_at": now + timedelta(seconds=min(60, max(1, (timeout_seconds or 120) / 4)))}
             logger.warning("Временная ошибка продления Moodle-сессии пользователя %s", user_id)
