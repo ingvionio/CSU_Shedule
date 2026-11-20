@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.models import Group, User
@@ -23,8 +23,8 @@ def normalize_name(value: str) -> str:
     return " ".join(value.split())
 
 
-def register(
-    db: Session,
+async def register(
+    db: AsyncSession,
     full_name: str,
     group_id: int,
     device_key: str,
@@ -40,15 +40,15 @@ def register(
     name = normalize_name(full_name)
     if len(name) < 3:
         raise StudentError("укажите фамилию и имя", 422)
-    if db.get(Group, group_id) is None:
+    if await db.get(Group, group_id) is None:
         raise StudentError("группа не найдена", 404)
 
     device_hash = secret_hash(device_key)
-    user = db.scalar(select(User).where(User.device_key_hash == device_hash))
+    user = await db.scalar(select(User).where(User.device_key_hash == device_hash))
     if user is None:
         ip_hash = secret_hash(ip) if ip else None
         if ip_hash:
-            recent = db.scalar(
+            recent = await db.scalar(
                 select(func.count(User.id)).where(User.ip_hash == ip_hash, User.created_at >= now - timedelta(hours=1))
             )
             if recent >= get_settings().student_register_ip_limit_per_hour:
@@ -62,21 +62,21 @@ def register(
         user.group_id = group_id
 
     user.last_seen_at = now
-    db.flush()
-    db.refresh(user, ["group"])
+    await db.flush()
+    await db.refresh(user, ["group"])
 
     if group_changed:
         # Импорт здесь, чтобы не было цикла: сервис сообщений знает о студентах.
         from app.services.messages import attach_recent_messages
 
-        attach_recent_messages(db, user, now)
+        await attach_recent_messages(db, user, now)
 
-    db.commit()
+    await db.commit()
     return user, group_changed
 
 
-def get_student(db: Session, user_id: int) -> User:
-    user = db.get(User, user_id)
+async def get_student(db: AsyncSession, user_id: int) -> User:
+    user = await db.get(User, user_id)
     if user is None:
         raise StudentError("профиль не найден, зарегистрируйтесь заново", 401)
     return user

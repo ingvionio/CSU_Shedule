@@ -10,7 +10,8 @@ from dataclasses import asdict, dataclass
 from datetime import date, datetime, time, timedelta
 
 from sqlalchemy import delete, select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
 from app.models import (
     Group,
@@ -68,26 +69,26 @@ def _parse_time(text: str) -> time:
     return time(int(hour), int(minute))
 
 
-def ensure_reference_data(session: Session) -> None:
+async def ensure_reference_data(session: AsyncSession) -> None:
     """Создаёт сетку звонков и форматы пар, если их ещё нет."""
     for code, name in DEFAULT_LESSON_TYPES:
-        if session.get(LessonType, code) is None:
+        if await session.get(LessonType, code) is None:
             session.add(LessonType(code=code, name=name))
 
     for number, start, end in DEFAULT_TIME_SLOTS:
-        if session.get(TimeSlot, number) is None:
+        if await session.get(TimeSlot, number) is None:
             session.add(TimeSlot(number=number, start_time=_parse_time(start), end_time=_parse_time(end)))
 
-    session.flush()
+    await session.flush()
 
 
-def _get_or_create(session: Session, model: type, column, value: str):
+async def _get_or_create(session: AsyncSession, model: type, column, value: str):
     """Находит запись справочника по значению или создаёт её."""
-    instance = session.scalar(select(model).where(column == value))
+    instance = await session.scalar(select(model).where(column == value))
     if instance is None:
         instance = model(**{column.key: value})
         session.add(instance)
-        session.flush()
+        await session.flush()
     return instance
 
 
@@ -125,8 +126,8 @@ def _validity_dates(semester: Semester, parsed: ParsedLesson) -> tuple[object, o
     return valid_from, min(valid_to, semester.end_date)
 
 
-def import_workbook(
-    session: Session,
+async def import_workbook(
+    session: AsyncSession,
     path: str,
     semester: Semester,
     file_name: str | None = None,
@@ -138,8 +139,8 @@ def import_workbook(
     `replace=True` удаляет пары групп книги в этом семестре --
     повторный запуск не плодит дубликаты.
     """
-    result: ParseResult = parse_workbook(path)
-    ensure_reference_data(session)
+    result: ParseResult = await run_in_threadpool(parse_workbook, path)
+    await ensure_reference_data(session)
 
     record = ScheduleImport(
         semester_id=semester.id,
@@ -149,16 +150,16 @@ def import_workbook(
         uploaded_by=uploaded_by,
     )
     session.add(record)
-    session.flush()
+    await session.flush()
 
     groups_created = 0
     group_ids: dict[str, int] = {}
     for parsed_group in result.groups:
-        group = session.scalar(select(Group).where(Group.name == parsed_group.name))
+        group = await session.scalar(select(Group).where(Group.name == parsed_group.name))
         if group is None:
             group = Group(name=parsed_group.name, course=parsed_group.course)
             session.add(group)
-            session.flush()
+            await session.flush()
             groups_created += 1
         if group.direction is None:
             group.direction = direction_of(group.name)
@@ -167,13 +168,13 @@ def import_workbook(
     homework: list[HomeworkBinding] = []
     if replace:
         old_ids = select(Lesson.id).where(Lesson.semester_id == semester.id, Lesson.group_id.in_(group_ids.values()))
-        homework = collect_homework(session, old_ids)
-        session.execute(
+        homework = await collect_homework(session, old_ids)
+        await session.execute(
             delete(Lesson).where(Lesson.semester_id == semester.id, Lesson.group_id.in_(group_ids.values()))
         )
-        session.flush()
+        await session.flush()
 
-    slots = {slot.number: slot for slot in session.scalars(select(TimeSlot)).all()}
+    slots = {slot.number: slot for slot in (await session.scalars(select(TimeSlot))).all()}
     new_lessons: list[Lesson] = []
 
     for parsed in result.lessons:
@@ -184,11 +185,11 @@ def import_workbook(
         start_time, end_time, slot_number = _lesson_times(slots, parsed)
         valid_from, valid_to = _validity_dates(semester, parsed)
 
-        subject = _get_or_create(session, Subject, Subject.name, parsed.subject)
+        subject = await _get_or_create(session, Subject, Subject.name, parsed.subject)
         teacher = (
-            _get_or_create(session, Teacher, Teacher.full_name, parsed.teacher) if parsed.teacher else None
+            await _get_or_create(session, Teacher, Teacher.full_name, parsed.teacher) if parsed.teacher else None
         )
-        room = _get_or_create(session, Room, Room.name, parsed.room) if parsed.room else None
+        room = await _get_or_create(session, Room, Room.name, parsed.room) if parsed.room else None
 
         new_lesson = Lesson(
             semester_id=semester.id,
@@ -217,9 +218,9 @@ def import_workbook(
 
     record.lessons_count = len(result.lessons)
     record.status = ImportStatus.PUBLISHED.value
-    session.flush()
-    homework_rebound, homework_unbound = rebind_homework(session, semester, homework, new_lessons)
-    session.commit()
+    await session.flush()
+    homework_rebound, homework_unbound = await rebind_homework(session, semester, homework, new_lessons)
+    await session.commit()
 
     return ImportReport(
         import_id=record.id,

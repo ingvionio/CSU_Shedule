@@ -12,18 +12,21 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import json
 import logging
 import re
+from types import TracebackType
 from typing import Any
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
-import requests
+import httpx
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.crypto import decrypt_secret, encrypt_secret
@@ -92,22 +95,34 @@ class MoodleClient:
 
     def __init__(self, base_url: str | None = None, timeout: int = 12) -> None:
         self.base_url = (base_url or get_settings().moodle_base_url).rstrip("/")
-        self.timeout = timeout
-        self.session = requests.Session()
-        self.session.headers.update(
-            {
+        self.session = httpx.AsyncClient(
+            timeout=timeout,
+            follow_redirects=True,
+            headers={
                 "User-Agent": USER_AGENT,
                 "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-            }
+            },
         )
 
-    def fetch_logintoken(self) -> str:
+    async def __aenter__(self) -> MoodleClient:
+        await self.session.__aenter__()
+        return self
+
+    async def __aexit__(
+        self, exc_type: type[BaseException] | None, exc: BaseException | None, traceback: TracebackType | None,
+    ) -> None:
+        await self.session.__aexit__(exc_type, exc, traceback)
+
+    def cookies(self) -> dict[str, str]:
+        return {cookie.name: cookie.value for cookie in self.session.cookies.jar if cookie.value is not None}
+
+    async def fetch_logintoken(self) -> str:
         """Извлекает CSRF-токен logintoken со страницы входа /login/index.php."""
         url = f"{self.base_url}/login/index.php"
         try:
-            resp = self.session.get(url, timeout=self.timeout)
+            resp = await self.session.get(url)
             resp.raise_for_status()
-        except requests.RequestException as exc:
+        except httpx.HTTPError as exc:
             logger.error("Ошибка при запросе страницы входа Moodle: %s", exc)
             raise MoodleError("Не удалось связаться с сервером Moodle ЧелГУ", 502) from exc
 
@@ -122,9 +137,9 @@ class MoodleClient:
 
         raise MoodleError("Форма входа Moodle изменилась (logintoken не найден)", 502)
 
-    def execute_login(self, username: str, password: str) -> tuple[str, str]:
+    async def execute_login(self, username: str, password: str) -> tuple[str, str]:
         """Выполняет POST-запрос авторизации и возвращает (html_страницы, sesskey)."""
-        logintoken = self.fetch_logintoken()
+        logintoken = await self.fetch_logintoken()
         login_url = f"{self.base_url}/login/index.php"
         payload = {
             "anchor": "",
@@ -134,14 +149,14 @@ class MoodleClient:
         }
 
         try:
-            resp = self.session.post(login_url, data=payload, allow_redirects=True, timeout=self.timeout)
+            resp = await self.session.post(login_url, data=payload)
             resp.raise_for_status()
-        except requests.RequestException as exc:
+        except httpx.HTTPError as exc:
             logger.error("Ошибка при отправке учетных данных в Moodle: %s", exc)
             raise MoodleError("Сервер Moodle ЧелГУ временно недоступен", 502) from exc
 
         # Если нас перенаправило обратно на страницу входа — ошибка логина
-        if "/login/index.php" in resp.url and "testsession" not in resp.url:
+        if "/login/index.php" in resp.url.path and "testsession" not in resp.url.params:
             soup = BeautifulSoup(resp.text, "html.parser")
             err_el = soup.find(class_=lambda c: c and ("alert-danger" in c or "loginerrors" in c))
             err_msg = err_el.get_text(strip=True) if err_el else "Неверный логин или пароль Moodle"
@@ -159,13 +174,13 @@ class MoodleClient:
             return logout_match.group(1)
         return ""
 
-    def get_profile_info(self) -> tuple[str, str, str, str]:
+    async def get_profile_info(self) -> tuple[str, str, str, str]:
         """Извлекает ФИО, moodle_id, sesskey и HTML из /user/profile.php."""
         url = f"{self.base_url}/user/profile.php"
         try:
-            resp = self.session.get(url, timeout=self.timeout)
+            resp = await self.session.get(url)
             resp.raise_for_status()
-        except requests.RequestException as exc:
+        except httpx.HTTPError as exc:
             logger.error("Ошибка при получении профиля Moodle: %s", exc)
             raise MoodleError("Не удалось загрузить профиль Moodle", 502) from exc
 
@@ -175,7 +190,7 @@ class MoodleClient:
 
         # Извлечение moodle_id: из URL страницы после редиректа или из ссылок на странице
         moodle_id = ""
-        id_match = re.search(r'[?&]id=(\d+)', resp.url)
+        id_match = re.search(r'[?&]id=(\d+)', str(resp.url))
         if id_match:
             moodle_id = id_match.group(1)
         else:
@@ -223,12 +238,12 @@ class MoodleClient:
 
         return full_name, moodle_id, sesskey, html
 
-    def call_ajax(self, sesskey: str, method_name: str, args: dict[str, Any]) -> Any:
+    async def call_ajax(self, sesskey: str, method_name: str, args: dict[str, Any]) -> Any:
         """Вызывает внутренний AJAX-метод Moodle (/lib/ajax/service.php)."""
         url = f"{self.base_url}/lib/ajax/service.php?sesskey={sesskey}&info={method_name}"
         payload = [{"index": 0, "methodname": method_name, "args": args}]
         try:
-            resp = self.session.post(url, json=payload, timeout=self.timeout)
+            resp = await self.session.post(url, json=payload)
             resp.raise_for_status()
             data = resp.json()
             if isinstance(data, list) and len(data) > 0:
@@ -241,15 +256,15 @@ class MoodleClient:
                     raise MoodleError(f"Ошибка службы Moodle: {err}")
                 return item.get("data")
             return None
-        except (requests.RequestException, json.JSONDecodeError) as exc:
+        except (httpx.HTTPError, json.JSONDecodeError) as exc:
             logger.warning("Ошибка вызова AJAX метода %s: %s", method_name, exc)
             return None
 
-    def get_enrolled_courses(self, sesskey: str) -> list[dict[str, Any]]:
+    async def get_enrolled_courses(self, sesskey: str) -> list[dict[str, Any]]:
         """Получает список зачисленных курсов пользователя через AJAX."""
         if not sesskey:
             return []
-        data = self.call_ajax(
+        data = await self.call_ajax(
             sesskey,
             "core_course_get_enrolled_courses_by_timeline_classification",
             {"offset": 0, "limit": 50, "classification": "all", "sort": "fullname"},
@@ -258,14 +273,14 @@ class MoodleClient:
             return data["courses"]
         return []
 
-    def touch_session(self, sesskey: str) -> bool:
+    async def touch_session(self, sesskey: str) -> bool:
         """Проверяет активность сессии методом core_session_touch."""
         if not sesskey:
             return False
         try:
             url = f"{self.base_url}/lib/ajax/service.php?sesskey={sesskey}&info=core_session_touch"
             payload = [{"index": 0, "methodname": "core_session_touch", "args": {}}]
-            resp = self.session.post(url, json=payload, timeout=6)
+            resp = await self.session.post(url, json=payload, timeout=6)
             if resp.status_code == 200:
                 data = resp.json()
                 if isinstance(data, list) and len(data) > 0 and data[0].get("error") is False:
@@ -491,8 +506,8 @@ def match_student_group(
     return None
 
 
-def authenticate_and_detect_student(
-    db: Session,
+async def authenticate_and_detect_student(
+    db: AsyncSession,
     username: str,
     password: str,
 ) -> MoodleSessionData:
@@ -502,10 +517,10 @@ def authenticate_and_detect_student(
     """
     settings = get_settings()
     now = datetime.now(timezone.utc)
-    groups = list(db.scalars(select(Group)).all())
 
     # Dev / Mock режим для локальной разработки
     if settings.moodle_mock:
+        groups = (await db.scalars(select(Group))).all()
         logger.info("Вход студента через Moodle MOCK режим: %s", username)
         if not groups:
             raise MoodleGroupError("В базе нет ни одной группы. Загрузите расписание перед входом.")
@@ -526,20 +541,21 @@ def authenticate_and_detect_student(
             expires_at=now + timedelta(hours=settings.moodle_session_ttl_hours),
         )
 
-    client = MoodleClient()
-    dashboard_html, initial_sesskey = client.execute_login(username, password)
-    full_name, moodle_id, profile_sesskey, profile_html = client.get_profile_info()
-    sesskey = profile_sesskey or initial_sesskey
+    async with MoodleClient() as client:
+        _, initial_sesskey = await client.execute_login(username, password)
+        full_name, moodle_id, profile_sesskey, profile_html = await client.get_profile_info()
+        sesskey = profile_sesskey or initial_sesskey
+        courses = await client.get_enrolled_courses(sesskey)
+        cookies = client.cookies()
 
-    # Получаем курсы через AJAX для определения группы
-    courses = client.get_enrolled_courses(sesskey)
+    groups = list(await db.scalars(select(Group)))
     detected_group = match_student_group(courses, profile_html, groups)
 
     if detected_group is None:
         # 1. Если группа была явно указана в профиле (например "ПрИ-401"), но отсутствует в known_groups
         explicit_name = extract_group_from_profile_html(profile_html)
         if explicit_name:
-            existing = db.scalar(select(Group).where(Group.name == explicit_name))
+            existing = await db.scalar(select(Group).where(Group.name == explicit_name))
             if existing is not None:
                 detected_group = existing
             else:
@@ -553,14 +569,14 @@ def authenticate_and_detect_student(
                     direction=direction_of(explicit_name),
                 )
                 db.add(detected_group)
-                db.flush()
+                await db.flush()
 
     if detected_group is None:
         # 2. Если группы нет в профиле — определяем по учебным курсам Moodle
         direction, course_num, group_idx = extract_student_group_info(courses, profile_html)
         if direction and course_num:
             canonical_name = f"{direction}-{course_num}{group_idx:02d}"
-            existing = db.scalar(select(Group).where(Group.name == canonical_name))
+            existing = await db.scalar(select(Group).where(Group.name == canonical_name))
             if existing is not None:
                 detected_group = existing
             else:
@@ -570,7 +586,7 @@ def authenticate_and_detect_student(
                     direction=direction,
                 )
                 db.add(detected_group)
-                db.flush()
+                await db.flush()
 
     if detected_group is None:
         raise MoodleGroupError()
@@ -582,14 +598,14 @@ def authenticate_and_detect_student(
         moodle_username=username,
         full_name=full_name,
         group=detected_group,
-        cookies=client.session.cookies.get_dict(),
+        cookies=cookies,
         sesskey=sesskey,
         expires_at=expires_at,
     )
 
 
-def save_or_update_student(
-    db: Session,
+async def save_or_update_student(
+    db: AsyncSession,
     moodle_data: MoodleSessionData,
     plain_password: str,
     device_key: str | None,
@@ -608,7 +624,7 @@ def save_or_update_student(
     cookie_str = json.dumps(moodle_data.cookies)
 
     # Ищем существующего пользователя по moodle_id или moodle_username
-    user = db.scalar(
+    user = await db.scalar(
         select(User).where(
             (User.moodle_id == moodle_data.moodle_id)
             | (User.moodle_username == moodle_data.moodle_username)
@@ -617,7 +633,7 @@ def save_or_update_student(
 
     if user is None:
         # Также проверяем совпадение по ФИО, если пользователь был заведен до внедрения Moodle
-        user = db.scalar(
+        user = await db.scalar(
             select(User).where(
                 User.full_name == moodle_data.full_name,
                 User.moodle_id.is_(None),
@@ -658,71 +674,65 @@ def save_or_update_student(
         if device_key:
             user.device_key_hash = device_key
 
-    db.flush()
-    db.refresh(user, ["group"])
+    await db.flush()
+    await db.refresh(user, ["group"])
 
     if group_changed:
         from app.services.messages import attach_recent_messages
 
-        attach_recent_messages(db, user, now)
+        await attach_recent_messages(db, user, now)
 
-    db.commit()
+    await db.commit()
     return user, group_changed
 
 
-def ensure_moodle_session(user: User, db: Session) -> requests.Session:
-    """
-    Возвращает авторизованную requests.Session для пользователя.
-    Если кэшированная сессия истекла или недействительна, автоматически
-    переавторизуется в Moodle с использованием зашифрованного пароля.
-    """
-    settings = get_settings()
+@asynccontextmanager
+async def ensure_moodle_session(user: User, db: AsyncSession) -> AsyncIterator[httpx.AsyncClient]:
+    """Открывает авторизованный клиент Moodle на время работы вызывающего кода."""
     now = datetime.now(timezone.utc)
+    expires_at = user.moodle_session_expires_at
+    if expires_at is not None and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
 
-    # Проверяем кэшированную сессию
-    if (
-        user.moodle_session_expires_at
-        and user.moodle_session_expires_at > now
-        and user.moodle_session_cookie
-        and user.moodle_sesskey
-    ):
-        try:
-            cookies = json.loads(user.moodle_session_cookie)
-            client = MoodleClient()
-            client.session.cookies.update(cookies)
-            if client.touch_session(user.moodle_sesskey):
-                return client.session
-        except Exception:
-            pass
+    async with MoodleClient() as client:
+        active = False
+        if expires_at and expires_at > now and user.moodle_session_cookie and user.moodle_sesskey:
+            try:
+                client.session.cookies.update(json.loads(user.moodle_session_cookie))
+                active = await client.touch_session(user.moodle_sesskey)
+            except (ValueError, TypeError):
+                pass
+        if not active:
+            client.session.cookies.clear()
+            await _renew_moodle_session(user, db, client, now)
+        yield client.session
 
-    # Сессия истекла — пробуем переавторизоваться
+
+async def _renew_moodle_session(user: User, db: AsyncSession, client: MoodleClient, now: datetime) -> None:
     if not user.moodle_username or not user.moodle_encrypted_password:
         user.moodle_auth_error = True
-        db.commit()
+        await db.commit()
         raise MoodleAuthError("Отсутствуют сохраненные учетные данные Moodle")
 
     try:
         plain_password = decrypt_secret(user.moodle_encrypted_password)
     except Exception as exc:
         user.moodle_auth_error = True
-        db.commit()
+        await db.commit()
         raise MoodleAuthError("Не удалось расшифровать пароль Moodle") from exc
 
     try:
-        client = MoodleClient()
-        _, sesskey = client.execute_login(user.moodle_username, plain_password)
-        expires_at = now + timedelta(hours=settings.moodle_session_ttl_hours)
-
-        user.moodle_session_cookie = json.dumps(client.session.cookies.get_dict())
-        user.moodle_sesskey = sesskey
-        user.moodle_session_expires_at = expires_at
-        user.moodle_auth_error = False
-        db.commit()
-        return client.session
-    except MoodleAuthError as exc:
+        _, sesskey = await client.execute_login(user.moodle_username, plain_password)
+    except MoodleAuthError:
         user.moodle_auth_error = True
-        db.commit()
-        raise exc
+        await db.commit()
+        raise
     except Exception as exc:
         logger.error("Ошибка автопродления сессии Moodle: %s", exc)
         raise MoodleError("Ошибка подключения к Moodle ЧелГУ", 502) from exc
+
+    user.moodle_session_cookie = json.dumps(client.cookies())
+    user.moodle_sesskey = sesskey
+    user.moodle_session_expires_at = now + timedelta(hours=get_settings().moodle_session_ttl_hours)
+    user.moodle_auth_error = False
+    await db.commit()

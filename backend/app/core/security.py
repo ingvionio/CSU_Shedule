@@ -54,7 +54,7 @@ def _payload(credentials: HTTPAuthorizationCredentials | None, missing: str) -> 
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "недействительный токен") from error
 
 
-def require_admin(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> str:
+async def require_admin(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> str:
     """Зависимость для админских эндпоинтов. Возвращает логин админа."""
     payload = _payload(credentials, "нужен вход администратора")
     if payload.get("role") != ROLE_ADMIN:
@@ -62,7 +62,7 @@ def require_admin(credentials: HTTPAuthorizationCredentials | None = Depends(_be
     return payload["sub"]
 
 
-def require_student(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> int:
+async def require_student(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> int:
     """Зависимость для эндпоинтов /me. Возвращает id студента."""
     payload = _payload(credentials, "нужен профиль студента")
     if payload.get("role") != ROLE_STUDENT:

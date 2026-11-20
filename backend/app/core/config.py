@@ -1,6 +1,7 @@
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import URL, make_url
 
 
 class Settings(BaseSettings):
@@ -65,3 +66,12 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def database_url() -> URL:
+    url = make_url(get_settings().database_url)
+    if url.drivername in {"sqlite", "sqlite+pysqlite"}:
+        return url.set(drivername="sqlite+aiosqlite")
+    if url.drivername == "postgresql":
+        return url.set(drivername="postgresql+psycopg")
+    return url

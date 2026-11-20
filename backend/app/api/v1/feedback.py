@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.security import require_admin
@@ -111,15 +111,15 @@ def _raise(error: feedback_service.FeedbackError) -> HTTPException:
     status_code=status.HTTP_201_CREATED,
     summary="Отправить обращение",
 )
-def create_feedback(
+async def create_feedback(
     data: FeedbackIn,
     request: Request,
     background: BackgroundTasks,
     token: str | None = TokenHeader,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> FeedbackCreatedOut:
     try:
-        message, outbox_ids = feedback_service.create_message(
+        message, outbox_ids = await feedback_service.create_message(
             db, data, token, request.client.host if request.client else None
         )
     except feedback_service.FeedbackError as error:
@@ -130,27 +130,27 @@ def create_feedback(
 
 
 @router.get("/feedback/mine", response_model=list[MyFeedbackOut], summary="Мои обращения и ответы на них")
-def my_feedback(token: str | None = TokenHeader, db: Session = Depends(get_db)) -> list[MyFeedbackOut]:
+async def my_feedback(token: str | None = TokenHeader, db: AsyncSession = Depends(get_db, scope="function")) -> list[MyFeedbackOut]:
     if not token:
         return []
-    return [_my_out(message) for message in feedback_service.list_for_token(db, token)]
+    return [_my_out(message) for message in await feedback_service.list_for_token(db, token)]
 
 
 # --- админка ---
 
 
 @admin_router.get("", response_model=list[AdminFeedbackOut], summary="Обращения в папке")
-def admin_feedback(
+async def admin_feedback(
     kind: FeedbackKindLiteral | None = Query(default=None, description="Папка"),
     status_: FeedbackStatusLiteral | None = Query(default=None, alias="status"),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[AdminFeedbackOut]:
-    return [_admin_out(message) for message in feedback_service.admin_list(db, kind, status_)]
+    return [_admin_out(message) for message in await feedback_service.admin_list(db, kind, status_)]
 
 
 @admin_router.get("/folders", response_model=list[FolderCountOut], summary="Папки и число новых обращений")
-def feedback_folders(db: Session = Depends(get_db)) -> list[FolderCountOut]:
-    summary = feedback_service.folder_summary(db)
+async def feedback_folders(db: AsyncSession = Depends(get_db, scope="function")) -> list[FolderCountOut]:
+    summary = await feedback_service.folder_summary(db)
     return [
         FolderCountOut(kind=kind, title=title, total=summary[kind]["total"], new=summary[kind]["new"])
         for kind, title in KIND_TITLES.items()
@@ -158,27 +158,27 @@ def feedback_folders(db: Session = Depends(get_db)) -> list[FolderCountOut]:
 
 
 @admin_router.get("/recipients", response_model=list[RecipientOut], summary="Адресаты и их почта")
-def feedback_recipients(db: Session = Depends(get_db)) -> list[RecipientOut]:
-    return [_recipient_out(item) for item in feedback_service.list_recipients(db)]
+async def feedback_recipients(db: AsyncSession = Depends(get_db, scope="function")) -> list[RecipientOut]:
+    return [_recipient_out(item) for item in await feedback_service.list_recipients(db)]
 
 
 @admin_router.patch("/recipients/{recipient_id}", response_model=RecipientOut, summary="Изменить адресата")
-def update_recipient(recipient_id: int, data: RecipientUpdateIn, db: Session = Depends(get_db)) -> RecipientOut:
+async def update_recipient(recipient_id: int, data: RecipientUpdateIn, db: AsyncSession = Depends(get_db, scope="function")) -> RecipientOut:
     try:
-        return _recipient_out(feedback_service.update_recipient(db, recipient_id, data))
+        return _recipient_out(await feedback_service.update_recipient(db, recipient_id, data))
     except feedback_service.FeedbackError as error:
         raise _raise(error) from error
 
 
 @admin_router.patch("/{message_id}", response_model=AdminFeedbackOut, summary="Статус, заметка, перенос в папку")
-def update_feedback(
+async def update_feedback(
     message_id: int,
     data: FeedbackUpdateIn,
     background: BackgroundTasks,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> AdminFeedbackOut:
     try:
-        message, outbox_ids = feedback_service.update_message(db, message_id, data)
+        message, outbox_ids = await feedback_service.update_message(db, message_id, data)
     except feedback_service.FeedbackError as error:
         raise _raise(error) from error
     background.add_task(deliver_by_ids, outbox_ids)
@@ -191,15 +191,15 @@ def update_feedback(
     status_code=status.HTTP_201_CREATED,
     summary="Ответить студенту",
 )
-def reply_feedback(
+async def reply_feedback(
     message_id: int,
     data: ReplyIn,
     background: BackgroundTasks,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
     admin: str = Depends(require_admin),
 ) -> AdminFeedbackOut:
     try:
-        message, outbox_ids = feedback_service.add_reply(db, message_id, data.text, admin)
+        message, outbox_ids = await feedback_service.add_reply(db, message_id, data.text, admin)
     except feedback_service.FeedbackError as error:
         raise _raise(error) from error
     background.add_task(deliver_by_ids, outbox_ids)
