@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+from collections import Counter
+
 import hashlib
 import hmac
 import re
@@ -24,6 +26,7 @@ from app.models import (
     FeedbackReply,
     FeedbackStatus,
     Group,
+    User,
 )
 from app.schemas.feedback import FeedbackIn, FeedbackUpdateIn, RecipientUpdateIn
 
@@ -153,8 +156,13 @@ async def create_message(
     token: str | None,
     ip: str | None,
     now: datetime | None = None,
+    author: User | None = None,
 ) -> tuple[FeedbackMessage, list[int]]:
-    """Сохраняет обращение и ставит письма в очередь. Возвращает обращение и id писем."""
+    """Сохраняет обращение и ставит письма в очередь. Возвращает обращение и id писем.
+
+    Если студент вошёл через Moodle, обращение подписывается его ФИО и группой из
+    профиля — имя из формы тогда не используется.
+    """
     if data.website:
         # Скрытое поле заполняют только боты.
         raise FeedbackError("обращение отклонено")
@@ -180,13 +188,15 @@ async def create_message(
 
     if data.group_id is not None and await db.get(Group, data.group_id) is None:
         raise FeedbackError("группа не найдена", 404)
+    author_name = author.full_name if author else (data.author_name or "").strip() or None
+    group_id = author.group_id if author and author.group_id is not None else data.group_id
 
     message = FeedbackMessage(
         kind=data.kind,
         recipient=await _route(db, data.kind),
         text=data.text.strip(),
-        group_id=data.group_id,
-        author_name=(data.author_name or "").strip() or None,
+        group_id=group_id,
+        author_name=author_name,
         contact=(data.contact or "").strip() or None,
         author_token_hash=token_hash,
         ip_hash=ip_hash,
@@ -292,3 +302,34 @@ async def update_recipient(db: AsyncSession, recipient_id: int, data: RecipientU
 
     await db.commit()
     return recipient
+
+
+async def fill_authors_from_devices(db: AsyncSession, apply: bool) -> list[tuple[int, str]]:
+    """Подписывает старые безымянные обращения ФИО студента, который потом вошёл через Moodle с того же устройства.
+
+    Совпадение — по хешу ключа устройства: им подписано обращение и его же хранит профиль
+    после входа. Профиль помнит только последнее устройство, поэтому подпишутся не все.
+    Трогаются только обращения без имени. Возвращает (id обращения, ФИО).
+    """
+    rows = (
+        await db.execute(
+            select(FeedbackMessage, User)
+            .join(User, User.device_key_hash == FeedbackMessage.author_token_hash)
+            .where(FeedbackMessage.author_name.is_(None), User.role == "student")
+            .order_by(FeedbackMessage.id)
+        )
+    ).all()
+    matches = Counter(message.id for message, _ in rows)
+    filled: list[tuple[int, str]] = []
+    for message, user in rows:
+        # Один ключ устройства у нескольких профилей — непонятно, кто писал; не подписываем.
+        if matches[message.id] > 1:
+            continue
+        filled.append((message.id, user.full_name))
+        if apply:
+            message.author_name = user.full_name
+            if message.group_id is None:
+                message.group_id = user.group_id
+    if apply:
+        await db.commit()
+    return filled

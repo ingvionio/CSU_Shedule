@@ -139,6 +139,17 @@ async def stats() -> None:
             print(f"  {name:18}{course:^6}{count:4}")
 
 
+async def feedback_authors(apply: bool) -> None:
+    from app.services.feedback import fill_authors_from_devices
+
+    async with SessionLocal() as session:
+        filled = await fill_authors_from_devices(session, apply)
+    for message_id, name in filled:
+        print(f"обращение {message_id}: {name}")
+    action = "подписано" if apply else "можно подписать (запустите с --apply)"
+    print(f"{action}: {len(filled)}")
+
+
 async def send_emails(test_to: str | None) -> None:
     from app.models import EmailOutbox, EmailStatus
     from app.services.mailer import deliver, deliver_pending
@@ -207,6 +218,9 @@ def parse_args() -> argparse.Namespace:
 
     sub.add_parser("generate-vapid", help="сгенерировать ключи для push-уведомлений")
 
+    authors = sub.add_parser("feedback-authors", help="подписать старые обращения ФИО по устройству студента")
+    authors.add_argument("--apply", action="store_true", help="записать; без флага — только показать")
+
     return parser.parse_args()
 
 
@@ -230,6 +244,8 @@ async def run_command(args: argparse.Namespace) -> None:
             await send_emails(args.test)
         elif args.command == "generate-vapid":
             generate_vapid()
+        elif args.command == "feedback-authors":
+            await feedback_authors(args.apply)
     finally:
         await engine.dispose()
 

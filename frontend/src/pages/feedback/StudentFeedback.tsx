@@ -3,6 +3,7 @@ import { useState, type FormEvent } from 'react'
 import { CheckCircle2, RefreshCw, Send } from 'lucide-react'
 
 import { useMyFeedback, useSendFeedback } from '../../api/queries'
+import { useStudentSession } from '../../api/student'
 import type { FeedbackKind, MyFeedback } from '../../types'
 import { KIND_OPTIONS, STATUS_TITLES, feedbackDate, isEmail } from './labels'
 
@@ -43,15 +44,19 @@ function FeedbackForm({ groupId, onShowMine }: { groupId: number | null; onShowM
   const [sent, setSent] = useState<{ id: number; kind_title: string } | null>(null)
   const [formError, setFormError] = useState('')
   const send = useSendFeedback()
+  // Вошедшего через Moodle подписываем ФИО из профиля — поле «Имя» ему не нужно.
+  const profile = useStudentSession()?.profile ?? null
 
-  const hasPersonalData = Boolean(authorName.trim() || contact.trim())
+  const hasPersonalData = Boolean((!profile && authorName.trim()) || contact.trim())
   const hint = KIND_OPTIONS.find((option) => option.kind === kind)?.hint
 
   /** Почему форму нельзя отправить; пустая строка — можно. */
   const problem = text.trim().length < MIN_TEXT_LENGTH
     ? `Сообщение слишком короткое — напишите хотя бы ${MIN_TEXT_LENGTH} символов.`
     : hasPersonalData && !consent
-      ? 'Отметьте согласие на обработку данных или очистите поля «Имя» и «Куда ответить».'
+      ? (profile
+        ? 'Отметьте согласие на обработку данных или очистите поле «Куда ответить».'
+        : 'Отметьте согласие на обработку данных или очистите поля «Имя» и «Куда ответить».')
       : ''
 
   const submit = async (event: FormEvent) => {
@@ -63,7 +68,7 @@ function FeedbackForm({ groupId, onShowMine }: { groupId: number | null; onShowM
         kind,
         text: text.trim(),
         group_id: groupId,
-        author_name: authorName.trim() || null,
+        author_name: profile ? null : authorName.trim() || null,
         contact: contact.trim() || null,
         website,
       })
@@ -119,15 +124,25 @@ function FeedbackForm({ groupId, onShowMine }: { groupId: number | null; onShowM
         onChange={(event) => setText(event.target.value)}
       />
 
-      <label className="field-label" htmlFor="feedback-name">Имя <span className="optional">— необязательно</span></label>
-      <input
-        id="feedback-name"
-        className="text-field"
-        maxLength={200}
-        autoComplete="name"
-        value={authorName}
-        onChange={(event) => setAuthorName(event.target.value)}
-      />
+      {profile ? (
+        <p className="feedback-author">
+          <span className="field-label">Отправитель</span>
+          <strong>{profile.full_name}</strong>{profile.group_name ? `, ${profile.group_name}` : ''}
+          <span className="optional"> — из профиля Moodle</span>
+        </p>
+      ) : (
+        <>
+          <label className="field-label" htmlFor="feedback-name">Имя <span className="optional">— необязательно</span></label>
+          <input
+            id="feedback-name"
+            className="text-field"
+            maxLength={200}
+            autoComplete="name"
+            value={authorName}
+            onChange={(event) => setAuthorName(event.target.value)}
+          />
+        </>
+      )}
 
       <label className="field-label" htmlFor="feedback-contact">Куда ответить <span className="optional">— необязательно</span></label>
       <input

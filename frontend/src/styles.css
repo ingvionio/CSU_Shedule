@@ -380,6 +380,8 @@ h1 { margin-top: 7px; font-size: 24px; line-height: 1.16; letter-spacing: -.045e
 .centered-text { text-align: center; }
 .optional { color: var(--muted); font-weight: 500; }
 .text-area { min-height: 0; padding: 11px 13px; line-height: 1.45; resize: vertical; }
+.feedback-author { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 4px; margin: 8px 1px 0; font-size: 13px; }
+.feedback-author .field-label { width: 100%; margin: 0 0 4px; }
 .feedback-consent { display: flex; align-items: flex-start; gap: 8px; margin-top: 4px; color: #555a64; font-size: 11px; line-height: 1.45; }
 .feedback-consent input { margin-top: 2px; accent-color: var(--purple); }
 .feedback-trap { position: absolute; left: -10000px; width: 1px; height: 1px; opacity: 0; }
