@@ -8,6 +8,7 @@ from sqlalchemy import delete, update
 from app.core.db import SessionLocal
 from app.models import Message, MessageRecipient
 from app.services import push as push_service
+from tests.moodle_helpers import login_student
 
 API = "/api/v1"
 
@@ -31,9 +32,7 @@ def pushed(monkeypatch) -> list[tuple[int, list[int], bool]]:
 
 
 def student(client, group_id, name, device):
-    response = client.post(
-        f"{API}/auth/student/register", json={"full_name": name, "group_id": group_id, "device_key": device}
-    )
+    response = login_student(client, group_id, name, device)
     assert response.status_code == 200, response.text
     body = response.json()
     return body["profile"]["id"], {"Authorization": f"Bearer {body['access_token']}"}

@@ -6,6 +6,7 @@ from sqlalchemy import delete, select
 from app.core.db import SessionLocal
 from app.models import Lesson, LessonOverride, PersonalNote, Semester, Subject
 from app.services.importer import ensure_reference_data
+from tests.moodle_helpers import login_student
 
 API = "/api/v1"
 
@@ -30,9 +31,7 @@ def notes_demo(bare_client, test_groups):
         db.commit()
         ids = semester.id, subject.id, lesson.id
     def register(key):
-        result = bare_client.post(f"{API}/auth/student/register", json={
-            "full_name": "Notes Student", "group_id": group, "device_key": key,
-        })
+        result = login_student(bare_client, group, "Notes Student", key)
         assert result.status_code == 200
         return {"Authorization": f"Bearer {result.json()['access_token']}"}
     first = register("notes-owner-device-0001")

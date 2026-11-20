@@ -95,7 +95,7 @@ def test_invalid_moodle_id_cannot_overwrite_existing_account(invalid_id):
             )
 
             with pytest.raises(MoodleError, match="идентификатор"):
-                save_or_update_student(db, data, "password", None, None)
+                save_or_update_student(db, data, None, None)
 
             db.expire_all()
             stored = db.get(User, victim_id)

@@ -8,8 +8,11 @@ from datetime import datetime, timedelta, timezone
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.db import get_db
+from app.models import User
 
 ALGORITHM = "HS256"
 ROLE_ADMIN = "admin"
@@ -42,12 +45,13 @@ def authenticate_admin(login: str, password: str) -> tuple[str, datetime]:
     return issue_token(login, ROLE_ADMIN, settings.jwt_ttl_hours)
 
 
-def _payload(credentials: HTTPAuthorizationCredentials | None, missing: str) -> dict:
+def _payload(credentials: HTTPAuthorizationCredentials | None, missing: str, *, verify_exp: bool = True) -> dict:
     if credentials is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, missing)
 
     try:
-        return jwt.decode(credentials.credentials, get_settings().jwt_secret, algorithms=[ALGORITHM])
+        return jwt.decode(credentials.credentials, get_settings().jwt_secret, algorithms=[ALGORITHM],
+                          options={"verify_exp": verify_exp, "require": ["sub", "role", "exp"]})
     except jwt.ExpiredSignatureError as error:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "сессия истекла, войдите снова") from error
     except jwt.InvalidTokenError as error:
@@ -62,9 +66,36 @@ def require_admin(credentials: HTTPAuthorizationCredentials | None = Depends(_be
     return payload["sub"]
 
 
-def require_student(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> int:
-    """Зависимость для эндпоинтов /me. Возвращает id студента."""
-    payload = _payload(credentials, "нужен профиль студента")
+def _student_session(credentials: HTTPAuthorizationCredentials | None, db: Session, *, verify_exp: bool = True) -> User:
+    from app.services.moodle import MoodleAuthError
+    from app.services.moodle_sessions import require_session
+
+    payload = _payload(credentials, "нужен вход через Moodle", verify_exp=verify_exp)
     if payload.get("role") != ROLE_STUDENT:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "доступно только студенту")
-    return int(payload["sub"])
+    try:
+        user_id = int(payload["sub"])
+        sid = payload.get("sid")
+        if not isinstance(sid, str):
+            raise ValueError("Отсутствует серверная сессия")
+        return require_session(db, user_id, sid)
+    except (ValueError, TypeError, MoodleAuthError):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "сессия завершена, войдите через Moodle") from None
+
+
+def require_student(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer), db: Session = Depends(get_db)) -> int:
+    return _student_session(credentials, db).id
+
+
+def refreshable_student(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer), db: Session = Depends(get_db)) -> int:
+    # Истечение JWT допустимо только здесь: подпись, sid и срок общей сессии проверяются всегда.
+    return _student_session(credentials, db, verify_exp=False).id
+
+
+def issue_student_token(user: User) -> tuple[str, datetime]:
+    from app.services.moodle_sessions import session_expires_at
+
+    expires_at = session_expires_at(user)
+    token = jwt.encode({"sub": str(user.id), "role": ROLE_STUDENT, "sid": user.moodle_session_id,
+                        "exp": expires_at}, get_settings().jwt_secret, algorithm=ALGORITHM)
+    return token, expires_at

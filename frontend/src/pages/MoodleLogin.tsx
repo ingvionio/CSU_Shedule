@@ -87,7 +87,7 @@ export function MoodleLogin({ onLogin, onGoToAdmin }: MoodleLoginProps) {
         }}
       >
         <ShieldCheck size={16} style={{ color: '#28a745', flexShrink: 0 }} />
-        <span>Пароль шифруется и передаётся исключительно на сервер Moodle ЧелГУ.</span>
+        <span>Пароль используется только для входа в Moodle и не сохраняется в сервисе.</span>
       </div>
 
       <button

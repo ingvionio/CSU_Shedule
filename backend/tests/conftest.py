@@ -1,6 +1,8 @@
 import os
 import unicodedata
 from pathlib import Path
+from threading import Event
+from unittest.mock import Mock
 
 # База для тестов — отдельный SQLite-файл, настройки читаются при импорте app.core.db.
 TEST_DB = Path(__file__).parent / "test_api.db"
@@ -8,6 +10,7 @@ os.environ["DATABASE_URL"] = f"sqlite+pysqlite:///{TEST_DB.as_posix()}"
 os.environ["ADMIN_LOGIN"] = "admin"
 os.environ["ADMIN_PASSWORD"] = "secret"
 os.environ["JWT_SECRET"] = "test-secret"
+os.environ["MOODLE_ENCRYPTION_KEY"] = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -32,6 +35,12 @@ def _find_excel() -> Path:
 
 
 EXCEL = _find_excel()
+
+
+@pytest.fixture(autouse=True)
+def no_background_moodle(monkeypatch):
+    # Фоновый worker проверяется отдельно; обычные API-тесты не запускают сеть и таймеры.
+    monkeypatch.setattr("app.services.moodle_sessions.start_worker", lambda: (Event(), Mock()))
 
 
 @pytest.fixture(scope="session")

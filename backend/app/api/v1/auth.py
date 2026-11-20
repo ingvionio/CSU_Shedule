@@ -5,19 +5,19 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from app.core.config import get_settings
 from app.core.db import get_db
-from app.core.security import ROLE_STUDENT, AuthError, authenticate_admin, issue_token, require_student
+from app.core.security import AuthError, authenticate_admin, issue_student_token, refreshable_student
 from app.models import User
 from app.schemas.admin import LoginIn, TokenOut
 from app.schemas.student import (
     MoodleLoginIn,
     StudentProfileOut,
-    StudentRegisterIn,
+    StudentRefreshIn,
     StudentTokenOut,
 )
 from app.services import moodle as moodle_service
 from app.services import students as students_service
+from app.services import moodle_sessions
 
 router = APIRouter()
 
@@ -49,42 +49,39 @@ def moodle_login(
         user, _ = moodle_service.save_or_update_student(
             db=db,
             moodle_data=moodle_data,
-            plain_password=data.password,
             device_key=data.device_key,
             ip=request.client.host if request.client else None,
         )
     except moodle_service.MoodleError as err:
         raise HTTPException(err.status_code, str(err)) from err
 
-    token, expires_at = issue_token(str(user.id), ROLE_STUDENT, get_settings().student_jwt_ttl_hours)
+    token, expires_at = issue_student_token(user)
     return StudentTokenOut(access_token=token, expires_at=expires_at, profile=profile_out(user))
 
 
-@router.post("/auth/moodle/forget", summary="Сбросить сохраненный пароль и сессию Moodle")
+@router.post("/auth/moodle/forget", summary="Завершить общую сессию на всех устройствах")
 def moodle_forget(
-    user_id: int = Depends(require_student),
+    user_id: int = Depends(refreshable_student),
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
-    user = students_service.get_student(db, user_id)
-    user.moodle_encrypted_password = None
-    user.moodle_session_cookie = None
-    user.moodle_sesskey = None
-    user.moodle_session_expires_at = None
-    user.moodle_auth_error = True
-    db.commit()
+    moodle_sessions.revoke_session(db, user_id)
     return {"status": "ok"}
 
 
-@router.post("/auth/student/register", response_model=StudentTokenOut, summary="Резервная регистрация студента: ФИО и группа")
-def student_register(data: StudentRegisterIn, request: Request, db: Session = Depends(get_db)) -> StudentTokenOut:
-    try:
-        user, _ = students_service.register(
-            db, data.full_name, data.group_id, data.device_key, request.client.host if request.client else None
-        )
-    except students_service.StudentError as error:
-        raise HTTPException(error.status_code, str(error)) from error
+@router.post("/auth/student/register", deprecated=True, summary="Устаревший способ входа отключён")
+def student_register() -> None:
+    raise HTTPException(status.HTTP_410_GONE, "Вход по ФИО и группе отключён. Войдите через Moodle")
 
-    token, expires_at = issue_token(str(user.id), ROLE_STUDENT, get_settings().student_jwt_ttl_hours)
+
+@router.post("/auth/student/refresh", response_model=StudentTokenOut, summary="Обновить токен действующей общей сессии")
+def student_refresh(data: StudentRefreshIn, user_id: int = Depends(refreshable_student), db: Session = Depends(get_db)) -> StudentTokenOut:
+    user = students_service.get_student(db, user_id)
+    try:
+        if data.active:
+            user = moodle_sessions.record_activity(db, user)
+    except moodle_service.MoodleAuthError as error:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(error)) from error
+    token, expires_at = issue_student_token(user)
     return StudentTokenOut(access_token=token, expires_at=expires_at, profile=profile_out(user))
 
 

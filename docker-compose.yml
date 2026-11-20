@@ -29,7 +29,9 @@ services:
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@example.com}
-      STUDENT_JWT_TTL_HOURS: ${STUDENT_JWT_TTL_HOURS:-1440}
+      MOODLE_ENCRYPTION_KEY: ${MOODLE_ENCRYPTION_KEY:?Задайте отдельный ключ AES-256-GCM в base64}
+      MOODLE_BASE_URL: ${MOODLE_BASE_URL:-https://eu.iit.csu.ru}
+      MOODLE_MOCK: ${MOODLE_MOCK:-false}
       REMIND_COOLDOWN_HOURS: ${REMIND_COOLDOWN_HOURS:-6}
     ports:
       - "${BACKEND_PORT:-8000}:8000"

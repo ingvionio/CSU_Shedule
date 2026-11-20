@@ -1,14 +1,13 @@
-"""Профиль студента: регистрация по ФИО и группе, ключ устройства, роли токенов."""
+"""Профиль студента после подтверждённого входа Moodle, роли токенов."""
+
+from tests.moodle_helpers import login_student
 
 DEVICE = "device-key-0123456789"
 OTHER_DEVICE = "device-key-9876543210"
 
 
 def register(client, group_id, name="Иванов Иван", device=DEVICE):
-    return client.post(
-        "/api/v1/auth/student/register",
-        json={"full_name": name, "group_id": group_id, "device_key": device},
-    )
+    return login_student(client, group_id, name, device)
 
 
 def student_headers(client, group_id, **kwargs) -> dict[str, str]:
@@ -17,7 +16,7 @@ def student_headers(client, group_id, **kwargs) -> dict[str, str]:
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
-def test_регистрация_и_профиль(bare_client, test_groups):
+def test_вход_и_профиль(bare_client, test_groups):
     group_id = test_groups["ТЕСТ ПИ 991"]
     response = register(bare_client, group_id, name="  Иванов   Иван ")
     assert response.status_code == 200
@@ -31,7 +30,7 @@ def test_регистрация_и_профиль(bare_client, test_groups):
     assert me["unread_count"] == 0
 
 
-def test_повторная_регистрация_с_того_же_устройства_тот_же_студент(bare_client, test_groups):
+def test_повторный_вход_той_же_учётной_записи_обновляет_профиль(bare_client, test_groups):
     first = register(bare_client, test_groups["ТЕСТ ПИ 991"]).json()["profile"]
     again = register(bare_client, test_groups["ТЕСТ ПИ 992"], name="Иванов Иван Петрович").json()["profile"]
     assert again["id"] == first["id"]
@@ -39,7 +38,7 @@ def test_повторная_регистрация_с_того_же_устрой
     assert again["full_name"] == "Иванов Иван Петрович"
 
 
-def test_тот_же_фио_с_другого_устройства_другой_студент(bare_client, test_groups):
+def test_разные_учётные_записи_с_одинаковым_фио_не_объединяются(bare_client, test_groups):
     group_id = test_groups["ТЕСТ ПИ 991"]
     first = register(bare_client, group_id).json()["profile"]
     other = register(bare_client, group_id, device=OTHER_DEVICE).json()["profile"]

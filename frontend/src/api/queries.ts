@@ -249,13 +249,15 @@ export function useDirections(): UseQueryResult<Direction[]> {
 
 /** Инбокс студента. Сохраняется на устройстве, чтобы сообщения открывались без сети. */
 export function useInbox(enabled: boolean): UseQueryResult<Inbox> {
+  const session = useStudentSession()
+  const cacheKey = `inbox-${session?.profile.id}`
   return useQuery({
-    queryKey: ['inbox'],
-    queryFn: async () => writeCache('inbox', await asStudent(api.inbox)),
-    initialData: () => readCache<Inbox>('inbox') ?? undefined,
+    queryKey: ['inbox', session?.profile.id],
+    queryFn: async () => writeCache(cacheKey, await asStudent(api.inbox)),
+    initialData: () => session ? readCache<Inbox>(cacheKey) ?? undefined : undefined,
     // Сохранённая копия — только чтобы было что показать: при открытии всегда спрашиваем сервер.
     initialDataUpdatedAt: 0,
-    enabled,
+    enabled: enabled && session !== null,
     staleTime: 30 * 1000,
     refetchInterval: 2 * 60 * 1000,
     refetchOnWindowFocus: true,
