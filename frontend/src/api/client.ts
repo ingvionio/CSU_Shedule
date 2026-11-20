@@ -133,6 +133,7 @@ export const api = {
     })
     if (filters.q?.trim()) query.set('q', filters.q.trim())
     if (filters.group_id) query.set('group_id', String(filters.group_id))
+    if (filters.platform) query.set('platform', filters.platform)
     for (const key of ['last_seen_from', 'last_seen_to', 'created_from', 'created_to'] as const) {
       if (filters[key]) query.set(key, filters[key]!)
     }

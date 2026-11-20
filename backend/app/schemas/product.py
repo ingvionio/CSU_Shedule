@@ -2,6 +2,8 @@
 
 from datetime import date, datetime
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -59,6 +61,7 @@ class GroupCoverageOut(BaseModel):
     id: int
     name: str
     course: int
+    level: Literal["bachelor", "master"] = Field(description="магистратура — название группы начинается с «М»")
     users: int = Field(description="студентов группы с профилем, всего")
     new: int = Field(description="из них впервые вошли за период")
     active: int = Field(description="заходили за период")

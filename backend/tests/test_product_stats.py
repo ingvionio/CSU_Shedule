@@ -10,7 +10,7 @@ from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.core.security import ROLE_STUDENT, issue_token
 from tests.moodle_helpers import login_student
-from app.models import EmailOutbox, FeedbackMessage, Message, MessageRecipient, ProductEvent, PushSubscription, User
+from app.models import EmailOutbox, FeedbackMessage, Group, Message, MessageRecipient, ProductEvent, PushSubscription, User
 from tests.test_notes import notes_demo  # noqa: F401 — фикстура для события заметки
 from app.services import product_stats
 from app.services.feedback import secret_hash
@@ -585,3 +585,48 @@ async def test_message_title_in_user_events(product, product_headers, bare_admin
     await _send_message(product, bare_admin_headers, importance="normal")
     items = (await product.get(f"/api/v1/product/users/{anya}/events", headers=product_headers)).json()["items"]
     assert [(e["name"], e["detail"]) for e in items] == [("message_received", "Перенос пары"), ("login_success", None)]
+
+
+async def test_master_groups_are_a_separate_level(product):
+    async with SessionLocal() as session:
+        session.add_all([Group(name="ТЕСТ МИТ 101", course=1), Group(name="ТЕСТ ПИ 101", course=1)])
+        await session.commit()
+    try:
+        groups = {g["name"]: g["level"] for g in (await _summary(7))["groups"]}
+        assert groups["ТЕСТ ПИ 101"] == "bachelor"
+        assert product_stats.level_of_group("МИТ 101") == "master"
+        assert product_stats.level_of_group(" МПрИ 201") == "master"
+        assert product_stats.level_of_group("ИТ1-ПрИб-11") == "bachelor"
+    finally:
+        async with SessionLocal() as session:
+            await session.execute(delete(Group).where(Group.name.in_(["ТЕСТ МИТ 101", "ТЕСТ ПИ 101"])))
+            await session.commit()
+
+
+async def test_users_platform_filter_and_computed_sorts(product, product_headers):
+    recent = datetime.now(timezone.utc) - timedelta(hours=2)
+    busy, quiet, phone = (await _student("Активный", created_at=OLD), await _student("Тихий", created_at=OLD),
+                          await _student("Телефон", created_at=OLD))
+    await _events(
+        ("app_open", recent, busy, "d1", "web"),
+        ("app_open", recent - timedelta(days=1), busy, "d1", "web"),
+        ("app_open", recent - timedelta(days=2), busy, "d1", "web"),
+        ("app_open", recent, phone, "d2", "apk"),
+    )
+
+    async def ids(**params):
+        response = await product.get("/api/v1/product/users", params=params, headers=product_headers)
+        body = response.json()
+        return [item["id"] for item in body["items"]], body["total"]
+
+    assert await ids(sort="active_days") == ([busy, phone, quiet], 3)
+    assert (await ids(sort="active_days", order="asc"))[0] == [quiet, phone, busy]
+    # Платформа: APK, PWA, браузер; без платформы — всегда в конце.
+    assert (await ids(sort="platform"))[0] == [phone, busy, quiet]
+    assert (await ids(sort="platform", order="desc"))[0] == [busy, phone, quiet]
+    assert await ids(platform="apk") == ([phone], 1)
+    assert await ids(platform="unknown") == ([quiet], 1)
+    assert await ids(platform="web", sort="name") == ([busy], 1)
+    assert (await ids(platform="web", limit=1, offset=1)) == ([], 1)
+    bad = await product.get("/api/v1/product/users?platform=ios", headers=product_headers)
+    assert bad.status_code == 422

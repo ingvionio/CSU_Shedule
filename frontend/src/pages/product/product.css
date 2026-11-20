@@ -118,7 +118,7 @@ body.pl-body { background: #0e1014; }
 .pl-popover-title { color: var(--pl-muted); font-size: 12px; }
 
 /* Фильтры пользователей */
-.pl-filters { display: grid; grid-template-columns: minmax(180px, 1.4fr) minmax(130px, 1fr) minmax(250px, 1.6fr) minmax(250px, 1.6fr) minmax(140px, 1fr); align-items: end; gap: 12px; }
+.pl-filters { display: grid; grid-template-columns: minmax(180px, 1.4fr) minmax(130px, 1fr) minmax(130px, 1fr) minmax(250px, 1.6fr) minmax(250px, 1.6fr); align-items: end; gap: 12px; }
 .pl-filter-actions { display: flex; grid-column: 1 / -1; gap: 8px; }
 .pl-pager { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--pl-line); }
 .pl-pager .pl-muted { margin-right: auto; }
@@ -166,3 +166,11 @@ body.pl-body { background: #0e1014; }
 .pl-sort { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
 .pl-sort:hover, .pl-sort.active { color: var(--pl-text); }
 .pl-sort span { min-width: 8px; font-size: 9px; }
+
+/* Курсы и группы: строка курса — итог, группы под ней с отступом */
+.pl-course-row td { background: var(--pl-surface-2); font-weight: 600; }
+.pl-course-row td:first-child { padding-left: 10px; border-radius: 6px 0 0 6px; }
+.pl-course-row td:last-child { padding-right: 10px; border-radius: 0 6px 6px 0; }
+.pl-indent { padding-left: 22px !important; }
+.pl-course tr:last-child td { border-bottom: 0; }
+.pl-course + .pl-course .pl-course-row td { border-top: 8px solid var(--pl-surface); }

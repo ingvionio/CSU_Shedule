@@ -449,7 +449,7 @@ export type ProductSummary = {
   by_platform: Record<string, number>
   features: { name: string; events: number; users: number }[]
   retention: { week: number; eligible: number; returned: number }[]
-  groups: { id: number; name: string; course: number; users: number; new: number; active: number }[]
+  groups: { id: number; name: string; course: number; level: 'bachelor' | 'master'; users: number; new: number; active: number }[]
   daily: { date: string; dau: number; new_users: number; landing_devices: number; login_success: number }[]
 }
 
@@ -472,7 +472,8 @@ export type ProductUserFilters = {
   last_seen_to?: string
   created_from?: string
   created_to?: string
-  sort: 'last_seen' | 'created' | 'name' | 'group'
+  platform?: 'web' | 'pwa' | 'apk' | 'unknown' | null
+  sort: 'last_seen' | 'created' | 'name' | 'group' | 'active_days' | 'platform'
   order: 'asc' | 'desc'
   limit: number
   offset: number

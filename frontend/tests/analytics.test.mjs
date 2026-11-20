@@ -82,3 +82,19 @@ test('nice scale covers the max with round steps', () => {
   assert.deepEqual({ ...ts2.niceScale(7) }, { top: 8, step: 2 })
   assert.deepEqual({ ...ts2.niceScale(130) }, { top: 150, step: 50 })
 })
+
+test('groups roll up into bachelor courses first, then master courses', () => {
+  const { coursesOf } = load('../src/pages/product/courses.ts')
+  const row = (id, name, course, level, users, active) => ({ id, name, course, level, users, new: 0, active })
+  const courses = coursesOf([
+    row(1, 'МИТ 101', 1, 'master', 3, 1),
+    row(2, 'ПИ 201', 2, 'bachelor', 5, 2),
+    row(3, 'ИТ1-ПИб-11', 1, 'bachelor', 4, 4),
+    row(4, 'ИТ1-БИб-11', 1, 'bachelor', 1, 0),
+  ])
+  // Массивы из контекста vm сравниваем как JSON: у них другой прототип.
+  const plain = value => JSON.parse(JSON.stringify(value))
+  assert.deepEqual(plain(courses.map(c => c.title)), ['1 курс', '2 курс', '1 курс магистратуры'])
+  assert.deepEqual(plain(courses.map(c => [c.users, c.active])), [[5, 4], [5, 2], [3, 1]])
+  assert.deepEqual(plain(courses[0].groups.map(g => g.name)), ['ИТ1-ПИб-11', 'ИТ1-БИб-11'])
+})

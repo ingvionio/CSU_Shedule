@@ -6,6 +6,7 @@ import { clearProductSession, readProductSession, writeProductSession } from '..
 import { ApiError, api } from '../../api/client'
 import type { AdminSession, ProductSummary, ProductUserFilters } from '../../api/types'
 import { AreaChart } from './charts'
+import { coursesOf } from './courses'
 import {
   COUNT_GROUPS, FEATURE_LABELS, conversion, eventLabel, formatDateTime, formatDay, percent, platformLabel,
 } from './labels'
@@ -402,21 +403,28 @@ function OverviewBody({ data, previous }: { data: ProductSummary; previous: Prod
       </div>
 
       <section className="pl-card">
-        <div className="pl-card-head"><h2>Группы</h2><span className="pl-muted">сколько студентов уже вошли; численность групп приложению неизвестна</span></div>
+        <div className="pl-card-head"><h2>Курсы и группы</h2><span className="pl-muted">сколько студентов уже вошли; численность групп приложению неизвестна</span></div>
         <div className="pl-scroll">
           <table className="pl-table">
-            <thead><tr><th>Группа</th><th className="num">Курс</th><th className="num">С профилем</th><th className="num">Новые</th><th className="num">Активны</th></tr></thead>
-            <tbody>
-              {data.groups.map((group) => (
-                <tr key={group.id} className={group.users === 0 ? 'pl-dim' : ''}>
-                  <td>{group.name}</td>
-                  <td className="num">{group.course}</td>
-                  <td className="num">{group.users}</td>
-                  <td className="num">{group.new}</td>
-                  <td className="num">{group.active}</td>
+            <thead><tr><th>Курс / группа</th><th className="num">С профилем</th><th className="num">Новые</th><th className="num">Активны</th></tr></thead>
+            {coursesOf(data.groups).map((course) => (
+              <tbody key={course.key} className="pl-course">
+                <tr className="pl-course-row">
+                  <td>{course.title}</td>
+                  <td className="num">{course.users}</td>
+                  <td className="num">{course.new}</td>
+                  <td className="num">{course.active}</td>
                 </tr>
-              ))}
-            </tbody>
+                {course.groups.map((group) => (
+                  <tr key={group.id} className={group.users === 0 ? 'pl-dim' : ''}>
+                    <td className="pl-indent">{group.name}</td>
+                    <td className="num">{group.users}</td>
+                    <td className="num">{group.new}</td>
+                    <td className="num">{group.active}</td>
+                  </tr>
+                ))}
+              </tbody>
+            ))}
           </table>
         </div>
       </section>
@@ -468,7 +476,7 @@ function UsersPage({ token, onLogout, onOpen }: { token: string; onLogout: () =>
   const sortBy = (column: SortKey) => {
     const order = filters.sort === column
       ? (filters.order === 'asc' ? 'desc' : 'asc')
-      : (column === 'name' || column === 'group' ? 'asc' : 'desc')
+      : (column === 'name' || column === 'group' || column === 'platform' ? 'asc' : 'desc')
     setDraft((current) => ({ ...current, sort: column, order }))
     setFilters((current) => ({ ...current, sort: column, order, offset: 0 }))
   }
@@ -491,6 +499,15 @@ function UsersPage({ token, onLogout, onOpen }: { token: string; onLogout: () =>
           <select className="pl-input" value={draft.group_id ?? ''} onChange={(event) => set({ group_id: event.target.value ? Number(event.target.value) : null })}>
             <option value="">Все</option>
             {groups.data?.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+          </select>
+        </label>
+        <label className="pl-field">Платформа
+          <select className="pl-input" value={draft.platform ?? ''} onChange={(event) => set({ platform: (event.target.value || null) as ProductUserFilters['platform'] })}>
+            <option value="">Все</option>
+            <option value="web">{platformLabel('web')}</option>
+            <option value="pwa">{platformLabel('pwa')}</option>
+            <option value="apk">{platformLabel('apk')}</option>
+            <option value="unknown">{platformLabel('unknown')}</option>
           </select>
         </label>
         <div className="pl-field" role="group" aria-labelledby="f-seen">
@@ -524,8 +541,8 @@ function UsersPage({ token, onLogout, onOpen }: { token: string; onLogout: () =>
                   <SortHeader label="Группа" column="group" filters={filters} onSort={sortBy} />
                   <SortHeader label="Последний заход" column="last_seen" filters={filters} onSort={sortBy} />
                   <SortHeader label="Первый вход" column="created" filters={filters} onSort={sortBy} />
-                  <th className="num">Дней за 30</th>
-                  <th>Платформа</th>
+                  <SortHeader label="Дней за 30" column="active_days" filters={filters} onSort={sortBy} className="num" />
+                  <SortHeader label="Платформа" column="platform" filters={filters} onSort={sortBy} />
                 </tr>
               </thead>
               <tbody>

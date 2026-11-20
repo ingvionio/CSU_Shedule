@@ -41,7 +41,11 @@ FEATURE_EVENTS = (
     ev.PUSH_SUBSCRIBED,
 )
 RETENTION_WEEKS = (1, 2, 4)
-USER_SORTS = ("last_seen", "created", "name", "group")
+USER_SORTS = ("last_seen", "created", "name", "group", "active_days", "platform")
+# Эти столбцы считаются в Python по событиям — сортировка и фильтр по ним идут после выборки.
+COMPUTED_SORTS = ("active_days", "platform")
+PLATFORM_FILTERS = ("web", "pwa", "apk", "unknown")
+PLATFORM_ORDER = {"apk": 0, "pwa": 1, "web": 2}
 USER_ORDERS = ("asc", "desc")
 
 
@@ -199,10 +203,18 @@ def _retention(db: Session, period: Period, today: date) -> list[dict]:
     return result
 
 
+def level_of_group(name: str) -> str:
+    """Магистратура — группы, чьё название начинается с «М» (МИТ 101, МПрИ 201…); остальные — бакалавриат."""
+    return "master" if name.strip()[:1] in ("М", "M") else "bachelor"
+
+
 def _groups(db: Session, period: Period, active_users: set[int]) -> list[dict]:
     """Охват групп: сколько студентов каждой группы вошли в приложение. Размер группы нам неизвестен."""
     stats: dict[int, dict] = {
-        group.id: {"id": group.id, "name": group.name, "course": group.course, "users": 0, "new": 0, "active": 0}
+        group.id: {
+            "id": group.id, "name": group.name, "course": group.course, "level": level_of_group(group.name),
+            "users": 0, "new": 0, "active": 0,
+        }
         for group in db.scalars(select(Group).order_by(Group.course, Group.name))
     }
     for user_id, group_id, created_at in db.execute(
@@ -404,6 +416,7 @@ def users(
     last_seen_to: date | None = None,
     created_from: date | None = None,
     created_to: date | None = None,
+    platform: str | None = None,
     sort: str = "last_seen",
     order: str | None = None,
     limit: int = 50,
@@ -414,8 +427,10 @@ def users(
     now = now or datetime.now(timezone.utc)
     if sort not in USER_SORTS:
         raise ProductStatsError("неизвестная сортировка", 422)
-    # По умолчанию — как ожидают от столбца: даты от новых, текст по алфавиту.
-    order = order or ("asc" if sort in ("name", "group") else "desc")
+    if platform is not None and platform not in PLATFORM_FILTERS:
+        raise ProductStatsError("платформа — web, pwa, apk или unknown", 422)
+    # По умолчанию — как ожидают от столбца: даты и числа от больших, текст по алфавиту.
+    order = order or ("asc" if sort in ("name", "group", "platform") else "desc")
     if order not in USER_ORDERS:
         raise ProductStatsError("порядок сортировки — asc или desc", 422)
     last_event = _last_event_subquery()
@@ -434,6 +449,9 @@ def users(
     if created_to:
         query = query.where(User.created_at < local_midnight_utc(created_to + timedelta(days=1)))
 
+    if sort in COMPUTED_SORTS or platform is not None:
+        return _users_computed(db, query, platform=platform, sort=sort, order=order, limit=limit, offset=offset, now=now)
+
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
     if sort == "group":
         query = query.outerjoin(Group, Group.id == User.group_id)
@@ -443,6 +461,37 @@ def users(
     ordering = (column.is_(None), direction, User.full_name.asc(), User.id.asc())
     page = list(db.scalars(query.order_by(*ordering).limit(limit).offset(offset)).unique())
     return {"total": total, "items": _user_rows(db, page, now)}
+
+
+def _users_computed(db: Session, query, *, platform: str | None, sort: str, order: str, limit: int, offset: int,
+                    now: datetime) -> dict:
+    """Платформа и активные дни считаются по событиям, поэтому фильтр и сортировка по ним — после выборки всех.
+
+    При тысячах студентов это несколько запросов на всю выборку — для ЛК приемлемо.
+    """
+    users = list(db.scalars(query.order_by(User.full_name.asc(), User.id.asc())).unique())
+    rows = _user_rows(db, users, now)
+    if platform is not None:
+        rows = [row for row in rows if (row["last_platform"] or "unknown") == platform]
+    reverse = order == "desc"
+    if sort == "active_days":
+        rows.sort(key=lambda row: row["active_days_30"], reverse=reverse)
+    elif sort == "platform":
+        known = [row for row in rows if row["last_platform"]]
+        known.sort(key=lambda row: PLATFORM_ORDER.get(row["last_platform"], 9), reverse=reverse)
+        # Без платформы — всегда в конце, как пустая группа.
+        rows = known + [row for row in rows if not row["last_platform"]]
+    else:
+        key = {
+            "last_seen": lambda row: row["last_seen_at"] or row["created_at"],
+            "created": lambda row: row["created_at"],
+            "name": lambda row: row["full_name"],
+            "group": lambda row: row["group"]["name"] if row["group"] else "",
+        }[sort]
+        filled = [row for row in rows if sort != "group" or row["group"]]
+        filled.sort(key=key, reverse=reverse)
+        rows = filled + [row for row in rows if sort == "group" and not row["group"]]
+    return {"total": len(rows), "items": rows[offset:offset + limit]}
 
 
 def user_detail(db: Session, user_id: int, now: datetime | None = None) -> dict:
