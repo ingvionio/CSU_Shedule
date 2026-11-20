@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.security import optional_student, require_admin
-from app.models import FeedbackMessage, FeedbackRecipient, FeedbackReply
+from app.models import FeedbackMessage, FeedbackRecipient, FeedbackReply, User
 from app.schemas.feedback import (
     AdminFeedbackOut,
     AdminReplyOut,
@@ -120,9 +120,10 @@ async def create_feedback(
     student_id: int | None = Depends(optional_student),
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> FeedbackCreatedOut:
+    author = await db.get(User, student_id) if student_id is not None else None
     try:
         message, outbox_ids = await feedback_service.create_message(
-            db, data, token, request.client.host if request.client else None
+            db, data, token, request.client.host if request.client else None, author=author
         )
     except feedback_service.FeedbackError as error:
         raise _raise(error) from error

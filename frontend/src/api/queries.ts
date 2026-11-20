@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 
 import { api } from './client'
-import { feedbackToken, readCache, readStudentSession, writeCache } from './cache'
-import { asStudent, useStudentSession } from './student'
+import { feedbackToken, readCache, writeCache } from './cache'
+import { asStudent, studentToken, useStudentSession } from './student'
 import type {
   Catalog,
   CurrentWeek,
@@ -184,7 +184,9 @@ export function useMyFeedback(enabled: boolean) {
 export function useSendFeedback() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (body: FeedbackInput) => api.sendFeedback(feedbackToken(), body, readStudentSession()?.token),
+    // Свежий токен: по нему сервер подпишет обращение ФИО из Moodle. Нет входа — уйдёт без подписи.
+    mutationFn: async (body: FeedbackInput) =>
+      api.sendFeedback(feedbackToken(), body, (await studentToken().catch(() => null)) ?? undefined),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['my-feedback'] }),
   })
 }
