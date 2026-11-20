@@ -10,7 +10,7 @@ from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.core.security import ROLE_STUDENT, issue_token
 from tests.moodle_helpers import login_student
-from app.models import EmailOutbox, FeedbackMessage, Message, MessageRecipient, ProductEvent, PushSubscription, User
+from app.models import EmailOutbox, FeedbackMessage, Group, Message, MessageRecipient, ProductEvent, PushSubscription, User
 from tests.test_notes import notes_demo  # noqa: F401 — фикстура для события заметки
 from app.services import product_stats
 from app.services.feedback import secret_hash
@@ -333,8 +333,11 @@ async def _summary(days: int = 30, end: date = TODAY, now: datetime = NOW) -> di
         return await session.run_sync(product_stats.summary, end - timedelta(days=days - 1), end, now=now)
 
 
+OLD = NOW - timedelta(days=200)  # профиль создан давно — его дата не попадает в периоды теста
+
+
 async def test_active_users_and_local_day(product):
-    a, b, c = await _student("А"), await _student("Б"), await _student("В")
+    a, b, c = await _student("А", created_at=OLD), await _student("Б", created_at=OLD), await _student("В", created_at=OLD)
     await _events(
         ("app_open", NOW, a, "d1", "web"),
         ("app_open", NOW - timedelta(hours=1), a, "d1", "web"),
@@ -354,7 +357,7 @@ async def test_active_users_and_local_day(product):
 
 
 async def test_custom_period_in_the_past(product):
-    user = await _student("Прошлый")
+    user = await _student("Прошлый", created_at=OLD)
     await _events(("app_open", datetime(2026, 9, 10, 6, tzinfo=timezone.utc), user, "d1", "web"))
     async with SessionLocal() as session:
         data = await session.run_sync(product_stats.summary, date(2026, 9, 1), date(2026, 9, 30), now=NOW)
@@ -393,8 +396,61 @@ async def test_funnel_counts_unique_devices(product):
         ("login_success", NOW, user, "d1", "web"),
     )
     data = await _summary(7)
-    assert data["funnel"] == {"landing_view": 2, "login_click": 1, "login_submit": 1, "login_success": 1}
+    assert data["funnel"] == {
+        "landing_view": 2, "login_click": 1, "login_submit": 1, "login_success": 1,
+        "login_any": 1, "login_without_landing": 0,
+    }
     assert data["login_failures"] == {"auth": 1, "group": 0, "other": 0}
+
+
+async def test_funnel_is_strict_and_counts_logins_without_landing(product):
+    """Форму можно открыть не с лендинга; шаг считается только среди прошедших предыдущий — конверсия ≤ 100%."""
+    a, b = await _student("А", created_at=OLD), await _student("Б", created_at=OLD)
+    await _events(
+        ("landing_view", NOW, None, "d1", "web"),
+        ("login_click", NOW, None, "d1", "web"),
+        ("login_submit", NOW, None, "d1", "web"),
+        ("login_success", NOW, a, "d1", "web"),
+        # Пришёл по прямой ссылке: формы входа и вход без лендинга.
+        ("login_click", NOW, None, "d2", "apk"),
+        ("login_submit", NOW, None, "d2", "apk"),
+        ("login_success", NOW, b, "d2", "apk"),
+        # Отправил форму, минуя шаг «открыл форму» (старая сборка).
+        ("landing_view", NOW, None, "d3", "web"),
+        ("login_submit", NOW, None, "d3", "web"),
+    )
+    funnel = (await _summary(7))["funnel"]
+    assert funnel == {
+        "landing_view": 2, "login_click": 1, "login_submit": 1, "login_success": 1,
+        "login_any": 2, "login_without_landing": 1,
+    }
+
+
+async def test_first_login_and_session_activity_count_as_active(product):
+    """Активность до сбора событий: дни первого входа и последней активности сессии из профиля."""
+    first = await _student("Новичок", created_at=NOW - timedelta(days=2))
+    await _student("Старый", created_at=OLD)
+    async with SessionLocal() as session:
+        user = await session.get(User, first)
+        user.session_last_active_at = NOW
+        await session.commit()
+    data = await _summary(7)
+    assert data["active_users"] == 1
+    assert [day["dau"] for day in data["daily"][-3:]] == [1, 0, 1]
+
+
+async def test_passive_events_do_not_make_active(product):
+    user = await _student("Получатель", created_at=OLD)
+    await _events(("message_received", NOW, user, None, None), ("push_sent", NOW, user, None, None))
+    assert (await _summary(7))["active_users"] == 0
+    await _events(("schedule_week_view", NOW, user, "d1", "web"))
+    assert (await _summary(7))["active_users"] == 1
+
+
+async def test_tracking_since(product):
+    assert (await _summary(7))["tracking_since"] is None
+    await _events(("landing_view", NOW - timedelta(days=3), None, "d1", "web"))
+    assert (await _summary(7))["tracking_since"].isoformat() == "2026-11-16"
 
 
 async def test_apk_downloads_and_installs(product):
@@ -529,3 +585,48 @@ async def test_message_title_in_user_events(product, product_headers, bare_admin
     await _send_message(product, bare_admin_headers, importance="normal")
     items = (await product.get(f"/api/v1/product/users/{anya}/events", headers=product_headers)).json()["items"]
     assert [(e["name"], e["detail"]) for e in items] == [("message_received", "Перенос пары"), ("login_success", None)]
+
+
+async def test_master_groups_are_a_separate_level(product):
+    async with SessionLocal() as session:
+        session.add_all([Group(name="ТЕСТ МИТ 101", course=1), Group(name="ТЕСТ ПИ 101", course=1)])
+        await session.commit()
+    try:
+        groups = {g["name"]: g["level"] for g in (await _summary(7))["groups"]}
+        assert groups["ТЕСТ ПИ 101"] == "bachelor"
+        assert product_stats.level_of_group("МИТ 101") == "master"
+        assert product_stats.level_of_group(" МПрИ 201") == "master"
+        assert product_stats.level_of_group("ИТ1-ПрИб-11") == "bachelor"
+    finally:
+        async with SessionLocal() as session:
+            await session.execute(delete(Group).where(Group.name.in_(["ТЕСТ МИТ 101", "ТЕСТ ПИ 101"])))
+            await session.commit()
+
+
+async def test_users_platform_filter_and_computed_sorts(product, product_headers):
+    recent = datetime.now(timezone.utc) - timedelta(hours=2)
+    busy, quiet, phone = (await _student("Активный", created_at=OLD), await _student("Тихий", created_at=OLD),
+                          await _student("Телефон", created_at=OLD))
+    await _events(
+        ("app_open", recent, busy, "d1", "web"),
+        ("app_open", recent - timedelta(days=1), busy, "d1", "web"),
+        ("app_open", recent - timedelta(days=2), busy, "d1", "web"),
+        ("app_open", recent, phone, "d2", "apk"),
+    )
+
+    async def ids(**params):
+        response = await product.get("/api/v1/product/users", params=params, headers=product_headers)
+        body = response.json()
+        return [item["id"] for item in body["items"]], body["total"]
+
+    assert await ids(sort="active_days") == ([busy, phone, quiet], 3)
+    assert (await ids(sort="active_days", order="asc"))[0] == [quiet, phone, busy]
+    # Платформа: APK, PWA, браузер; без платформы — всегда в конце.
+    assert (await ids(sort="platform"))[0] == [phone, busy, quiet]
+    assert (await ids(sort="platform", order="desc"))[0] == [busy, phone, quiet]
+    assert await ids(platform="apk") == ([phone], 1)
+    assert await ids(platform="unknown") == ([quiet], 1)
+    assert await ids(platform="web", sort="name") == ([busy], 1)
+    assert (await ids(platform="web", limit=1, offset=1)) == ([], 1)
+    bad = await product.get("/api/v1/product/users?platform=ios", headers=product_headers)
+    assert bad.status_code == 422

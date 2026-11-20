@@ -20,8 +20,9 @@ from app.services import product_events as ev
 LOCAL_TZ = timezone(timedelta(hours=5), "Челябинск")
 MAX_PERIOD_DAYS = 731
 DEFAULT_PERIOD_DAYS = 30
-# Что считается «заходил в этот день».
-ACTIVE_EVENTS = (ev.APP_OPEN, ev.LOGIN_SUCCESS)
+# «Заходил в этот день» — любое действие студента. Не считаются события, которые
+# происходят без его участия: сообщение ему отправили, push ему доставили.
+PASSIVE_EVENTS = (ev.MESSAGE_RECEIVED, ev.PUSH_SENT)
 FUNNEL = (ev.LANDING_VIEW, ev.LOGIN_CLICK, ev.LOGIN_SUBMIT, ev.LOGIN_SUCCESS)
 # Использование функций: события студентов, по которым строится блок «Функции».
 FEATURE_EVENTS = (
@@ -40,7 +41,11 @@ FEATURE_EVENTS = (
     ev.PUSH_SUBSCRIBED,
 )
 RETENTION_WEEKS = (1, 2, 4)
-USER_SORTS = ("last_seen", "created", "name", "group")
+USER_SORTS = ("last_seen", "created", "name", "group", "active_days", "platform")
+# Эти столбцы считаются в Python по событиям — сортировка и фильтр по ним идут после выборки.
+COMPUTED_SORTS = ("active_days", "platform")
+PLATFORM_FILTERS = ("web", "pwa", "apk", "unknown")
+PLATFORM_ORDER = {"apk": 0, "pwa": 1, "web": 2}
 USER_ORDERS = ("asc", "desc")
 
 
@@ -105,35 +110,68 @@ def _in_period(period: Period):
     return (ProductEvent.occurred_at >= period.start_utc, ProductEvent.occurred_at < period.end_utc)
 
 
-def _distinct_devices(db: Session, name: str, period: Period) -> int:
-    return db.scalar(
-        select(func.count(func.distinct(ProductEvent.device_hash))).where(
-            ProductEvent.name == name, *_in_period(period), ProductEvent.device_hash.is_not(None)
-        )
-    ) or 0
-
-
 def _count(db: Session, name: str, period: Period) -> int:
     return db.scalar(select(func.count(ProductEvent.id)).where(ProductEvent.name == name, *_in_period(period))) or 0
 
 
 def _active_days(db: Session, since: date, until: date, user_ids: Iterable[int] | None = None) -> dict[int, set[date]]:
-    """Дни (по Челябинску), в которые студент открывал приложение или входил."""
-    query = select(ProductEvent.user_id, ProductEvent.occurred_at).where(
-        ProductEvent.name.in_(ACTIVE_EVENTS),
-        ProductEvent.user_id.is_not(None),
-        ProductEvent.occurred_at >= local_midnight_utc(since),
-        ProductEvent.occurred_at < local_midnight_utc(until + timedelta(days=1)),
-    )
-    if user_ids is not None:
-        ids = list(user_ids)
-        if not ids:
-            return {}
-        query = query.where(ProductEvent.user_id.in_(ids))
+    """Дни (по Челябинску), в которые студент что-то делал в приложении.
+
+    Кроме событий учитываются отметки профиля: первый вход, последний вход через
+    Moodle и последняя активность общей сессии. Так видна и активность до того,
+    как начали собираться события, и заходы, событие которых не дошло.
+    """
+    low, high = local_midnight_utc(since), local_midnight_utc(until + timedelta(days=1))
+    ids = list(user_ids) if user_ids is not None else None
+    if ids is not None and not ids:
+        return {}
     days: dict[int, set[date]] = defaultdict(set)
+
+    query = select(ProductEvent.user_id, ProductEvent.occurred_at).where(
+        ProductEvent.name.not_in(PASSIVE_EVENTS),
+        ProductEvent.user_id.is_not(None),
+        ProductEvent.occurred_at >= low,
+        ProductEvent.occurred_at < high,
+    )
+    if ids is not None:
+        query = query.where(ProductEvent.user_id.in_(ids))
     for user_id, occurred_at in db.execute(query):
         days[user_id].add(local_date(occurred_at))
+
+    profile = select(User.id, User.created_at, User.last_seen_at, User.session_last_active_at).where(User.role == "student")
+    if ids is not None:
+        profile = profile.where(User.id.in_(ids))
+    for user_id, *moments in db.execute(profile):
+        for moment in moments:
+            if moment is not None and low <= as_utc(moment) < high:
+                days[user_id].add(local_date(moment))
     return days
+
+
+def _funnel(db: Session, period: Period) -> dict:
+    """Воронка по устройствам: каждый шаг — только среди тех, кто прошёл предыдущий.
+
+    Отдельно — сколько устройств вошло, не открывая лендинг за период
+    (уже были на нём раньше, пришли по прямой ссылке или из уведомления).
+    """
+    devices: dict[str, set[str]] = defaultdict(set)
+    for name, device in db.execute(
+        select(ProductEvent.name, ProductEvent.device_hash)
+        .where(ProductEvent.name.in_(FUNNEL), ProductEvent.device_hash.is_not(None), *_in_period(period))
+        .distinct()
+    ):
+        devices[name].add(device)
+    steps: dict[str, int] = {}
+    passed: set[str] | None = None
+    for name in FUNNEL:
+        passed = devices[name] if passed is None else passed & devices[name]
+        steps[name] = len(passed)
+    logged_in = devices[ev.LOGIN_SUCCESS]
+    return {
+        **steps,
+        "login_any": len(logged_in),
+        "login_without_landing": len(logged_in - devices[ev.LANDING_VIEW]),
+    }
 
 
 def _retention(db: Session, period: Period, today: date) -> list[dict]:
@@ -165,10 +203,18 @@ def _retention(db: Session, period: Period, today: date) -> list[dict]:
     return result
 
 
+def level_of_group(name: str) -> str:
+    """Магистратура — группы, чьё название начинается с «М» (МИТ 101, МПрИ 201…); остальные — бакалавриат."""
+    return "master" if name.strip()[:1] in ("М", "M") else "bachelor"
+
+
 def _groups(db: Session, period: Period, active_users: set[int]) -> list[dict]:
     """Охват групп: сколько студентов каждой группы вошли в приложение. Размер группы нам неизвестен."""
     stats: dict[int, dict] = {
-        group.id: {"id": group.id, "name": group.name, "course": group.course, "users": 0, "new": 0, "active": 0}
+        group.id: {
+            "id": group.id, "name": group.name, "course": group.course, "level": level_of_group(group.name),
+            "users": 0, "new": 0, "active": 0,
+        }
         for group in db.scalars(select(Group).order_by(Group.course, Group.name))
     }
     for user_id, group_id, created_at in db.execute(
@@ -277,7 +323,8 @@ def summary(db: Session, start: date | None = None, end: date | None = None, now
         "wau": len(active_between(period.end - timedelta(days=6), period.end)),
         "mau": len(active_between(period.end - timedelta(days=29), period.end)),
         "users_with_push": users_with_push,
-        "funnel": {name: _distinct_devices(db, name, period) for name in FUNNEL},
+        "funnel": _funnel(db, period),
+        "tracking_since": local_date(first_event) if (first_event := db.scalar(select(func.min(ProductEvent.occurred_at)))) else None,
         "login_failures": {
             "auth": _count(db, ev.LOGIN_FAILED_AUTH, period),
             "group": _count(db, ev.LOGIN_FAILED_GROUP, period),
@@ -369,6 +416,7 @@ def users(
     last_seen_to: date | None = None,
     created_from: date | None = None,
     created_to: date | None = None,
+    platform: str | None = None,
     sort: str = "last_seen",
     order: str | None = None,
     limit: int = 50,
@@ -379,8 +427,10 @@ def users(
     now = now or datetime.now(timezone.utc)
     if sort not in USER_SORTS:
         raise ProductStatsError("неизвестная сортировка", 422)
-    # По умолчанию — как ожидают от столбца: даты от новых, текст по алфавиту.
-    order = order or ("asc" if sort in ("name", "group") else "desc")
+    if platform is not None and platform not in PLATFORM_FILTERS:
+        raise ProductStatsError("платформа — web, pwa, apk или unknown", 422)
+    # По умолчанию — как ожидают от столбца: даты и числа от больших, текст по алфавиту.
+    order = order or ("asc" if sort in ("name", "group", "platform") else "desc")
     if order not in USER_ORDERS:
         raise ProductStatsError("порядок сортировки — asc или desc", 422)
     last_event = _last_event_subquery()
@@ -399,6 +449,9 @@ def users(
     if created_to:
         query = query.where(User.created_at < local_midnight_utc(created_to + timedelta(days=1)))
 
+    if sort in COMPUTED_SORTS or platform is not None:
+        return _users_computed(db, query, platform=platform, sort=sort, order=order, limit=limit, offset=offset, now=now)
+
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
     if sort == "group":
         query = query.outerjoin(Group, Group.id == User.group_id)
@@ -408,6 +461,37 @@ def users(
     ordering = (column.is_(None), direction, User.full_name.asc(), User.id.asc())
     page = list(db.scalars(query.order_by(*ordering).limit(limit).offset(offset)).unique())
     return {"total": total, "items": _user_rows(db, page, now)}
+
+
+def _users_computed(db: Session, query, *, platform: str | None, sort: str, order: str, limit: int, offset: int,
+                    now: datetime) -> dict:
+    """Платформа и активные дни считаются по событиям, поэтому фильтр и сортировка по ним — после выборки всех.
+
+    При тысячах студентов это несколько запросов на всю выборку — для ЛК приемлемо.
+    """
+    users = list(db.scalars(query.order_by(User.full_name.asc(), User.id.asc())).unique())
+    rows = _user_rows(db, users, now)
+    if platform is not None:
+        rows = [row for row in rows if (row["last_platform"] or "unknown") == platform]
+    reverse = order == "desc"
+    if sort == "active_days":
+        rows.sort(key=lambda row: row["active_days_30"], reverse=reverse)
+    elif sort == "platform":
+        known = [row for row in rows if row["last_platform"]]
+        known.sort(key=lambda row: PLATFORM_ORDER.get(row["last_platform"], 9), reverse=reverse)
+        # Без платформы — всегда в конце, как пустая группа.
+        rows = known + [row for row in rows if not row["last_platform"]]
+    else:
+        key = {
+            "last_seen": lambda row: row["last_seen_at"] or row["created_at"],
+            "created": lambda row: row["created_at"],
+            "name": lambda row: row["full_name"],
+            "group": lambda row: row["group"]["name"] if row["group"] else "",
+        }[sort]
+        filled = [row for row in rows if sort != "group" or row["group"]]
+        filled.sort(key=key, reverse=reverse)
+        rows = filled + [row for row in rows if sort == "group" and not row["group"]]
+    return {"total": len(rows), "items": rows[offset:offset + limit]}
 
 
 def user_detail(db: Session, user_id: int, now: datetime | None = None) -> dict:

@@ -437,7 +437,11 @@ export type ProductSummary = {
   wau: number
   mau: number
   users_with_push: number
-  funnel: { landing_view: number; login_click: number; login_submit: number; login_success: number }
+  funnel: {
+    landing_view: number; login_click: number; login_submit: number; login_success: number
+    login_any: number; login_without_landing: number
+  }
+  tracking_since: string | null
   login_failures: { auth: number; group: number; other: number }
   apk_downloads: number
   apk_installs: number
@@ -445,7 +449,7 @@ export type ProductSummary = {
   by_platform: Record<string, number>
   features: { name: string; events: number; users: number }[]
   retention: { week: number; eligible: number; returned: number }[]
-  groups: { id: number; name: string; course: number; users: number; new: number; active: number }[]
+  groups: { id: number; name: string; course: number; level: 'bachelor' | 'master'; users: number; new: number; active: number }[]
   daily: { date: string; dau: number; new_users: number; landing_devices: number; login_success: number }[]
 }
 
@@ -468,7 +472,8 @@ export type ProductUserFilters = {
   last_seen_to?: string
   created_from?: string
   created_to?: string
-  sort: 'last_seen' | 'created' | 'name' | 'group'
+  platform?: 'web' | 'pwa' | 'apk' | 'unknown' | null
+  sort: 'last_seen' | 'created' | 'name' | 'group' | 'active_days' | 'platform'
   order: 'asc' | 'desc'
   limit: number
   offset: number

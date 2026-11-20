@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, type FormEvent, useState } from 'react'
 import { GraduationCap, LogIn, ShieldCheck } from 'lucide-react'
 
 import { track } from '../api/analytics'
@@ -15,6 +15,8 @@ export function MoodleLogin({ onLogin, onGoToAdmin }: MoodleLoginProps) {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  // Шаг воронки «открыли форму входа» — с какого бы экрана студент сюда ни попал.
+  useEffect(() => track('login_click'), [])
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()

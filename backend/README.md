@@ -258,7 +258,9 @@ python -m app.cli send-emails --test you@example.com   # проверить SMTP
 охват групп; APK; ряды по дням. Дни считаются по Челябинску (UTC+5).
 
 Пользователи — `GET /api/v1/product/users` (поиск по ФИО, группа, даты
-последнего захода и первого входа, сортировка `sort` = `last_seen` /
-`created` / `name` / `group` и `order` = `asc` / `desc`), карточка `GET /api/v1/product/users/{id}` (сколько раз каждое
+последнего захода и первого входа, платформа `web` / `pwa` / `apk` /
+`unknown`; сортировка `sort` = `last_seen` / `created` / `name` / `group` /
+`active_days` / `platform` и `order` = `asc` / `desc`). В охвате групп у
+каждой группы `level`: магистратура — название начинается с «М»., карточка `GET /api/v1/product/users/{id}` (сколько раз каждое
 событие) и лента `GET /api/v1/product/users/{id}/events` (по времени, курсор
 `before`, у событий сообщений — заголовок).
