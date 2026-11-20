@@ -10,8 +10,10 @@ from __future__ import annotations
 import json
 import logging
 
+from aiohttp import ClientError, ClientSession, DummyCookieJar
+from pywebpush import WebPushException, webpush_async
 from sqlalchemy import delete, select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
@@ -28,9 +30,9 @@ def is_configured() -> bool:
     return bool(settings.vapid_public_key and settings.vapid_private_key)
 
 
-def subscribe(db: Session, user_id: int, endpoint: str, p256dh: str, auth: str, user_agent: str | None) -> PushSubscription:
+async def subscribe(db: AsyncSession, user_id: int, endpoint: str, p256dh: str, auth: str, user_agent: str | None) -> PushSubscription:
     """Сохраняет подписку. Тот же браузер под другим профилем — подписка переходит к нему."""
-    subscription = db.scalar(select(PushSubscription).where(PushSubscription.endpoint == endpoint))
+    subscription = await db.scalar(select(PushSubscription).where(PushSubscription.endpoint == endpoint))
     if subscription is None:
         subscription = PushSubscription(endpoint=endpoint)
         db.add(subscription)
@@ -38,15 +40,15 @@ def subscribe(db: Session, user_id: int, endpoint: str, p256dh: str, auth: str, 
     subscription.p256dh = p256dh
     subscription.auth = auth
     subscription.user_agent = (user_agent or "")[:300] or None
-    db.commit()
+    await db.commit()
     return subscription
 
 
-def unsubscribe(db: Session, user_id: int, subscription_id: int) -> bool:
-    result = db.execute(
+async def unsubscribe(db: AsyncSession, user_id: int, subscription_id: int) -> bool:
+    result = await db.execute(
         delete(PushSubscription).where(PushSubscription.id == subscription_id, PushSubscription.user_id == user_id)
     )
-    db.commit()
+    await db.commit()
     return result.rowcount > 0
 
 
@@ -62,51 +64,51 @@ def payload(message: Message, reminder: bool) -> dict:
     }
 
 
-def _send(subscription: PushSubscription, data: dict) -> None:
-    from pywebpush import webpush
-
+async def _send(client: ClientSession, subscription: PushSubscription, data: dict) -> None:
     settings = get_settings()
-    webpush(
+    await webpush_async(
         subscription_info={"endpoint": subscription.endpoint, "keys": {"p256dh": subscription.p256dh, "auth": subscription.auth}},
         data=json.dumps(data, ensure_ascii=False),
         vapid_private_key=settings.vapid_private_key,
         vapid_claims={"sub": settings.vapid_subject},
         ttl=24 * 60 * 60,
         timeout=10,
+        aiohttp_session=client,
     )
 
 
-def deliver(db: Session, message: Message, user_ids: list[int], reminder: bool) -> int:
+async def deliver(db: AsyncSession, message: Message, user_ids: list[int], reminder: bool) -> int:
     """Отправляет push на все устройства студентов. Возвращает число доставленных."""
-    from pywebpush import WebPushException
-
-    subscriptions = db.scalars(select(PushSubscription).where(PushSubscription.user_id.in_(user_ids))).all()
+    subscriptions = (await db.scalars(select(PushSubscription).where(PushSubscription.user_id.in_(user_ids)))).all()
     data = payload(message, reminder)
+    # Соединение с БД понадобится снова только для записи результата.
+    await db.commit()
     sent = 0
-    for subscription in subscriptions:
-        try:
-            _send(subscription, data)
-            sent += 1
-        except WebPushException as error:
-            status = error.response.status_code if error.response is not None else None
-            if status in GONE_STATUSES:
-                db.delete(subscription)
-            else:
-                logger.warning("Push %s не доставлен (%s): %s", subscription.id, status, error)
-        except OSError as error:
-            logger.warning("Push %s не доставлен: %s", subscription.id, error)
-    db.commit()
+    async with ClientSession(cookie_jar=DummyCookieJar(), trust_env=True) as client:
+        for subscription in subscriptions:
+            try:
+                await _send(client, subscription, data)
+                sent += 1
+            except WebPushException as error:
+                status = error.response.status if error.response is not None else None
+                if status in GONE_STATUSES:
+                    await db.delete(subscription)
+                else:
+                    logger.warning("Push %s не доставлен (%s): %s", subscription.id, status, error)
+            except (ClientError, OSError) as error:
+                logger.warning("Push %s не доставлен: %s", subscription.id, error)
+    await db.commit()
     return sent
 
 
-def notify_message(message_id: int, user_ids: list[int], reminder: bool) -> None:
+async def notify_message(message_id: int, user_ids: list[int], reminder: bool) -> None:
     """Фоновая задача после ответа API: своя сессия, потому что запросная уже закрыта."""
     if not user_ids:
         return
     if not is_configured():
         logger.info("Push не настроен (VAPID_*): сообщение %s, получателей %s", message_id, len(user_ids))
         return
-    with SessionLocal() as db:
-        message = db.get(Message, message_id)
+    async with SessionLocal() as db:
+        message = await db.get(Message, message_id)
         if message is not None:
-            deliver(db, message, user_ids, reminder)
+            await deliver(db, message, user_ids, reminder)

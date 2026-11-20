@@ -8,14 +8,14 @@
 from __future__ import annotations
 
 import logging
-import smtplib
-import ssl
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from email.utils import formataddr
 
+from aiosmtplib import send
+from aiosmtplib.errors import SMTPException
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 MAX_ATTEMPTS = 5
 
 
-def _send(item: EmailOutbox) -> None:
+async def _send(item: EmailOutbox) -> None:
     settings = get_settings()
     message = EmailMessage()
     message["From"] = formataddr((settings.smtp_from_name, settings.smtp_user))
@@ -36,13 +36,18 @@ def _send(item: EmailOutbox) -> None:
     message["Subject"] = item.subject
     message.set_content(item.body)
 
-    context = ssl.create_default_context()
-    with smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, context=context, timeout=20) as smtp:
-        smtp.login(settings.smtp_user, settings.smtp_password)
-        smtp.send_message(message)
+    await send(
+        message,
+        hostname=settings.smtp_host,
+        port=settings.smtp_port,
+        username=settings.smtp_user,
+        password=settings.smtp_password,
+        use_tls=True,
+        timeout=20,
+    )
 
 
-def deliver(db: Session, items: list[EmailOutbox]) -> None:
+async def deliver(db: AsyncSession, items: list[EmailOutbox]) -> None:
     """Отправляет письма и записывает результат. Ошибки не пробрасывает."""
     settings = get_settings()
     for item in items:
@@ -53,8 +58,8 @@ def deliver(db: Session, items: list[EmailOutbox]) -> None:
 
         item.attempts += 1
         try:
-            _send(item)
-        except (OSError, smtplib.SMTPException) as error:
+            await _send(item)
+        except (OSError, SMTPException) as error:
             logger.warning("Письмо %s на %s не отправлено: %s", item.id, item.to_address, error)
             item.last_error = str(error)[:500]
             if item.attempts >= MAX_ATTEMPTS:
@@ -63,20 +68,23 @@ def deliver(db: Session, items: list[EmailOutbox]) -> None:
             item.status = EmailStatus.SENT.value
             item.sent_at = datetime.now(timezone.utc)
             item.last_error = None
-    db.commit()
+    await db.commit()
 
 
-def deliver_by_ids(ids: list[int]) -> None:
+async def deliver_by_ids(ids: list[int]) -> None:
     """Фоновая задача после ответа API: своя сессия, потому что запросная уже закрыта."""
     if not ids:
         return
-    with SessionLocal() as db:
-        items = list(db.scalars(select(EmailOutbox).where(EmailOutbox.id.in_(ids))).all())
-        deliver(db, items)
+    async with SessionLocal() as db:
+        items = list(await db.scalars(select(EmailOutbox).where(EmailOutbox.id.in_(ids))))
+        # Возвращаем соединение в пул перед обращением к SMTP.
+        await db.commit()
+        await deliver(db, items)
 
 
-def deliver_pending(db: Session) -> int:
+async def deliver_pending(db: AsyncSession) -> int:
     """Досылает все письма, которые ещё не ушли. Возвращает число попыток."""
-    items = list(db.scalars(select(EmailOutbox).where(EmailOutbox.status == EmailStatus.PENDING.value)).all())
-    deliver(db, items)
+    items = list(await db.scalars(select(EmailOutbox).where(EmailOutbox.status == EmailStatus.PENDING.value)))
+    await db.commit()
+    await deliver(db, items)
     return len(items)

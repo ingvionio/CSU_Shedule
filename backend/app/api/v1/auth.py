@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.db import get_db
@@ -34,19 +34,19 @@ def profile_out(user: User) -> StudentProfileOut:
 
 
 @router.post("/auth/moodle/login", response_model=StudentTokenOut, summary="Вход студента через Moodle ЧелГУ")
-def moodle_login(
+async def moodle_login(
     data: MoodleLoginIn,
     request: Request,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> StudentTokenOut:
     """Аутентификация студента через eu.iit.csu.ru и определение группы."""
     try:
-        moodle_data = moodle_service.authenticate_and_detect_student(
+        moodle_data = await moodle_service.authenticate_and_detect_student(
             db=db,
             username=data.username.strip(),
             password=data.password,
         )
-        user, _ = moodle_service.save_or_update_student(
+        user, _ = await moodle_service.save_or_update_student(
             db=db,
             moodle_data=moodle_data,
             plain_password=data.password,
@@ -61,24 +61,24 @@ def moodle_login(
 
 
 @router.post("/auth/moodle/forget", summary="Сбросить сохраненный пароль и сессию Moodle")
-def moodle_forget(
+async def moodle_forget(
     user_id: int = Depends(require_student),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict[str, str]:
-    user = students_service.get_student(db, user_id)
+    user = await students_service.get_student(db, user_id)
     user.moodle_encrypted_password = None
     user.moodle_session_cookie = None
     user.moodle_sesskey = None
     user.moodle_session_expires_at = None
     user.moodle_auth_error = True
-    db.commit()
+    await db.commit()
     return {"status": "ok"}
 
 
 @router.post("/auth/student/register", response_model=StudentTokenOut, summary="Резервная регистрация студента: ФИО и группа")
-def student_register(data: StudentRegisterIn, request: Request, db: Session = Depends(get_db)) -> StudentTokenOut:
+async def student_register(data: StudentRegisterIn, request: Request, db: AsyncSession = Depends(get_db, scope="function")) -> StudentTokenOut:
     try:
-        user, _ = students_service.register(
+        user, _ = await students_service.register(
             db, data.full_name, data.group_id, data.device_key, request.client.host if request.client else None
         )
     except students_service.StudentError as error:
@@ -89,7 +89,7 @@ def student_register(data: StudentRegisterIn, request: Request, db: Session = De
 
 
 @router.post("/auth/admin/login", response_model=TokenOut, summary="Вход администратора, выдача JWT")
-def admin_login(data: LoginIn) -> TokenOut:
+async def admin_login(data: LoginIn) -> TokenOut:
     try:
         token, expires_at = authenticate_admin(data.login, data.password)
     except AuthError as error:

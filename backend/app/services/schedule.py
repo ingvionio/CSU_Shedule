@@ -12,7 +12,7 @@ import hashlib
 import json
 
 from sqlalchemy import or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     Group,
@@ -35,22 +35,22 @@ class ScheduleError(Exception):
     """Расписание не может быть собрано (нет семестра, группы или недели)."""
 
 
-def active_semester(session: Session) -> Semester:
-    semester = session.scalar(select(Semester).where(Semester.is_active.is_(True)))
+async def active_semester(session: AsyncSession) -> Semester:
+    semester = await session.scalar(select(Semester).where(Semester.is_active.is_(True)))
     if semester is None:
         raise ScheduleError("активный семестр не настроен")
     return semester
 
 
-def get_group(session: Session, group_id: int) -> Group:
-    group = session.get(Group, group_id)
+async def get_group(session: AsyncSession, group_id: int) -> Group:
+    group = await session.get(Group, group_id)
     if group is None:
         raise ScheduleError(f"группа {group_id} не найдена")
     return group
 
 
-def build_week_schedule(
-    session: Session,
+async def build_week_schedule(
+    session: AsyncSession,
     group: Group,
     semester: Semester,
     week_number: int,
@@ -66,16 +66,19 @@ def build_week_schedule(
         )
 
     week = weeks.build_week_info(semester, week_number, today)
-    return week, _assemble_days(session, group, semester, week, today)
+    return week, await _assemble_days(session, group, semester, week, today)
 
 
-def build_day(session: Session, group: Group, semester: Semester, day: date, today: date) -> dict:
+async def build_day(session: AsyncSession, group: Group, semester: Semester, day: date, today: date) -> dict:
     """Один собранный день — для проверки пересечений при создании изменений."""
     number = weeks.week_number_for_date(semester, day)
     if number is None:
         raise ScheduleError(f"дата {day:%d.%m.%Y} вне семестра")
+    if day.isoweekday() == 7:
+        raise ScheduleError(f"дата {day:%d.%m.%Y} вне расписания")
     week = weeks.build_week_info(semester, number, today)
-    return next(item for item in _assemble_days(session, group, semester, week, today) if item["date"] == day)
+    days = await _assemble_days(session, group, semester, week, today)
+    return days[day.weekday()]
 
 
 def lesson_occurs_on(semester: Semester, lesson: Lesson, day: date) -> bool:
@@ -88,10 +91,10 @@ def lesson_occurs_on(semester: Semester, lesson: Lesson, day: date) -> bool:
     return _is_valid_on(lesson, day)
 
 
-def _assemble_days(
-    session: Session, group: Group, semester: Semester, week: WeekInfo, today: date
+async def _assemble_days(
+    session: AsyncSession, group: Group, semester: Semester, week: WeekInfo, today: date
 ) -> list[dict]:
-    lessons = session.scalars(
+    lessons = (await session.scalars(
         select(Lesson)
         .where(
             Lesson.group_id == group.id,
@@ -100,11 +103,11 @@ def _assemble_days(
             Lesson.week_parity.in_([week.parity, WeekParity.BOTH.value]),
         )
         .order_by(Lesson.weekday, Lesson.start_time)
-    ).all()
+    )).all()
 
     # Изменения, у которых исходная или новая дата попадает в неделю:
     # перенос может пересекать границу недели.
-    overrides = session.scalars(
+    overrides = (await session.scalars(
         select(LessonOverride).where(
             LessonOverride.group_id == group.id,
             LessonOverride.semester_id == semester.id,
@@ -114,7 +117,7 @@ def _assemble_days(
                 LessonOverride.target_date.between(week.start_date, week.end_date),
             ),
         )
-    ).unique().all()
+    )).unique().all()
     by_source = {(item.lesson_id, item.date): item for item in overrides if item.lesson_id is not None}
 
     days: list[dict] = []
