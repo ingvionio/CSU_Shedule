@@ -437,7 +437,11 @@ export type ProductSummary = {
   wau: number
   mau: number
   users_with_push: number
-  funnel: { landing_view: number; login_click: number; login_submit: number; login_success: number }
+  funnel: {
+    landing_view: number; login_click: number; login_submit: number; login_success: number
+    login_any: number; login_without_landing: number
+  }
+  tracking_since: string | null
   login_failures: { auth: number; group: number; other: number }
   apk_downloads: number
   apk_installs: number

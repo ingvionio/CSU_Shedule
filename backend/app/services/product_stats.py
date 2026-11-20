@@ -20,8 +20,9 @@ from app.services import product_events as ev
 LOCAL_TZ = timezone(timedelta(hours=5), "Челябинск")
 MAX_PERIOD_DAYS = 731
 DEFAULT_PERIOD_DAYS = 30
-# Что считается «заходил в этот день».
-ACTIVE_EVENTS = (ev.APP_OPEN, ev.LOGIN_SUCCESS)
+# «Заходил в этот день» — любое действие студента. Не считаются события, которые
+# происходят без его участия: сообщение ему отправили, push ему доставили.
+PASSIVE_EVENTS = (ev.MESSAGE_RECEIVED, ev.PUSH_SENT)
 FUNNEL = (ev.LANDING_VIEW, ev.LOGIN_CLICK, ev.LOGIN_SUBMIT, ev.LOGIN_SUCCESS)
 # Использование функций: события студентов, по которым строится блок «Функции».
 FEATURE_EVENTS = (
@@ -105,35 +106,68 @@ def _in_period(period: Period):
     return (ProductEvent.occurred_at >= period.start_utc, ProductEvent.occurred_at < period.end_utc)
 
 
-def _distinct_devices(db: Session, name: str, period: Period) -> int:
-    return db.scalar(
-        select(func.count(func.distinct(ProductEvent.device_hash))).where(
-            ProductEvent.name == name, *_in_period(period), ProductEvent.device_hash.is_not(None)
-        )
-    ) or 0
-
-
 def _count(db: Session, name: str, period: Period) -> int:
     return db.scalar(select(func.count(ProductEvent.id)).where(ProductEvent.name == name, *_in_period(period))) or 0
 
 
 def _active_days(db: Session, since: date, until: date, user_ids: Iterable[int] | None = None) -> dict[int, set[date]]:
-    """Дни (по Челябинску), в которые студент открывал приложение или входил."""
-    query = select(ProductEvent.user_id, ProductEvent.occurred_at).where(
-        ProductEvent.name.in_(ACTIVE_EVENTS),
-        ProductEvent.user_id.is_not(None),
-        ProductEvent.occurred_at >= local_midnight_utc(since),
-        ProductEvent.occurred_at < local_midnight_utc(until + timedelta(days=1)),
-    )
-    if user_ids is not None:
-        ids = list(user_ids)
-        if not ids:
-            return {}
-        query = query.where(ProductEvent.user_id.in_(ids))
+    """Дни (по Челябинску), в которые студент что-то делал в приложении.
+
+    Кроме событий учитываются отметки профиля: первый вход, последний вход через
+    Moodle и последняя активность общей сессии. Так видна и активность до того,
+    как начали собираться события, и заходы, событие которых не дошло.
+    """
+    low, high = local_midnight_utc(since), local_midnight_utc(until + timedelta(days=1))
+    ids = list(user_ids) if user_ids is not None else None
+    if ids is not None and not ids:
+        return {}
     days: dict[int, set[date]] = defaultdict(set)
+
+    query = select(ProductEvent.user_id, ProductEvent.occurred_at).where(
+        ProductEvent.name.not_in(PASSIVE_EVENTS),
+        ProductEvent.user_id.is_not(None),
+        ProductEvent.occurred_at >= low,
+        ProductEvent.occurred_at < high,
+    )
+    if ids is not None:
+        query = query.where(ProductEvent.user_id.in_(ids))
     for user_id, occurred_at in db.execute(query):
         days[user_id].add(local_date(occurred_at))
+
+    profile = select(User.id, User.created_at, User.last_seen_at, User.session_last_active_at).where(User.role == "student")
+    if ids is not None:
+        profile = profile.where(User.id.in_(ids))
+    for user_id, *moments in db.execute(profile):
+        for moment in moments:
+            if moment is not None and low <= as_utc(moment) < high:
+                days[user_id].add(local_date(moment))
     return days
+
+
+def _funnel(db: Session, period: Period) -> dict:
+    """Воронка по устройствам: каждый шаг — только среди тех, кто прошёл предыдущий.
+
+    Отдельно — сколько устройств вошло, не открывая лендинг за период
+    (уже были на нём раньше, пришли по прямой ссылке или из уведомления).
+    """
+    devices: dict[str, set[str]] = defaultdict(set)
+    for name, device in db.execute(
+        select(ProductEvent.name, ProductEvent.device_hash)
+        .where(ProductEvent.name.in_(FUNNEL), ProductEvent.device_hash.is_not(None), *_in_period(period))
+        .distinct()
+    ):
+        devices[name].add(device)
+    steps: dict[str, int] = {}
+    passed: set[str] | None = None
+    for name in FUNNEL:
+        passed = devices[name] if passed is None else passed & devices[name]
+        steps[name] = len(passed)
+    logged_in = devices[ev.LOGIN_SUCCESS]
+    return {
+        **steps,
+        "login_any": len(logged_in),
+        "login_without_landing": len(logged_in - devices[ev.LANDING_VIEW]),
+    }
 
 
 def _retention(db: Session, period: Period, today: date) -> list[dict]:
@@ -277,7 +311,8 @@ def summary(db: Session, start: date | None = None, end: date | None = None, now
         "wau": len(active_between(period.end - timedelta(days=6), period.end)),
         "mau": len(active_between(period.end - timedelta(days=29), period.end)),
         "users_with_push": users_with_push,
-        "funnel": {name: _distinct_devices(db, name, period) for name in FUNNEL},
+        "funnel": _funnel(db, period),
+        "tracking_since": local_date(first_event) if (first_event := db.scalar(select(func.min(ProductEvent.occurred_at)))) else None,
         "login_failures": {
             "auth": _count(db, ev.LOGIN_FAILED_AUTH, period),
             "group": _count(db, ev.LOGIN_FAILED_GROUP, period),

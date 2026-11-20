@@ -333,8 +333,11 @@ async def _summary(days: int = 30, end: date = TODAY, now: datetime = NOW) -> di
         return await session.run_sync(product_stats.summary, end - timedelta(days=days - 1), end, now=now)
 
 
+OLD = NOW - timedelta(days=200)  # профиль создан давно — его дата не попадает в периоды теста
+
+
 async def test_active_users_and_local_day(product):
-    a, b, c = await _student("А"), await _student("Б"), await _student("В")
+    a, b, c = await _student("А", created_at=OLD), await _student("Б", created_at=OLD), await _student("В", created_at=OLD)
     await _events(
         ("app_open", NOW, a, "d1", "web"),
         ("app_open", NOW - timedelta(hours=1), a, "d1", "web"),
@@ -354,7 +357,7 @@ async def test_active_users_and_local_day(product):
 
 
 async def test_custom_period_in_the_past(product):
-    user = await _student("Прошлый")
+    user = await _student("Прошлый", created_at=OLD)
     await _events(("app_open", datetime(2026, 9, 10, 6, tzinfo=timezone.utc), user, "d1", "web"))
     async with SessionLocal() as session:
         data = await session.run_sync(product_stats.summary, date(2026, 9, 1), date(2026, 9, 30), now=NOW)
@@ -393,8 +396,61 @@ async def test_funnel_counts_unique_devices(product):
         ("login_success", NOW, user, "d1", "web"),
     )
     data = await _summary(7)
-    assert data["funnel"] == {"landing_view": 2, "login_click": 1, "login_submit": 1, "login_success": 1}
+    assert data["funnel"] == {
+        "landing_view": 2, "login_click": 1, "login_submit": 1, "login_success": 1,
+        "login_any": 1, "login_without_landing": 0,
+    }
     assert data["login_failures"] == {"auth": 1, "group": 0, "other": 0}
+
+
+async def test_funnel_is_strict_and_counts_logins_without_landing(product):
+    """Форму можно открыть не с лендинга; шаг считается только среди прошедших предыдущий — конверсия ≤ 100%."""
+    a, b = await _student("А", created_at=OLD), await _student("Б", created_at=OLD)
+    await _events(
+        ("landing_view", NOW, None, "d1", "web"),
+        ("login_click", NOW, None, "d1", "web"),
+        ("login_submit", NOW, None, "d1", "web"),
+        ("login_success", NOW, a, "d1", "web"),
+        # Пришёл по прямой ссылке: формы входа и вход без лендинга.
+        ("login_click", NOW, None, "d2", "apk"),
+        ("login_submit", NOW, None, "d2", "apk"),
+        ("login_success", NOW, b, "d2", "apk"),
+        # Отправил форму, минуя шаг «открыл форму» (старая сборка).
+        ("landing_view", NOW, None, "d3", "web"),
+        ("login_submit", NOW, None, "d3", "web"),
+    )
+    funnel = (await _summary(7))["funnel"]
+    assert funnel == {
+        "landing_view": 2, "login_click": 1, "login_submit": 1, "login_success": 1,
+        "login_any": 2, "login_without_landing": 1,
+    }
+
+
+async def test_first_login_and_session_activity_count_as_active(product):
+    """Активность до сбора событий: дни первого входа и последней активности сессии из профиля."""
+    first = await _student("Новичок", created_at=NOW - timedelta(days=2))
+    await _student("Старый", created_at=OLD)
+    async with SessionLocal() as session:
+        user = await session.get(User, first)
+        user.session_last_active_at = NOW
+        await session.commit()
+    data = await _summary(7)
+    assert data["active_users"] == 1
+    assert [day["dau"] for day in data["daily"][-3:]] == [1, 0, 1]
+
+
+async def test_passive_events_do_not_make_active(product):
+    user = await _student("Получатель", created_at=OLD)
+    await _events(("message_received", NOW, user, None, None), ("push_sent", NOW, user, None, None))
+    assert (await _summary(7))["active_users"] == 0
+    await _events(("schedule_week_view", NOW, user, "d1", "web"))
+    assert (await _summary(7))["active_users"] == 1
+
+
+async def test_tracking_since(product):
+    assert (await _summary(7))["tracking_since"] is None
+    await _events(("landing_view", NOW - timedelta(days=3), None, "d1", "web"))
+    assert (await _summary(7))["tracking_since"].isoformat() == "2026-11-16"
 
 
 async def test_apk_downloads_and_installs(product):

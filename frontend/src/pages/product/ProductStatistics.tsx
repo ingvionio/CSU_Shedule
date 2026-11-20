@@ -265,7 +265,7 @@ function OverviewBody({ data, previous }: { data: ProductSummary; previous: Prod
   const [metric, setMetric] = useState<(typeof METRICS)[number]['key']>('dau')
   const funnel = [
     ['Открыли лендинг', data.funnel.landing_view],
-    ['Нажали «Войти через Moodle»', data.funnel.login_click],
+    ['Открыли форму входа', data.funnel.login_click],
     ['Отправили форму входа', data.funnel.login_submit],
     ['Вошли', data.funnel.login_success],
   ] as const
@@ -273,8 +273,17 @@ function OverviewBody({ data, previous }: { data: ProductSummary; previous: Prod
   const current = METRICS.find((item) => item.key === metric)!
   const platforms = Object.entries(data.by_platform).sort((a, b) => b[1] - a[1])
 
+  const partial = data.tracking_since !== null && data.tracking_since > data.start_date
+
   return (
     <>
+      {data.tracking_since === null && <div className="pl-note">Событий пока нет: воронка, функции и платформы начнут заполняться после первых заходов.</div>}
+      {partial && (
+        <div className="pl-note">
+          События собираются с {formatDay(data.tracking_since!)}. До этого воронка, функции и платформы пустые, а активность
+          видна только по датам входа из профилей.
+        </div>
+      )}
       <section className="pl-kpis" aria-label="Ключевые показатели">
         <Kpi label="Активные пользователи" value={data.active_users} previous={previous?.active_users} hint="заходили в приложение" />
         <Kpi label="Новые пользователи" value={data.users_new} previous={previous?.users_new} hint="вошли впервые" />
@@ -302,7 +311,7 @@ function OverviewBody({ data, previous }: { data: ProductSummary; previous: Prod
 
       <div className="pl-grid-2">
         <section className="pl-card">
-          <div className="pl-card-head"><h2>Воронка входа</h2><span className="pl-muted">уникальные устройства</span></div>
+          <div className="pl-card-head"><h2>Воронка входа</h2><span className="pl-muted">устройства; шаг — среди прошедших предыдущий</span></div>
           <table className="pl-table">
             <thead><tr><th>Шаг</th><th className="num">Устройств</th><th className="num">Конверсия</th></tr></thead>
             <tbody>
@@ -316,6 +325,15 @@ function OverviewBody({ data, previous }: { data: ProductSummary; previous: Prod
                   <td className="num pl-muted">{index === 0 ? '—' : conversion(value, funnel[index - 1][1])}</td>
                 </tr>
               ))}
+            </tbody>
+          </table>
+          <table className="pl-table">
+            <tbody>
+              <tr><td>Всего вошли за период</td><td className="num">{data.funnel.login_any}</td><td className="num pl-muted">устройств</td></tr>
+              <tr>
+                <td>из них без лендинга <span className="pl-muted">— ссылка, уведомление, лендинг раньше периода</span></td>
+                <td className="num">{data.funnel.login_without_landing}</td><td className="num pl-muted">устройств</td>
+              </tr>
             </tbody>
           </table>
           <p className="pl-footnote">

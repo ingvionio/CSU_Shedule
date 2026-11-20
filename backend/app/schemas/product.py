@@ -17,12 +17,14 @@ class EventsIn(BaseModel):
 
 
 class FunnelOut(BaseModel):
-    """Уникальные устройства на каждом шаге за период."""
+    """Уникальные устройства; каждый шаг — среди прошедших предыдущий, поэтому конверсия не больше 100%."""
 
     landing_view: int
-    login_click: int
+    login_click: int = Field(description="открыли форму входа")
     login_submit: int
     login_success: int
+    login_any: int = Field(description="все устройства, с которых вошли за период")
+    login_without_landing: int = Field(description="вошли, не открывая лендинг за период")
 
 
 class LoginFailuresOut(BaseModel):
@@ -74,6 +76,7 @@ class SummaryOut(BaseModel):
     mau: int = Field(description="30 дней по последний день периода")
     users_with_push: int = Field(description="студентов с включёнными уведомлениями сейчас")
     funnel: FunnelOut
+    tracking_since: date | None = Field(description="первый день, за который есть события; раньше воронка и функции пустые")
     login_failures: LoginFailuresOut
     apk_downloads: int
     apk_installs: int

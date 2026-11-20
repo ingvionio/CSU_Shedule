@@ -73,13 +73,16 @@ export function App() {
 
   // Статистика ЛК продукта: заход в приложение (запуск или возврат после паузы).
   useEffect(() => watchAppOpens(), [])
+  const signedIn = studentSession !== null
   useEffect(() => {
     const screenEvents: Partial<Record<typeof view, ClientEvent>> = {
       landing: 'landing_view', day: 'schedule_day_view', week: 'schedule_week_view', map: 'map_open', help: 'help_open',
     }
+    // Гость на закрытом экране видит форму входа, а не расписание или карту — это не просмотр.
+    const publicScreen = view === 'landing' || view === 'help'
     const event = screenEvents[view]
-    if (event) track(event)
-  }, [view])
+    if (event && (publicScreen || signedIn)) track(event)
+  }, [view, signedIn])
   // Приложение открыли нажатием на push-уведомление (ссылка /?message=ID).
   useEffect(() => {
     if (messageFromUrl(window.location.href) !== null) track('push_open')
