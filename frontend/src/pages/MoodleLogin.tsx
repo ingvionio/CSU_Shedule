@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { GraduationCap, LogIn, ShieldCheck } from 'lucide-react'
 
+import { track } from '../api/analytics'
 import { loginWithMoodle } from '../api/student'
 import type { StudentSession } from '../api/types'
 
@@ -18,6 +19,7 @@ export function MoodleLogin({ onLogin, onGoToAdmin }: MoodleLoginProps) {
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (!username.trim() || !password) return
+    track('login_submit', true)
     setBusy(true)
     setError('')
     try {

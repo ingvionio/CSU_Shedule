@@ -18,6 +18,7 @@ import { Landing } from './pages/Landing'
 import { Help } from './pages/Help'
 import { CampusMap } from './pages/CampusMap'
 import { MoodleLogin } from './pages/MoodleLogin'
+import { track, watchAppOpens, type ClientEvent } from './api/analytics'
 import { StudentFeedback } from './pages/feedback/StudentFeedback'
 import { StudentMessages } from './pages/messages/StudentMessages'
 import { GroupHomeworkPanel } from './pages/homework/GroupHomeworkPanel'
@@ -63,9 +64,24 @@ export function App() {
   const [adminGroupId, setAdminGroupId] = useState<number | null>(null)
   const [weekNumber, setWeekNumber] = useState<number | null>(null)
   const [selectedDay, setSelectedDay] = useState(0)
+  const followCurrentWeek = useRef(true)
   const [now, setNow] = useState(() => new Date())
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+
+  // Статистика ЛК продукта: заход в приложение (запуск или возврат после паузы).
+  useEffect(() => watchAppOpens(), [])
+  useEffect(() => {
+    const screenEvents: Partial<Record<typeof view, ClientEvent>> = {
+      landing: 'landing_view', day: 'schedule_day_view', week: 'schedule_week_view', map: 'map_open', help: 'help_open',
+    }
+    const event = screenEvents[view]
+    if (event) track(event)
+  }, [view])
+  // Приложение открыли нажатием на push-уведомление (ссылка /?message=ID).
+  useEffect(() => {
+    if (messageFromUrl(window.location.href) !== null) track('push_open')
+  }, [])
 
   // Меню ☰ закрывается нажатием в любом месте вне меню и клавишей Esc.
   // Кнопку ☰ не считаем «вне»: её нажатие и так переключает меню.
@@ -176,7 +192,7 @@ export function App() {
 
   // По умолчанию открывается текущая неделя.
   useEffect(() => {
-    if (weekNumber === null && currentWeek.data) setWeekNumber(currentWeek.data.number)
+    if (currentWeek.data && (weekNumber === null || followCurrentWeek.current)) setWeekNumber(currentWeek.data.number)
   }, [currentWeek.data, weekNumber])
 
   useEffect(() => {
@@ -232,11 +248,20 @@ export function App() {
     setMenuOpen(false)
   }
 
-  // На текущей неделе открываем сегодняшний день.
+  const todayIndex = days.findIndex((day) => day.is_today)
+  // Обновление ответа из кеша тоже может изменить сегодняшний день.
   useEffect(() => {
-    const todayIndex = days.findIndex((day) => day.is_today)
     if (todayIndex >= 0) setSelectedDay(todayIndex)
-  }, [week?.number, days.length])
+  }, [week?.number, todayIndex])
+
+  const goToToday = () => {
+    followCurrentWeek.current = true
+    if (currentWeek.data) setWeekNumber(currentWeek.data.number)
+    if (todayIndex >= 0) setSelectedDay(todayIndex)
+    setView('day')
+    void currentWeek.refetch()
+    void queryClient.invalidateQueries({ queryKey: ['schedule', groupId] })
+  }
 
   const groupOptions = useMemo(
     () => (groups.data ?? []).filter((group) => group.course === course && directionOf(group) === direction),
@@ -265,6 +290,7 @@ export function App() {
   const moveWeek = (delta: number) => {
     const target = delta > 0 ? week?.next : week?.prev
     if (target == null) return
+    followCurrentWeek.current = false
     setSlideDirection(delta > 0 ? 'next' : 'prev')
     setWeekNumber(target)
   }
@@ -308,7 +334,10 @@ export function App() {
 
   const moveAdminWeek = (delta: number) => {
     const target = delta > 0 ? adminSchedule.data?.week.next : adminSchedule.data?.week.prev
-    if (target != null) setWeekNumber(target)
+    if (target != null) {
+      followCurrentWeek.current = false
+      setWeekNumber(target)
+    }
   }
 
   const nav = (next: View) => {
@@ -333,7 +362,7 @@ export function App() {
               : view === 'admin'
                 ? 'Администрирование'
                 : view === 'feedback'
-                  ? 'Вопросы'
+                  ? 'Обращения'
                   : view === 'messages'
                     ? 'Сообщения'
                     : !studentSession
@@ -352,6 +381,8 @@ export function App() {
                   : `Институт ИТ · ${selectedGroup?.name ?? studentSession?.profile.group_name ?? 'ЧелГУ'}`
           }
           onBack={view === 'help' || view === 'login' || (view === 'group' && groupId !== null) ? () => nav(studentSession ? 'day' : 'landing') : undefined}
+          onHome={() => nav(studentSession ? 'day' : 'landing')}
+          accountAction={!studentSession && publicView ? { label: 'Войти', onClick: () => nav('login') } : undefined}
           onMenu={() => setMenuOpen((open) => !open)}
         />
         {menuOpen && (
@@ -363,7 +394,6 @@ export function App() {
                 <div>Группа: {studentSession.profile.group_name ?? 'не определена'}</div>
               </div>
             )}
-            {studentSession && <button onClick={() => nav('day')}>Студенческое расписание</button>}
             <button onClick={() => nav('landing')}>О проекте</button>
             <button onClick={() => nav('help')}>Помощь</button>
             <button onClick={() => nav('admin')}>Администрирование расписания</button>
@@ -379,7 +409,7 @@ export function App() {
 
         <main className="content">
           {view === 'landing' ? <Landing authenticated={Boolean(studentSession)} onStart={() => nav(studentSession ? 'day' : 'login')} onHelp={() => nav('help')} onAdmin={() => nav('admin')} />
-          : view === 'help' ? <Help onFeedback={() => nav('feedback')} />
+          : view === 'help' ? <Help authenticated={Boolean(studentSession)} onNavigate={nav} />
           : needsLogin ? (
             <MoodleLogin onLogin={handleMoodleLogin} onGoToAdmin={() => nav('admin')} />
           ) : (
@@ -422,11 +452,11 @@ export function App() {
                       Группа определена автоматически через Moodle (eu.iit.csu.ru) по курсам текущего семестра и не может быть изменена вручную.
                     </div>
 
-                    <div style={{ marginTop: '1.5rem', display: 'flex', gap: '0.75rem' }}>
-                      <button className="button button-primary" style={{ flex: 1 }} onClick={() => nav('day')}>
+                    <div className="profile-actions">
+                      <button className="button button-primary" onClick={() => nav('day')}>
                         К расписанию
                       </button>
-                      <button className="button button-secondary" onClick={handleForgetMoodle}>
+                      <button className="button button-logout" onClick={handleForgetMoodle}>
                         Выйти из Moodle
                       </button>
                     </div>
@@ -511,6 +541,7 @@ export function App() {
                           </span>
                         </h1>
                       </div>
+                      <button type="button" className="today-button" onClick={goToToday}>Сегодня</button>
                       <button
                         className="icon-button outlined"
                         aria-label="Предыдущая неделя"
@@ -570,11 +601,13 @@ export function App() {
                               <button
                                 className={`date-cell ${selectedDay === index ? 'active' : ''} ${day.is_today ? 'today' : ''}`}
                                 key={day.date}
+                                aria-current={day.is_today ? 'date' : undefined}
+                                aria-pressed={selectedDay === index}
                                 onClick={() => {
                                   if (!ignoreDateClick.current) setSelectedDay(index)
                                 }}
                               >
-                                <span>{WEEKDAY_SHORT[index]}</span>
+                                <span>{day.is_today ? 'Сегодня' : WEEKDAY_SHORT[index]}</span>
                                 <strong>{dayNumber(day.date)}</strong>
                               </button>
                             ))}

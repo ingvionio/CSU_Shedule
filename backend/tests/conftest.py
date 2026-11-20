@@ -10,6 +10,12 @@ os.environ["ADMIN_LOGIN"] = "admin"
 os.environ["ADMIN_PASSWORD"] = "secret"
 os.environ["JWT_SECRET"] = "test-secret"
 
+# backend/.env разработчика (настоящий SMTP, ключи push, Moodle) в тестах не
+# читаем: иначе тесты слали бы реальные письма и зависели от чужих настроек.
+from app.core.config import Settings  # noqa: E402
+
+Settings.model_config["env_file"] = None
+
 import pytest  # noqa: E402
 from httpx import AsyncClient  # noqa: E402
 from sqlalchemy import select  # noqa: E402

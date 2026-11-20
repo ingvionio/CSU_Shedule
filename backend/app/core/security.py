@@ -14,6 +14,7 @@ from app.core.config import get_settings
 ALGORITHM = "HS256"
 ROLE_ADMIN = "admin"
 ROLE_STUDENT = "student"
+ROLE_PRODUCT = "product"
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -28,18 +29,28 @@ def issue_token(subject: str, role: str, ttl_hours: int) -> tuple[str, datetime]
     return token, expires_at
 
 
+def _authenticate(login: str, password: str, expected_login: str, expected_password: str, role: str) -> tuple[str, datetime]:
+    login_ok = secrets.compare_digest(login.encode(), expected_login.encode())
+    password_ok = secrets.compare_digest(password.encode(), expected_password.encode())
+    if not (login_ok and password_ok):
+        raise AuthError("неверный логин или пароль")
+    return issue_token(login, role, get_settings().jwt_ttl_hours)
+
+
 def authenticate_admin(login: str, password: str) -> tuple[str, datetime]:
     """Проверяет логин и пароль, возвращает токен и время его истечения."""
     settings = get_settings()
     if not settings.admin_password:
         raise AuthError("вход администратора не настроен (ADMIN_PASSWORD)")
+    return _authenticate(login, password, settings.admin_login, settings.admin_password, ROLE_ADMIN)
 
-    login_ok = secrets.compare_digest(login.encode(), settings.admin_login.encode())
-    password_ok = secrets.compare_digest(password.encode(), settings.admin_password.encode())
-    if not (login_ok and password_ok):
-        raise AuthError("неверный логин или пароль")
 
-    return issue_token(login, ROLE_ADMIN, settings.jwt_ttl_hours)
+def authenticate_product(login: str, password: str) -> tuple[str, datetime]:
+    """Вход в ЛК продукта (/statistic) — отдельная учётная запись, не методиста."""
+    settings = get_settings()
+    if not settings.product_password:
+        raise AuthError("вход в ЛК продукта не настроен (PRODUCT_PASSWORD)")
+    return _authenticate(login, password, settings.product_login, settings.product_password, ROLE_PRODUCT)
 
 
 def _payload(credentials: HTTPAuthorizationCredentials | None, missing: str) -> dict:
@@ -68,3 +79,27 @@ async def require_student(credentials: HTTPAuthorizationCredentials | None = Dep
     if payload.get("role") != ROLE_STUDENT:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "доступно только студенту")
     return int(payload["sub"])
+
+
+async def require_product(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> str:
+    """Зависимость для эндпоинтов ЛК продукта. Возвращает логин."""
+    payload = _payload(credentials, "нужен вход в ЛК продукта")
+    if payload.get("role") != ROLE_PRODUCT:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "нет доступа к ЛК продукта")
+    return payload["sub"]
+
+
+async def optional_student(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> int | None:
+    """id студента, если передан его действующий токен; иначе None, без ошибки."""
+    if credentials is None:
+        return None
+    try:
+        payload = jwt.decode(credentials.credentials, get_settings().jwt_secret, algorithms=[ALGORITHM])
+    except jwt.InvalidTokenError:
+        return None
+    if payload.get("role") != ROLE_STUDENT:
+        return None
+    try:
+        return int(payload["sub"])
+    except (KeyError, TypeError, ValueError):
+        return None

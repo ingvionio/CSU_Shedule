@@ -11,6 +11,7 @@ from app.core.security import require_student
 from app.models import User
 from app.schemas.student import MeOut, PushSubscriptionIn, PushSubscriptionOut
 from app.services import messages as messages_service
+from app.services import product_events
 from app.services import push as push_service
 from app.services import students as students_service
 
@@ -42,6 +43,7 @@ async def subscribe_push(
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> PushSubscriptionOut:
     subscription = await push_service.subscribe(db, user.id, data.endpoint, data.keys.p256dh, data.keys.auth, user_agent)
+    await product_events.record_server_event(db, product_events.PUSH_SUBSCRIBED, user_id=user.id)
     return PushSubscriptionOut(id=subscription.id)
 
 

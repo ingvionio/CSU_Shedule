@@ -28,7 +28,7 @@ function Report({ result }: { result: Result }) {
         <thead><tr><th>Файл / группа</th><th>Неделя (даты)</th><th>Пар</th><th>Статус</th></tr></thead>
         <tbody>{result.report.files.map((file, index) => <tr key={index}>
           <td><strong>{file.group_name ?? 'Группа не определена'}</strong><small>{file.file_name}</small></td>
-          <td>{file.week_number ?? '—'}<small>{file.start_date ?? '—'} — {file.end_date ?? '—'}</small></td>
+          <td>{file.week_number ?? '—'}{file.parity && ` · ${file.parity === 'odd' ? 'нечётная' : 'чётная'}`}<small>{file.start_date ?? '—'} — {file.end_date ?? '—'}</small></td>
           <td>{file.lessons_count}</td>
           <td>
             <span>{file.errors.length ? 'Ошибка' : file.warnings.length ? 'Предупреждения' : '✓'}</span>

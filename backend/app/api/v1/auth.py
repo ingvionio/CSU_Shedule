@@ -7,7 +7,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.db import get_db
-from app.core.security import ROLE_STUDENT, AuthError, authenticate_admin, issue_token, require_student
+from app.core.security import (
+    ROLE_STUDENT,
+    AuthError,
+    authenticate_admin,
+    authenticate_product,
+    issue_token,
+    require_student,
+)
 from app.models import User
 from app.schemas.admin import LoginIn, TokenOut
 from app.schemas.student import (
@@ -17,6 +24,7 @@ from app.schemas.student import (
     StudentTokenOut,
 )
 from app.services import moodle as moodle_service
+from app.services import product_events
 from app.services import students as students_service
 
 router = APIRouter()
@@ -40,6 +48,11 @@ async def moodle_login(
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> StudentTokenOut:
     """Аутентификация студента через eu.iit.csu.ru и определение группы."""
+    client = {
+        "device_key": data.device_key,
+        "platform": request.headers.get("X-Client-Platform"),
+        "app_version": request.headers.get("X-Client-Version"),
+    }
     try:
         moodle_data = await moodle_service.authenticate_and_detect_student(
             db=db,
@@ -54,10 +67,22 @@ async def moodle_login(
             ip=request.client.host if request.client else None,
         )
     except moodle_service.MoodleError as err:
+        # Неудачный вход мог успеть что-то добавить в сессию — событие пишем с чистого листа.
+        await db.rollback()
+        await product_events.record_server_event(db, _login_failure_event(err), user_id=None, **client)
         raise HTTPException(err.status_code, str(err)) from err
 
+    await product_events.record_server_event(db, product_events.LOGIN_SUCCESS, user_id=user.id, **client)
     token, expires_at = issue_token(str(user.id), ROLE_STUDENT, get_settings().student_jwt_ttl_hours)
     return StudentTokenOut(access_token=token, expires_at=expires_at, profile=profile_out(user))
+
+
+def _login_failure_event(error: moodle_service.MoodleError) -> str:
+    if isinstance(error, moodle_service.MoodleAuthError):
+        return product_events.LOGIN_FAILED_AUTH
+    if isinstance(error, moodle_service.MoodleGroupError):
+        return product_events.LOGIN_FAILED_GROUP
+    return product_events.LOGIN_FAILED_OTHER
 
 
 @router.post("/auth/moodle/forget", summary="Сбросить сохраненный пароль и сессию Moodle")
@@ -92,6 +117,15 @@ async def student_register(data: StudentRegisterIn, request: Request, db: AsyncS
 async def admin_login(data: LoginIn) -> TokenOut:
     try:
         token, expires_at = authenticate_admin(data.login, data.password)
+    except AuthError as error:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(error)) from error
+    return TokenOut(access_token=token, expires_at=expires_at)
+
+
+@router.post("/auth/product/login", response_model=TokenOut, summary="Вход в ЛК продукта (/statistic), выдача JWT")
+async def product_login(data: LoginIn) -> TokenOut:
+    try:
+        token, expires_at = authenticate_product(data.login, data.password)
     except AuthError as error:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(error)) from error
     return TokenOut(access_token=token, expires_at=expires_at)

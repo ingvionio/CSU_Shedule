@@ -18,6 +18,13 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-me"
     jwt_ttl_hours: int = 12
 
+    # ЛК продукта (/statistic): свой логин и пароль, не как у методиста.
+    # Пустой пароль — вход выключен.
+    product_login: str = "product"
+    product_password: str = ""
+    # Событий статистики с одного устройства за час; лишние молча отбрасываются.
+    product_events_limit_per_hour: int = 120
+
     # Почта для обращений (SMTP Яндекса). Пустой SMTP_USER — письма не
     # отправляются, а пишутся в лог; обращения при этом сохраняются.
     smtp_host: str = "smtp.yandex.ru"

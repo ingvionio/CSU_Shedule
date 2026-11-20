@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 
 import { api } from './client'
-import { feedbackToken, readCache, writeCache } from './cache'
+import { feedbackToken, readCache, readStudentSession, writeCache } from './cache'
 import { asStudent, useStudentSession } from './student'
 import type {
   Catalog,
@@ -65,6 +65,7 @@ export function useCurrentWeek(): UseQueryResult<CurrentWeek> {
     initialData: () => readCache<CurrentWeek>('current-week') ?? undefined,
     // Кэш с устройства показываем сразу, но считаем устаревшим — сразу же перезапрашиваем.
     initialDataUpdatedAt: 0,
+    refetchOnMount: 'always',
     staleTime: 60 * 60 * 1000,
   })
 }
@@ -183,7 +184,7 @@ export function useMyFeedback(enabled: boolean) {
 export function useSendFeedback() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (body: FeedbackInput) => api.sendFeedback(feedbackToken(), body),
+    mutationFn: (body: FeedbackInput) => api.sendFeedback(feedbackToken(), body, readStudentSession()?.token),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['my-feedback'] }),
   })
 }
