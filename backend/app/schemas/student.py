@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
 
 
 class MoodleLoginIn(BaseModel):
@@ -45,11 +45,30 @@ class PushKeysIn(BaseModel):
     auth: str = Field(min_length=1, max_length=100)
 
 
-class PushSubscriptionIn(BaseModel):
+class WebPushSubscriptionIn(BaseModel):
     """Ровно то, что отдаёт `PushSubscription.toJSON()` в браузере."""
 
+    platform: Literal["web"] = "web"
     endpoint: str = Field(min_length=10, max_length=2000, pattern=r"^https://")
     keys: PushKeysIn
+
+
+class FcmPushSubscriptionIn(BaseModel):
+    platform: Literal["fcm"]
+    token: str = Field(min_length=20, max_length=4096)
+
+
+def _default_push_platform(value: object) -> object:
+    # Старые браузерные клиенты ещё не передают дискриминатор.
+    if isinstance(value, dict) and "platform" not in value:
+        return {**value, "platform": "web"}
+    return value
+
+
+PushSubscriptionIn = Annotated[
+    WebPushSubscriptionIn | FcmPushSubscriptionIn,
+    Field(discriminator="platform"), BeforeValidator(_default_push_platform),
+]
 
 
 class PushSubscriptionOut(BaseModel):
@@ -58,3 +77,4 @@ class PushSubscriptionOut(BaseModel):
 
 class PushConfigOut(BaseModel):
     public_key: str | None
+    fcm: bool

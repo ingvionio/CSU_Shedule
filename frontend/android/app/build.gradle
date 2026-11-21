@@ -1,5 +1,28 @@
 apply plugin: 'com.android.application'
 
+def keystorePropertiesFile = rootProject.file('keystore.properties')
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+}
+
+// Проверяем только граф release-задач: debug не требует ключа подписи.
+def validateReleaseSigning = tasks.register('validateReleaseSigning') {
+    doLast {
+        if (!keystorePropertiesFile.exists()) {
+            throw new GradleException('Для release-сборки создайте frontend/android/keystore.properties (storeFile, storePassword, keyAlias, keyPassword).')
+        }
+        def required = ['storeFile', 'storePassword', 'keyAlias', 'keyPassword']
+        def missing = required.findAll { !keystoreProperties.getProperty(it)?.trim() }
+        if (!missing.isEmpty()) {
+            throw new GradleException('Заполните keystore.properties: ' + missing.join(', '))
+        }
+        if (!rootProject.file(keystoreProperties.getProperty('storeFile')).isFile()) {
+            throw new GradleException('Файл ключа storeFile из keystore.properties не найден.')
+        }
+    }
+}
+
 android {
     namespace = "ru.csu.schedule"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +30,8 @@ android {
         applicationId "ru.csu.schedule"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode 4
+        versionName "1.2"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,11 +39,31 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (keystorePropertiesFile.exists()) {
+                def keyFile = keystoreProperties.getProperty('storeFile')
+                if (keyFile) {
+                    storeFile rootProject.file(keyFile)
+                }
+                storePassword keystoreProperties.getProperty('storePassword')
+                keyAlias keystoreProperties.getProperty('keyAlias')
+                keyPassword keystoreProperties.getProperty('keyPassword')
+            }
+        }
+    }
     buildTypes {
         release {
+            signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
+    }
+}
+
+tasks.configureEach { task ->
+    if (task.name in ['preReleaseBuild', 'validateSigningRelease']) {
+        task.dependsOn(validateReleaseSigning)
     }
 }
 

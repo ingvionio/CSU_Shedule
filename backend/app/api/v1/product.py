@@ -46,7 +46,7 @@ async def get_summary(
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     try:
-        return await db.run_sync(product_stats.summary, start, end)
+        return await product_stats.summary(db, start, end)
     except product_stats.ProductStatsError as error:
         _raise(error)
 
@@ -66,8 +66,8 @@ async def get_users(
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
-    return await db.run_sync(
-        product_stats.users,
+    return await product_stats.users(
+        db,
         q=q,
         group_id=group_id,
         last_seen_from=last_seen_from,
@@ -85,7 +85,7 @@ async def get_users(
 @product_router.get("/users/{user_id}", response_model=ProductUserDetailOut, summary="Карточка пользователя")
 async def get_user(user_id: int, db: AsyncSession = Depends(get_db, scope="function")) -> dict:
     try:
-        return await db.run_sync(product_stats.user_detail, user_id)
+        return await product_stats.user_detail(db, user_id)
     except product_stats.ProductStatsError as error:
         _raise(error)
 
@@ -98,6 +98,6 @@ async def get_user_events(
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     try:
-        return await db.run_sync(product_stats.user_events, user_id, limit=limit, before=before)
+        return await product_stats.user_events(db, user_id, limit=limit, before=before)
     except product_stats.ProductStatsError as error:
         _raise(error)

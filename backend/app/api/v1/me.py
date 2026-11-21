@@ -42,7 +42,10 @@ async def subscribe_push(
     user: User = Depends(current_student),
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> PushSubscriptionOut:
-    subscription = await push_service.subscribe(db, user.id, data.endpoint, data.keys.p256dh, data.keys.auth, user_agent)
+    if data.platform == "fcm":
+        subscription = await push_service.subscribe(db, user.id, data.token, None, None, user_agent, platform="fcm")
+    else:
+        subscription = await push_service.subscribe(db, user.id, data.endpoint, data.keys.p256dh, data.keys.auth, user_agent)
     response = PushSubscriptionOut(id=subscription.id)
     await product_events.record_server_event(db, product_events.PUSH_SUBSCRIBED, user_id=user.id)
     return response

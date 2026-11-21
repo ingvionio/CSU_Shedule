@@ -25,7 +25,8 @@ export function AdminMessages({ token, groups, onUnauthorized }: AdminMessagesPr
   const [composing, setComposing] = useState(false)
   const [openId, setOpenId] = useState<number | null>(null)
   const [notice, setNotice] = useState('')
-  const list = useAdminMessages(token)
+  const [includeAutomatic, setIncludeAutomatic] = useState(false)
+  const list = useAdminMessages(token, includeAutomatic)
 
   useEffect(() => {
     if (isUnauthorized(list.error)) onUnauthorized()
@@ -51,9 +52,11 @@ export function AdminMessages({ token, groups, onUnauthorized }: AdminMessagesPr
           onCancel={() => setComposing(false)}
           onSent={(message) => {
             setComposing(false)
-            setNotice(message.recipients_total
+            const sentNotice = message.recipients_total
               ? `Сообщение отправлено: получателей ${message.recipients_total}.`
-              : 'Сообщение сохранено, но из адресатов пока никто не заполнил профиль. Его увидят, когда зарегистрируются.')
+              : 'Сообщение сохранено, но из адресатов пока никто не заполнил профиль. Его увидят, когда зарегистрируются.'
+            setNotice(message.push.configured ? sentNotice
+              : `${sentNotice} Push не настроен: студенты увидят сообщение только в приложении.`)
           }}
           onUnauthorized={onUnauthorized}
         />
@@ -68,6 +71,10 @@ export function AdminMessages({ token, groups, onUnauthorized }: AdminMessagesPr
           <button className="button button-secondary" onClick={() => list.refetch()}><RefreshCw size={16} />Повторить</button>
         </div>
       )}
+      <label className="automatic-message-filter">
+        <input type="checkbox" checked={includeAutomatic} onChange={(event) => setIncludeAutomatic(event.target.checked)} />
+        Показать автоматические
+      </label>
       {list.isLoading && <div className="state-note">Загружаем сообщения…</div>}
       {list.data && !list.data.length && <div className="empty-day">Сообщений пока нет.</div>}
 
@@ -79,6 +86,7 @@ export function AdminMessages({ token, groups, onUnauthorized }: AdminMessagesPr
               <span className={`badge importance-${item.importance}`}>{IMPORTANCE_TITLES[item.importance]}</span>
             </div>
             <strong className="message-title">{item.title}</strong>
+            {item.created_by === 'system' && <span className="badge">автоматически</span>}
             <ReadProgress item={item} />
           </button>
         ))}
@@ -350,7 +358,11 @@ function MessageDetailDialog({
   const sendReminder = () => run(async () => {
     const result = await remind.mutateAsync(id)
     await detail.refetch()
-    setNotice(result.reminded ? `Напоминание отправлено: ${result.reminded}.` : 'Напоминать некому — все прочитали.')
+    setNotice(!result.reminded
+      ? 'Напоминать некому — все прочитали.'
+      : !result.push_configured
+        ? `Напоминание записано (${result.reminded}), но push не настроен — студенты увидят его только в приложении.`
+        : `Напоминание: ${result.reminded} студентам, на ${result.devices} устройств.`)
   })
 
   return (
@@ -365,10 +377,19 @@ function MessageDetailDialog({
           <h2>{message.title}</h2>
           <p className="feedback-text feedback-original">{message.body}</p>
           <dl className="feedback-meta">
-            <dt>Отправлено</dt><dd>{messageDate(message.sent_at)}{message.created_by ? ` · ${message.created_by}` : ''}</dd>
+            <dt>Отправлено</dt><dd>{messageDate(message.sent_at)}{message.created_by === 'system' ? ' · автоматически' : message.created_by ? ` · ${message.created_by}` : ''}</dd>
             {message.last_reminded_at && <><dt>Напоминание</dt><dd>{messageDate(message.last_reminded_at)}</dd></>}
           </dl>
           <ReadProgress item={message} />
+
+          <p className="push-status" role="status">
+            {message.push.configured
+              ? <>Push: доставлено {message.push.sent} из {message.push.total} устройств
+                {message.push.pending > 0 && <> · ожидают {message.push.pending}</>}
+                {message.push.failed > 0 && <> · не доставлено {message.push.failed}</>}
+              </>
+              : 'Push не настроен: студенты увидят сообщение только в приложении'}
+          </p>
 
           {message.importance !== 'low' && (
             <button className="button button-secondary full" disabled={remind.isPending || pendingCount === 0} onClick={sendReminder}>

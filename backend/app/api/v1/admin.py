@@ -23,13 +23,15 @@ router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)])
 async def stream_schedule(
     group_ids: list[int] = Query(default=[]),
     week: int | None = Query(default=None, ge=1),
-    db: AsyncSession = Depends(get_db, scope="function"),
+    db: AsyncSession = Depends(get_db),
 ) -> WeekScheduleOut:
     try:
         groups = await stream_service.load_groups(db, group_ids)
         semester = await schedule_service.active_semester(db)
         today = datetime.now().date()
-        number = week or weeks_service.current_week_number(semester, today)
+        number = week or weeks_service.current_week_number(
+            semester, today, await weeks_service.last_available_week(db, semester)
+        )
         info, days = await stream_service.build_stream_schedule(db, groups, semester, number, today)
     except stream_service.StreamScheduleError as error:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
@@ -42,7 +44,7 @@ async def stream_schedule(
 
 
 @router.get("/catalog", response_model=CatalogOut, summary="Предметы, преподаватели, аудитории для подсказок")
-async def catalog(db: AsyncSession = Depends(get_db, scope="function")) -> CatalogOut:
+async def catalog(db: AsyncSession = Depends(get_db)) -> CatalogOut:
     return CatalogOut(**await overrides_service.catalog(db))
 
 
@@ -54,7 +56,7 @@ async def catalog(db: AsyncSession = Depends(get_db, scope="function")) -> Catal
 )
 async def create_override(
     data: OverrideIn,
-    db: AsyncSession = Depends(get_db, scope="function"),
+    db: AsyncSession = Depends(get_db),
     admin: str = Depends(require_admin),
 ) -> OverrideCreatedOut:
     try:
@@ -76,7 +78,7 @@ async def create_override(
 async def delete_override(
     override_id: int,
     batch: bool = Query(default=False, description="Откатить для всех групп потока"),
-    db: AsyncSession = Depends(get_db, scope="function"),
+    db: AsyncSession = Depends(get_db),
 ) -> OverrideDeletedOut:
     try:
         deleted = await overrides_service.delete_override(db, override_id, batch)

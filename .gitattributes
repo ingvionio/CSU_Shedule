@@ -1,0 +1,2 @@
+# Файлы для сервера (systemd, .env): только LF, в том числе в git archive на Windows
+deploy/** text eol=lf

@@ -31,7 +31,7 @@ from app.models import (
 )
 from app.schemas.admin import OverrideIn
 from app.services import schedule as schedule_service
-from app.services import weeks
+from app.services import weeks, schedule_changes
 from app.services.importer import _get_or_create
 
 # Пары с такими статусами не занимают время и не мешают новой паре.
@@ -65,7 +65,7 @@ async def create_overrides(
     if kind != OverrideKind.ADD.value:
         if data.source_lesson_id is None:
             raise OverrideError("не указана исходная пара (source_lesson_id)")
-        source = await session.get(Lesson, data.source_lesson_id)
+        source = await session.scalar(select(Lesson).where(Lesson.id == data.source_lesson_id))
         if source is None or source.semester_id != semester.id:
             raise OverrideError(f"пара {data.source_lesson_id} не найдена", 404)
         if not schedule_service.lesson_occurs_on(semester, source, data.date):
@@ -101,6 +101,12 @@ async def create_overrides(
             continue
         for lesson in targets:
             # Новое изменение пары на ту же дату заменяет прежнее.
+            previous = await session.scalar(select(LessonOverride).where(
+                LessonOverride.lesson_id == lesson.id, LessonOverride.date == data.date))
+            if previous is not None:
+                await schedule_changes.record(session, group_id=previous.group_id, source="override", ref_id=previous.id,
+                                        action="removed", day=previous.date,
+                                        text=schedule_changes.override_text(previous, removed=True))
             await session.execute(
                 delete(LessonOverride).where(LessonOverride.lesson_id == lesson.id, LessonOverride.date == data.date)
             )
@@ -123,6 +129,9 @@ async def create_overrides(
         await session.rollback()
         raise
 
+    for item in sorted(created, key=lambda item: item.group_id):
+        await schedule_changes.record(session, group_id=item.group_id, source="override", ref_id=item.id,
+                                action="created", day=item.date, text=schedule_changes.override_text(item))
     await session.commit()
     return batch_id, created
 
@@ -136,6 +145,9 @@ async def delete_override(session: AsyncSession, override_id: int, whole_batch: 
     condition = (
         LessonOverride.batch_id == override.batch_id if whole_batch else LessonOverride.id == override.id
     )
+    for item in await session.scalars(select(LessonOverride).where(condition).order_by(LessonOverride.group_id)):
+        await schedule_changes.record(session, group_id=item.group_id, source="override", ref_id=item.id,
+                                action="removed", day=item.date, text=schedule_changes.override_text(item, removed=True))
     deleted = (await session.execute(delete(LessonOverride).where(condition))).rowcount
     await session.commit()
     return deleted

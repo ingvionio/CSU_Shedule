@@ -1,10 +1,12 @@
 import type {
+  ExamKind, ExamInput, ExamEvent, ExamImportReport, ExamImportHistory,
   ImportHistory,
   SemesterImportReport,
   WeeklyImportReport,
   AdminFeedback,
   AdminMessage,
   AdminMessageDetail,
+  RemindOut,
   Catalog,
   CurrentWeek,
   Direction,
@@ -94,6 +96,20 @@ async function request<T>(path: string, { method = 'GET', body, token, feedbackT
 }
 
 export const api = {
+  adminExams: (token: string, filters: { kind: string; course: string; group_id: string }) => {
+    const params = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== ''))
+    return request<ExamEvent[]>('/admin/exams?' + params, { token })
+  },
+  examImports: (token: string) => request<ExamImportHistory[]>('/admin/exams/imports', { token }),
+  importExams: (token: string, file: File, kind: ExamKind, apply: boolean) => {
+    const body = new FormData()
+    body.append('file', file)
+    return request<ExamImportReport>('/admin/exams/import?kind=' + kind + '&apply=' + apply, { method: 'POST', body, token })
+  },
+  createExam: (token: string, body: ExamInput) => request<ExamEvent>('/admin/exams', { method: 'POST', body, token }),
+  patchExam: (token: string, id: number, body: Partial<ExamInput>) => request<ExamEvent>('/admin/exams/' + id, { method: 'PATCH', body, token }),
+  cancelExam: (token: string, id: number, cancelled: boolean) => request<ExamEvent>('/admin/exams/' + id + '/' + (cancelled ? 'cancel' : 'restore'), { method: 'POST', token }),
+  deleteExam: (token: string, id: number) => request<void>('/admin/exams/' + id, { method: 'DELETE', token }),
   imports: (token: string) => request<ImportHistory[]>('/admin/imports', { token }),
   importWeekly: (token: string, files: File[], dryRun: boolean, skipErrors: boolean) => {
     const body = new FormData()
@@ -115,8 +131,9 @@ export const api = {
   timeSlots: () => request<TimeSlot[]>('/time-slots'),
   lessonTypes: () => request<LessonType[]>('/lesson-types'),
   currentWeek: () => request<CurrentWeek>('/weeks/current'),
+  // events=1: этот клиент умеет показывать экзамены (старые APK их не получают).
   schedule: (groupId: number, week?: number) =>
-    request<WeekSchedule>(`/groups/${groupId}/schedule${week ? `?week=${week}` : ''}`),
+    request<WeekSchedule>(`/groups/${groupId}/schedule?events=1${week ? `&week=${week}` : ''}`),
   streamSchedule: (token: string, groupIds: number[], week: number) => {
     const params = new URLSearchParams(groupIds.map((id) => ['group_ids', String(id)]))
     params.set('week', String(week))
@@ -170,8 +187,8 @@ export const api = {
     request<FeedbackRecipient>(`/admin/feedback/recipients/${id}`, { method: 'PATCH', body, token }),
 
   directions: () => request<Direction[]>('/directions'),
-  pushConfig: () => request<{ public_key: string | null }>('/push/config'),
-  subscribePush: (token: string, body: { endpoint: string; keys: { p256dh: string; auth: string } }) =>
+  pushConfig: () => request<{ public_key: string | null; fcm: boolean }>('/push/config'),
+  subscribePush: (token: string, body: { platform?: 'web'; endpoint: string; keys: { p256dh: string; auth: string } } | { platform: 'fcm'; token: string }) =>
     request<{ id: number }>('/me/push-subscriptions', { method: 'POST', body, token }),
   unsubscribePush: (token: string, id: number) =>
     request<void>(`/me/push-subscriptions/${id}`, { method: 'DELETE', token }),
@@ -194,12 +211,14 @@ export const api = {
     )
     return request<Student[]>(`/admin/users?${query}`, { token })
   },
-  adminMessages: (token: string) => request<AdminMessage[]>('/admin/messages', { token }),
+  adminMessages: (token: string, includeAutomatic = false) => request<AdminMessage[]>(
+    '/admin/messages?include_automatic=' + includeAutomatic, { token },
+  ),
   adminMessage: (token: string, id: number) => request<AdminMessageDetail>(`/admin/messages/${id}`, { token }),
   sendMessage: (token: string, body: MessageInput) =>
     request<AdminMessage>('/admin/messages', { method: 'POST', body, token }),
   remindMessage: (token: string, id: number) =>
-    request<{ reminded: number }>(`/admin/messages/${id}/remind`, { method: 'POST', token }),
+    request<RemindOut>(`/admin/messages/${id}/remind`, { method: 'POST', token }),
   deleteMessage: (token: string, id: number) => request<void>(`/admin/messages/${id}`, { method: 'DELETE', token }),
 
   homework: (token: string, start?: string, end?: string) => {

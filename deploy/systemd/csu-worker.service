@@ -1,0 +1,23 @@
+# Доставка push и писем из очереди (outbox). Копировать в
+# /etc/systemd/system/csu-worker.service, затем:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now csu-worker
+# Код и настройки — те же, что у csu-backend: каталог backend и его .env.
+# Python — из текущего релиза (ссылка releases/current, см. DEPLOY.md).
+
+[Unit]
+Description=CSU schedule notification worker
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+User=antigravity
+Group=antigravity
+WorkingDirectory=/home/antigravity/csu_schedule/backend
+ExecStart=/home/antigravity/csu_schedule/releases/current/venv/bin/python -m app.cli worker
+Restart=always
+RestartSec=5
+# По SIGTERM worker дорабатывает текущую пачку и выходит.
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Значок уведомления: щит ИИТ с вырезанными «IIT». Android рисует его одним цветом. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M4,2H20V15.5L12,22L4,15.5Z
+            M4,8.4H20V9.4H4Z
+            M6.3,11H8V16.6H6.3Z
+            M9.4,11H11.1V16.6H9.4Z
+            M12.5,11H17.7V12.6H12.5Z
+            M14.25,12.6H15.95V16.6H14.25Z" />
+</vector>

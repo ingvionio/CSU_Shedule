@@ -187,6 +187,32 @@ python -m app.cli send-emails                  # дослать письма, к
 python -m app.cli send-emails --test you@example.com   # проверить SMTP
 ```
 
+## Push в Android (FCM)
+
+Web Push использует VAPID, Android APK — Firebase Cloud Messaging (HTTP v1).
+Можно настроить одну или обе платформы; API и worker получают одинаковое
+окружение через `x-backend-env` в `docker-compose.yml`.
+
+1. В Firebase включите Cloud Messaging API (v1) и получите JSON-ключ
+   сервисного аккаунта с правами отправки сообщений.
+2. Положите ключ в `backend/secrets/firebase-service-account.json`.
+   Каталог `backend/secrets/` исключён из Git; ключ не коммитить.
+3. В корневом `.env` для Docker задайте
+   `FCM_CREDENTIALS_FILE=/app/secrets/firebase-service-account.json`.
+   Каталог `./backend` уже смонтирован в `/app` у API и worker.
+   При запуске Python из `backend/` без Docker используйте
+   `FCM_CREDENTIALS_FILE=secrets/firebase-service-account.json`.
+   Пустое значение отключает FCM. `project_id` берётся из JSON.
+4. Установите зависимости из `requirements.txt`, примените
+   `python -m alembic upgrade head` и перезапустите API и worker:
+   `docker compose up -d --build backend worker`.
+
+OAuth-токен кэшируется в процессе worker и обновляется автоматически.
+Ключ сервисного аккаунта остаётся на сервере. Для APK нужен отдельный
+`google-services.json` того же Firebase-проекта — см.
+[инструкцию Android](../frontend/README.md#android-apk).
+Без FCM сообщения доступны в инбоксе; VAPID настраивается независимо.
+
 ## Чего ещё нет
 
 Черновики расписания, предпросмотр недели с черновыми правками, отдельная

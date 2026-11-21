@@ -60,12 +60,13 @@ function harness() {
     useLessonTypes: () => ({ data: [lesson.type] }),
     useCatalog: () => ({ data: { subjects: [], rooms: [], teachers: [] } }),
     useOverrideMutations: () => ({ create: {}, remove: {} }),
+    useExamMutations: () => ({ patch: {}, cancel: {}, remove: {} }),
     useStreamSchedule: (token, ids, number) => { requested = { token, ids: [...ids], number }; return { data: stream } },
   }
   const { AdminSchedule } = load('../src/pages/admin/AdminSchedule.tsx', {
     react: hooks, '../../api/queries': queries, '../../api/client': { ApiError: class extends Error {} },
     '../../ContextHelp': { ContextHelp: () => null }, './helpContent': { adminHelpItems: [] },
-    '../../ScheduleComponents': components,
+    '../../ScheduleComponents': components, './AdminExams': { ExamForm: () => null },
   })
   const props = { groups, groupId: 1, weekNumber: 12, schedule: normal, days: normal.days,
     slots: [{ number: 1, start_time: '08:00', end_time: '09:30' }], currentMinutes: 0, token: 'admin-token',

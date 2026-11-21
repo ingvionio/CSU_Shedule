@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
@@ -26,7 +26,6 @@ from app.schemas.feedback import (
 from app.services import feedback as feedback_service
 from app.services import product_events
 from app.services.feedback import KIND_TITLES
-from app.services.mailer import deliver_by_ids
 
 router = APIRouter()
 admin_router = APIRouter(prefix="/admin/feedback", dependencies=[Depends(require_admin)])
@@ -115,14 +114,13 @@ def _raise(error: feedback_service.FeedbackError) -> HTTPException:
 async def create_feedback(
     data: FeedbackIn,
     request: Request,
-    background: BackgroundTasks,
     token: str | None = TokenHeader,
     student_id: int | None = Depends(optional_student),
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> FeedbackCreatedOut:
     author = await db.get(User, student_id) if student_id is not None else None
     try:
-        message, outbox_ids = await feedback_service.create_message(
+        message, _ = await feedback_service.create_message(
             db, data, token, request.client.host if request.client else None, author=author
         )
     except feedback_service.FeedbackError as error:
@@ -139,7 +137,6 @@ async def create_feedback(
         app_version=request.headers.get("X-Client-Version"),
     )
 
-    background.add_task(deliver_by_ids, outbox_ids)
     return response
 
 
@@ -188,14 +185,12 @@ async def update_recipient(recipient_id: int, data: RecipientUpdateIn, db: Async
 async def update_feedback(
     message_id: int,
     data: FeedbackUpdateIn,
-    background: BackgroundTasks,
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> AdminFeedbackOut:
     try:
-        message, outbox_ids = await feedback_service.update_message(db, message_id, data)
+        message, _ = await feedback_service.update_message(db, message_id, data)
     except feedback_service.FeedbackError as error:
         raise _raise(error) from error
-    background.add_task(deliver_by_ids, outbox_ids)
     return _admin_out(message)
 
 
@@ -208,13 +203,11 @@ async def update_feedback(
 async def reply_feedback(
     message_id: int,
     data: ReplyIn,
-    background: BackgroundTasks,
     db: AsyncSession = Depends(get_db, scope="function"),
     admin: str = Depends(require_admin),
 ) -> AdminFeedbackOut:
     try:
-        message, outbox_ids = await feedback_service.add_reply(db, message_id, data.text, admin)
+        message, _ = await feedback_service.add_reply(db, message_id, data.text, admin)
     except feedback_service.FeedbackError as error:
         raise _raise(error) from error
-    background.add_task(deliver_by_ids, outbox_ids)
     return _admin_out(message)

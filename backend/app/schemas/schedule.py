@@ -56,12 +56,22 @@ class ChangeOut(BaseModel):
     moved_from: dict | None = None
 
 
+class EventChangeOut(BaseModel):
+    original: dict[Literal["date", "start_time", "room"], str | None]
+
+
+class ScheduleEventOut(BaseModel):
+    kind: Literal["session", "retake"]
+    note: str | None = None
+    groups: list[str]
+
+
 class LessonOut(BaseModel):
     id: str
     note_key: str | None = None
     stream_diff: list[str] | None = None
-    start_time: str = Field(description="HH:MM, заполнено всегда")
-    end_time: str
+    start_time: str | None = Field(description="HH:MM; null — время события не указано")
+    end_time: str | None
     slot: int | None = Field(default=None, description="Номер в сетке звонков; null -- пара вне сетки")
     subject: str
     type: LessonTypeOut
@@ -70,17 +80,19 @@ class LessonOut(BaseModel):
     teacher: str | None = None
     subgroup: int | None = Field(default=None, description="Подгруппа из Excel; null -- вся группа")
     status: LessonStatusLiteral = "regular"
-    change: ChangeOut | None = None
+    change: ChangeOut | EventChangeOut | None = None
+    event: ScheduleEventOut | None = None
 
 
 class DayOut(BaseModel):
     date: date
-    weekday: int = Field(description="1 = пн ... 6 = сб")
+    weekday: int = Field(description="1 = пн ... 7 = вс")
     is_today: bool
     lessons: list[LessonOut]
 
 
 class WeekOut(BaseModel):
+    schedule_pending: bool = False
     number: int
     parity: ParityLiteral
     start_date: date

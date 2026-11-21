@@ -1,16 +1,16 @@
 """Push: подписка устройства, доставка, удаление отозванных подписок."""
 
-import json
-from types import SimpleNamespace
-
 import pytest
 from pywebpush import WebPushException
 from sqlalchemy import delete, select
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
-from app.models import Message, MessageRecipient, PushSubscription
+from app.models import Message, MessageRecipient, PushDelivery, PushSubscription
 from app.services import push as push_service
+from app.services.worker import process_push
+from datetime import datetime, timezone
+
 from tests.moodle_helpers import login_student
 
 API = "/api/v1"
@@ -24,6 +24,7 @@ def subscription_body(name="a"):
 async def _clean(db_schema):
     yield
     async with SessionLocal() as session:
+        await session.execute(delete(PushDelivery))
         await session.execute(delete(PushSubscription))
         await session.execute(delete(MessageRecipient))
         await session.execute(delete(Message))
@@ -41,30 +42,28 @@ def sent(monkeypatch) -> list[tuple[str, dict]]:
     """Вместо push-сервиса — список; endpoint с «gone» отвечает 410."""
     calls: list[tuple[str, dict]] = []
 
-    async def fake_send(*, subscription_info, data, aiohttp_session, **kwargs):
-        assert not aiohttp_session.closed
-        assert kwargs["timeout"] == 10
-        endpoint = subscription_info["endpoint"]
-        if "gone" in endpoint:
-            raise WebPushException("gone", response=SimpleNamespace(status=410))
-        calls.append((endpoint, json.loads(data)))
+    async def fake_send(subscription, data):
+        if "gone" in subscription.endpoint:
+            response = type("Response", (), {"status": 410})()
+            raise WebPushException("gone", response=response)
+        calls.append((subscription.endpoint, data))
 
-    monkeypatch.setattr(push_service, "webpush_async", fake_send)
+    monkeypatch.setattr(push_service, "_send", fake_send)
     return calls
 
 
 async def student(client, group_id, device):
-    response = await login_student(client, group_id, "Аня Андреева", device)
+    response = await login_student(client, group_id, name=device, device=device)
     body = response.json()
     return body["profile"]["id"], {"Authorization": f"Bearer {body['access_token']}"}
 
 
 async def test_конфиг_без_ключей(bare_client):
-    assert (await bare_client.get(f"{API}/push/config")).json() == {"public_key": None}
+    assert (await bare_client.get(f"{API}/push/config")).json() == {"public_key": None, "fcm": False}
 
 
 async def test_конфиг_с_ключами(bare_client, vapid):
-    assert (await bare_client.get(f"{API}/push/config")).json() == {"public_key": "public-key"}
+    assert (await bare_client.get(f"{API}/push/config")).json() == {"public_key": "public-key", "fcm": False}
 
 
 async def test_подписка_и_отписка(bare_client, test_groups):
@@ -93,13 +92,16 @@ async def test_доставка_и_удаление_отозванной_под�
     await bare_client.post(f"{API}/me/push-subscriptions", json=subscription_body("phone"), headers=anya)
     await bare_client.post(f"{API}/me/push-subscriptions", json=subscription_body("gone"), headers=anya)
 
-    # Транспорт ASGI дожидается выполнения фоновых задач.
+    # API только пишет очередь; доставку запускает отдельный worker.
     response = await bare_client.post(
         f"{API}/admin/messages",
         json={"title": "Перенос пары", "body": "На четверг", "importance": "high", "target": {"type": "all"}},
         headers=bare_admin_headers,
     )
     assert response.status_code == 201
+    assert sent == []
+    async with SessionLocal() as session:
+        assert (await process_push(session, datetime.now(timezone.utc))).processed == 2
 
     assert len(sent) == 1
     endpoint, data = sent[0]
@@ -121,7 +123,9 @@ async def test_напоминание_с_пометкой(bare_client, bare_admi
         headers=bare_admin_headers,
     )).json()
     await bare_client.post(f"{API}/admin/messages/{message['id']}/remind", headers=bare_admin_headers)
-    assert sent[-1][1]["title"] == "Напоминание: Анкета"
+    async with SessionLocal() as session:
+        await process_push(session, datetime.now(timezone.utc))
+    assert sorted(data["title"] for _, data in sent) == ["Анкета", "Напоминание: Анкета"]
 
 
 async def test_без_ключей_push_не_отправляется(bare_client, bare_admin_headers, test_groups, sent):

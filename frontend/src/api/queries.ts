@@ -4,6 +4,7 @@ import { api } from './client'
 import { feedbackToken, readCache, writeCache } from './cache'
 import { asStudent, studentToken, useStudentSession } from './student'
 import type {
+  ExamKind, ExamInput,
   Catalog,
   CurrentWeek,
   Direction,
@@ -326,10 +327,10 @@ export function usePersonalNoteMutations() {
 
 /* --- Рассылка: методист --- */
 
-export function useAdminMessages(token: string) {
+export function useAdminMessages(token: string, includeAutomatic = false) {
   return useQuery({
-    queryKey: ['admin-messages'],
-    queryFn: () => api.adminMessages(token),
+    queryKey: ['admin-messages', { includeAutomatic }],
+    queryFn: () => api.adminMessages(token, includeAutomatic),
     refetchInterval: 60 * 1000,
   })
 }
@@ -384,4 +385,33 @@ export function useMessageMutations(token: string) {
     onSuccess: refresh,
   })
   return { send, remind, remove }
+}
+
+/* --- Сессия --- */
+export function useAdminExams(token: string, filters: { kind: string; course: string; group_id: string }) {
+  return useQuery({ queryKey: ['admin-exams', token, filters], queryFn: () => api.adminExams(token, filters) })
+}
+
+export function useExamImports(token: string) {
+  return useQuery({ queryKey: ['exam-imports', token], queryFn: () => api.examImports(token) })
+}
+
+export function useExamMutations(token: string) {
+  const client = useQueryClient()
+  const refresh = () => Promise.all([
+    client.invalidateQueries({ queryKey: ['schedule'] }),
+    client.invalidateQueries({ queryKey: ['current-week'] }),
+    client.invalidateQueries({ queryKey: ['admin-exams'] }),
+    client.invalidateQueries({ queryKey: ['exam-imports'] }),
+  ])
+  return {
+    create: useMutation({ mutationFn: (body: ExamInput) => api.createExam(token, body), onSuccess: refresh }),
+    patch: useMutation({ mutationFn: ({ id, body }: { id: number; body: Partial<ExamInput> }) => api.patchExam(token, id, body), onSuccess: refresh }),
+    cancel: useMutation({ mutationFn: ({ id, cancelled }: { id: number; cancelled: boolean }) => api.cancelExam(token, id, cancelled), onSuccess: refresh }),
+    remove: useMutation({ mutationFn: (id: number) => api.deleteExam(token, id), onSuccess: refresh }),
+    upload: useMutation({
+      mutationFn: ({ file, kind, apply }: { file: File; kind: ExamKind; apply: boolean }) => api.importExams(token, file, kind, apply),
+      onSuccess: result => result.applied ? refresh() : undefined,
+    }),
+  }
 }

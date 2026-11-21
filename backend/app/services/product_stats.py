@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Group, Message, ProductEvent, PushSubscription, User
 from app.services import product_events as ev
@@ -110,11 +110,11 @@ def _in_period(period: Period):
     return (ProductEvent.occurred_at >= period.start_utc, ProductEvent.occurred_at < period.end_utc)
 
 
-def _count(db: Session, name: str, period: Period) -> int:
-    return db.scalar(select(func.count(ProductEvent.id)).where(ProductEvent.name == name, *_in_period(period))) or 0
+async def _count(db: AsyncSession, name: str, period: Period) -> int:
+    return await db.scalar(select(func.count(ProductEvent.id)).where(ProductEvent.name == name, *_in_period(period))) or 0
 
 
-def _active_days(db: Session, since: date, until: date, user_ids: Iterable[int] | None = None) -> dict[int, set[date]]:
+async def _active_days(db: AsyncSession, since: date, until: date, user_ids: Iterable[int] | None = None) -> dict[int, set[date]]:
     """Дни (по Челябинску), в которые студент что-то делал в приложении.
 
     Кроме событий учитываются отметки профиля: первый вход, последний вход через
@@ -135,27 +135,27 @@ def _active_days(db: Session, since: date, until: date, user_ids: Iterable[int] 
     )
     if ids is not None:
         query = query.where(ProductEvent.user_id.in_(ids))
-    for user_id, occurred_at in db.execute(query):
+    for user_id, occurred_at in await db.execute(query):
         days[user_id].add(local_date(occurred_at))
 
     profile = select(User.id, User.created_at, User.last_seen_at, User.session_last_active_at).where(User.role == "student")
     if ids is not None:
         profile = profile.where(User.id.in_(ids))
-    for user_id, *moments in db.execute(profile):
+    for user_id, *moments in await db.execute(profile):
         for moment in moments:
             if moment is not None and low <= as_utc(moment) < high:
                 days[user_id].add(local_date(moment))
     return days
 
 
-def _funnel(db: Session, period: Period) -> dict:
+async def _funnel(db: AsyncSession, period: Period) -> dict:
     """Воронка по устройствам: каждый шаг — только среди тех, кто прошёл предыдущий.
 
     Отдельно — сколько устройств вошло, не открывая лендинг за период
     (уже были на нём раньше, пришли по прямой ссылке или из уведомления).
     """
     devices: dict[str, set[str]] = defaultdict(set)
-    for name, device in db.execute(
+    for name, device in await db.execute(
         select(ProductEvent.name, ProductEvent.device_hash)
         .where(ProductEvent.name.in_(FUNNEL), ProductEvent.device_hash.is_not(None), *_in_period(period))
         .distinct()
@@ -174,20 +174,20 @@ def _funnel(db: Session, period: Period) -> dict:
     }
 
 
-def _retention(db: Session, period: Period, today: date) -> list[dict]:
+async def _retention(db: AsyncSession, period: Period, today: date) -> list[dict]:
     """Доля новых за период, вернувшихся на N-й неделе после первого входа.
 
     Учитываются только те, у кого N-я неделя уже закончилась.
     """
     cohort = {
         user_id: local_date(created_at)
-        for user_id, created_at in db.execute(
+        for user_id, created_at in await db.execute(
             select(User.id, User.created_at).where(
                 User.role == "student", User.created_at >= period.start_utc, User.created_at < period.end_utc
             )
         )
     }
-    activity = _active_days(db, period.start, today, cohort) if cohort else {}
+    activity = await _active_days(db, period.start, today, cohort) if cohort else {}
     result = []
     for week in RETENTION_WEEKS:
         eligible = returned = 0
@@ -208,16 +208,16 @@ def level_of_group(name: str) -> str:
     return "master" if name.strip()[:1] in ("М", "M") else "bachelor"
 
 
-def _groups(db: Session, period: Period, active_users: set[int]) -> list[dict]:
+async def _groups(db: AsyncSession, period: Period, active_users: set[int]) -> list[dict]:
     """Охват групп: сколько студентов каждой группы вошли в приложение. Размер группы нам неизвестен."""
     stats: dict[int, dict] = {
         group.id: {
             "id": group.id, "name": group.name, "course": group.course, "level": level_of_group(group.name),
             "users": 0, "new": 0, "active": 0,
         }
-        for group in db.scalars(select(Group).order_by(Group.course, Group.name))
+        for group in await db.scalars(select(Group).order_by(Group.course, Group.name))
     }
-    for user_id, group_id, created_at in db.execute(
+    for user_id, group_id, created_at in await db.execute(
         select(User.id, User.group_id, User.created_at).where(User.role == "student", User.group_id.is_not(None))
     ):
         row = stats.get(group_id)
@@ -231,14 +231,14 @@ def _groups(db: Session, period: Period, active_users: set[int]) -> list[dict]:
     return list(stats.values())
 
 
-def summary(db: Session, start: date | None = None, end: date | None = None, now: datetime | None = None) -> dict:
+async def summary(db: AsyncSession, start: date | None = None, end: date | None = None, now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
     period = resolve_period(start, end, now)
     today = local_date(now)
 
     # DAU / WAU / MAU — на последний день периода.
     window_start = min(period.start, period.end - timedelta(days=29))
-    activity = _active_days(db, window_start, period.end)
+    activity = await _active_days(db, window_start, period.end)
     active_by_day: dict[date, set[int]] = defaultdict(set)
     for user_id, days in activity.items():
         for day in days:
@@ -254,7 +254,7 @@ def summary(db: Session, start: date | None = None, end: date | None = None, now
     active_users = active_between(period.start, period.end)
 
     last_platform: dict[int, tuple[datetime, str | None]] = {}
-    for user_id, occurred_at, platform in db.execute(
+    for user_id, occurred_at, platform in await db.execute(
         select(ProductEvent.user_id, ProductEvent.occurred_at, ProductEvent.platform).where(
             ProductEvent.user_id.is_not(None), ProductEvent.platform.is_not(None), *_in_period(period)
         )
@@ -267,7 +267,7 @@ def summary(db: Session, start: date | None = None, end: date | None = None, now
         by_platform[last_platform[user_id][1] if user_id in last_platform else "unknown"] += 1
 
     new_by_day: dict[date, int] = defaultdict(int)
-    for created_at in db.scalars(
+    for created_at in await db.scalars(
         select(User.created_at).where(
             User.role == "student", User.created_at >= period.start_utc, User.created_at < period.end_utc
         )
@@ -276,7 +276,7 @@ def summary(db: Session, start: date | None = None, end: date | None = None, now
 
     landing_by_day: dict[date, set[str]] = defaultdict(set)
     success_by_day: dict[date, int] = defaultdict(int)
-    for name, device, occurred_at in db.execute(
+    for name, device, occurred_at in await db.execute(
         select(ProductEvent.name, ProductEvent.device_hash, ProductEvent.occurred_at).where(
             ProductEvent.name.in_((ev.LANDING_VIEW, ev.LOGIN_SUCCESS)), *_in_period(period)
         )
@@ -293,8 +293,8 @@ def summary(db: Session, start: date | None = None, end: date | None = None, now
         .group_by(ProductEvent.device_hash)
         .subquery()
     )
-    apk_installs_total = db.scalar(select(func.count()).select_from(first_apk)) or 0
-    apk_installs = db.scalar(
+    apk_installs_total = await db.scalar(select(func.count()).select_from(first_apk)) or 0
+    apk_installs = await db.scalar(
         select(func.count())
         .select_from(first_apk)
         .where(first_apk.c.first_at >= period.start_utc, first_apk.c.first_at < period.end_utc)
@@ -302,15 +302,15 @@ def summary(db: Session, start: date | None = None, end: date | None = None, now
 
     feature_rows = {
         name: (events, users)
-        for name, events, users in db.execute(
+        for name, events, users in await db.execute(
             select(ProductEvent.name, func.count(ProductEvent.id), func.count(func.distinct(ProductEvent.user_id)))
             .where(ProductEvent.name.in_(FEATURE_EVENTS), *_in_period(period))
             .group_by(ProductEvent.name)
         )
     }
 
-    users_total = db.scalar(select(func.count()).select_from(_students().subquery())) or 0
-    users_with_push = db.scalar(select(func.count(func.distinct(PushSubscription.user_id)))) or 0
+    users_total = await db.scalar(select(func.count()).select_from(_students().subquery())) or 0
+    users_with_push = await db.scalar(select(func.count(func.distinct(PushSubscription.user_id)))) or 0
 
     return {
         "start_date": period.start,
@@ -323,14 +323,14 @@ def summary(db: Session, start: date | None = None, end: date | None = None, now
         "wau": len(active_between(period.end - timedelta(days=6), period.end)),
         "mau": len(active_between(period.end - timedelta(days=29), period.end)),
         "users_with_push": users_with_push,
-        "funnel": _funnel(db, period),
-        "tracking_since": local_date(first_event) if (first_event := db.scalar(select(func.min(ProductEvent.occurred_at)))) else None,
+        "funnel": await _funnel(db, period),
+        "tracking_since": local_date(first_event) if (first_event := await db.scalar(select(func.min(ProductEvent.occurred_at)))) else None,
         "login_failures": {
-            "auth": _count(db, ev.LOGIN_FAILED_AUTH, period),
-            "group": _count(db, ev.LOGIN_FAILED_GROUP, period),
-            "other": _count(db, ev.LOGIN_FAILED_OTHER, period),
+            "auth": await _count(db, ev.LOGIN_FAILED_AUTH, period),
+            "group": await _count(db, ev.LOGIN_FAILED_GROUP, period),
+            "other": await _count(db, ev.LOGIN_FAILED_OTHER, period),
         },
-        "apk_downloads": _count(db, ev.APK_DOWNLOAD, period),
+        "apk_downloads": await _count(db, ev.APK_DOWNLOAD, period),
         "apk_installs": apk_installs,
         "apk_installs_total": apk_installs_total,
         "by_platform": dict(by_platform),
@@ -338,8 +338,8 @@ def summary(db: Session, start: date | None = None, end: date | None = None, now
             {"name": name, "events": feature_rows.get(name, (0, 0))[0], "users": feature_rows.get(name, (0, 0))[1]}
             for name in FEATURE_EVENTS
         ],
-        "retention": _retention(db, period, today),
-        "groups": _groups(db, period, active_users),
+        "retention": await _retention(db, period, today),
+        "groups": await _groups(db, period, active_users),
         "daily": [
             {
                 "date": day,
@@ -365,21 +365,21 @@ def _last_event_subquery():
     )
 
 
-def _user_rows(db: Session, users: list[User], now: datetime) -> list[dict]:
+async def _user_rows(db: AsyncSession, users: list[User], now: datetime) -> list[dict]:
     """Последний заход, активные дни за 30 дней и последняя платформа — для списка и карточки."""
     ids = [user.id for user in users]
     last_seen: dict[int, datetime] = {}
     platforms: dict[int, tuple[datetime, str]] = {}
     today = local_date(now)
-    days = _active_days(db, today - timedelta(days=29), today, ids)
+    days = await _active_days(db, today - timedelta(days=29), today, ids)
     if ids:
-        for user_id, moment in db.execute(
+        for user_id, moment in await db.execute(
             select(ProductEvent.user_id, func.max(ProductEvent.occurred_at))
             .where(ProductEvent.user_id.in_(ids))
             .group_by(ProductEvent.user_id)
         ):
             last_seen[user_id] = as_utc(moment)
-        for user_id, moment, platform in db.execute(
+        for user_id, moment, platform in await db.execute(
             select(ProductEvent.user_id, ProductEvent.occurred_at, ProductEvent.platform).where(
                 ProductEvent.user_id.in_(ids),
                 ProductEvent.platform.is_not(None),
@@ -407,8 +407,8 @@ def _user_rows(db: Session, users: list[User], now: datetime) -> list[dict]:
     return rows
 
 
-def users(
-    db: Session,
+async def users(
+    db: AsyncSession,
     *,
     q: str | None = None,
     group_id: int | None = None,
@@ -450,27 +450,27 @@ def users(
         query = query.where(User.created_at < local_midnight_utc(created_to + timedelta(days=1)))
 
     if sort in COMPUTED_SORTS or platform is not None:
-        return _users_computed(db, query, platform=platform, sort=sort, order=order, limit=limit, offset=offset, now=now)
+        return await _users_computed(db, query, platform=platform, sort=sort, order=order, limit=limit, offset=offset, now=now)
 
-    total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
+    total = await db.scalar(select(func.count()).select_from(query.subquery())) or 0
     if sort == "group":
         query = query.outerjoin(Group, Group.id == User.group_id)
     column = {"last_seen": seen, "created": User.created_at, "name": User.full_name, "group": Group.name}[sort]
     direction = column.asc() if order == "asc" else column.desc()
     # Пустые значения (нет группы) — всегда в конце; при равенстве — по ФИО.
     ordering = (column.is_(None), direction, User.full_name.asc(), User.id.asc())
-    page = list(db.scalars(query.order_by(*ordering).limit(limit).offset(offset)).unique())
-    return {"total": total, "items": _user_rows(db, page, now)}
+    page = list((await db.scalars(query.order_by(*ordering).limit(limit).offset(offset))).unique())
+    return {"total": total, "items": await _user_rows(db, page, now)}
 
 
-def _users_computed(db: Session, query, *, platform: str | None, sort: str, order: str, limit: int, offset: int,
+async def _users_computed(db: AsyncSession, query, *, platform: str | None, sort: str, order: str, limit: int, offset: int,
                     now: datetime) -> dict:
     """Платформа и активные дни считаются по событиям, поэтому фильтр и сортировка по ним — после выборки всех.
 
     При тысячах студентов это несколько запросов на всю выборку — для ЛК приемлемо.
     """
-    users = list(db.scalars(query.order_by(User.full_name.asc(), User.id.asc())).unique())
-    rows = _user_rows(db, users, now)
+    users = list((await db.scalars(query.order_by(User.full_name.asc(), User.id.asc()))).unique())
+    rows = await _user_rows(db, users, now)
     if platform is not None:
         rows = [row for row in rows if (row["last_platform"] or "unknown") == platform]
     reverse = order == "desc"
@@ -494,44 +494,44 @@ def _users_computed(db: Session, query, *, platform: str | None, sort: str, orde
     return {"total": len(rows), "items": rows[offset:offset + limit]}
 
 
-def user_detail(db: Session, user_id: int, now: datetime | None = None) -> dict:
+async def user_detail(db: AsyncSession, user_id: int, now: datetime | None = None) -> dict:
     """Карточка: профиль и сколько раз студент сделал каждое действие за всё время."""
     now = now or datetime.now(timezone.utc)
-    user = db.scalar(_students().where(User.id == user_id))
+    user = await db.scalar(_students().where(User.id == user_id))
     if user is None:
         raise ProductStatsError("пользователь не найден", 404)
     counts = {
         name: count
-        for name, count in db.execute(
+        for name, count in await db.execute(
             select(ProductEvent.name, func.count(ProductEvent.id))
             .where(ProductEvent.user_id == user_id)
             .group_by(ProductEvent.name)
         )
     }
-    has_push = db.scalar(select(func.count(PushSubscription.id)).where(PushSubscription.user_id == user_id)) or 0
-    return {"user": _user_rows(db, [user], now)[0], "counts": counts, "push_enabled": has_push > 0}
+    has_push = await db.scalar(select(func.count(PushSubscription.id)).where(PushSubscription.user_id == user_id)) or 0
+    return {"user": (await _user_rows(db, [user], now))[0], "counts": counts, "push_enabled": has_push > 0}
 
 
-def user_events(db: Session, user_id: int, *, limit: int, before: int | None) -> dict:
-    if db.scalar(_students().where(User.id == user_id)) is None:
+async def user_events(db: AsyncSession, user_id: int, *, limit: int, before: int | None) -> dict:
+    if await db.scalar(_students().where(User.id == user_id)) is None:
         raise ProductStatsError("пользователь не найден", 404)
     query = select(ProductEvent).where(ProductEvent.user_id == user_id)
     if before is not None:
         # Курсор — событие, после которого продолжать: строго раньше по (время, id).
-        anchor = db.get(ProductEvent, before)
+        anchor = await db.get(ProductEvent, before)
         if anchor is not None:
             query = query.where(
                 (ProductEvent.occurred_at < anchor.occurred_at)
                 | ((ProductEvent.occurred_at == anchor.occurred_at) & (ProductEvent.id < anchor.id))
             )
     order = (ProductEvent.occurred_at.desc(), ProductEvent.id.desc())
-    rows = list(db.scalars(query.order_by(*order).limit(limit + 1)))
+    rows = list(await db.scalars(query.order_by(*order).limit(limit + 1)))
     more = len(rows) > limit
     rows = rows[:limit]
 
     message_ids = {row.props["message_id"] for row in rows if isinstance(row.props, dict) and row.props.get("message_id")}
     titles = (
-        dict(db.execute(select(Message.id, Message.title).where(Message.id.in_(message_ids))).all()) if message_ids else {}
+        dict((await db.execute(select(Message.id, Message.title).where(Message.id.in_(message_ids)))).all()) if message_ids else {}
     )
     items = []
     for row in rows:

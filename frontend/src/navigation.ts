@@ -8,6 +8,7 @@ export function viewFromUrl(url: string, authenticated: boolean): View {
   const message = Number(location.searchParams.get('message'))
   if (Number.isInteger(message) && message > 0) return 'messages'
   const hash = location.hash.replace(/^#\/?/, '')
+  if (hash === 'exams') return 'day'
   if (views.includes(hash as View)) return hash as View
   // Preserve a separate administrative entry point as well as #/admin.
   if (/^\/admin\/?$/.test(location.pathname)) return 'admin'

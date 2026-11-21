@@ -34,5 +34,20 @@ services:
     volumes:
       - ./backend:/app
 
+  worker:
+    build: ./backend
+    command: python -m app.cli worker
+    env_file:
+      - ./backend/.env
+    environment:
+      # Внутри docker-сети Postgres доступен по имени сервиса; перекрывает
+      # DATABASE_URL из backend/.env, который нужен для запуска без Docker.
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/csu_schedule
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+
 volumes:
   postgres_data:

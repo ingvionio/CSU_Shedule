@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.me import current_student
@@ -15,6 +15,7 @@ from app.schemas.message import (
     InboxMessageOut,
     InboxOut,
     MessageIn,
+    PushStatsOut,
     RecipientStatusOut,
     RemindOut,
     StudentOut,
@@ -45,20 +46,24 @@ def _inbox_out(recipient: MessageRecipient) -> InboxMessageOut:
     )
 
 
-async def _admin_out(db: AsyncSession, message: Message, total: int, read: int, acknowledged: int) -> AdminMessageOut:
+async def _admin_out(
+    db: AsyncSession, message: Message, total: int, read: int, acknowledged: int, push: PushStatsOut | None = None,
+    target_title: str | None = None,
+) -> AdminMessageOut:
     return AdminMessageOut(
         id=message.id,
         title=message.title,
         body=message.body,
         importance=message.importance,
         target=message.target,
-        target_title=await messages_service.target_title(db, message.target),
+        target_title=target_title if target_title is not None else await messages_service.target_title(db, message.target),
         created_by=message.created_by,
         sent_at=message.sent_at,
         last_reminded_at=message.last_reminded_at,
         recipients_total=total,
         read_count=read,
         acknowledged_count=acknowledged,
+        push=push if push is not None else (await messages_service.push_stats(db, [message.id]))[message.id],
     )
 
 
@@ -66,7 +71,7 @@ async def _admin_out(db: AsyncSession, message: Message, total: int, read: int, 
 
 
 @router.get("", response_model=InboxOut, summary="Мои сообщения")
-async def my_messages(user: User = Depends(current_student), db: AsyncSession = Depends(get_db, scope="function")) -> InboxOut:
+async def my_messages(user: User = Depends(current_student), db: AsyncSession = Depends(get_db)) -> InboxOut:
     return InboxOut(
         unread_count=await messages_service.unread_count(db, user.id),
         messages=[_inbox_out(item) for item in await messages_service.inbox(db, user.id)],
@@ -74,7 +79,7 @@ async def my_messages(user: User = Depends(current_student), db: AsyncSession = 
 
 
 @router.get("/{message_id}", response_model=InboxMessageOut, summary="Открыть сообщение (отмечает прочитанным)")
-async def open_message(message_id: int, user: User = Depends(current_student), db: AsyncSession = Depends(get_db, scope="function")) -> InboxMessageOut:
+async def open_message(message_id: int, user: User = Depends(current_student), db: AsyncSession = Depends(get_db)) -> InboxMessageOut:
     try:
         return _inbox_out(await messages_service.open_message(db, user.id, message_id))
     except messages_service.MessageError as error:
@@ -82,7 +87,7 @@ async def open_message(message_id: int, user: User = Depends(current_student), d
 
 
 @router.post("/{message_id}/acknowledge", response_model=InboxMessageOut, summary="«Ознакомлен» для важного сообщения")
-async def acknowledge(message_id: int, user: User = Depends(current_student), db: AsyncSession = Depends(get_db, scope="function")) -> InboxMessageOut:
+async def acknowledge(message_id: int, user: User = Depends(current_student), db: AsyncSession = Depends(get_db)) -> InboxMessageOut:
     try:
         return _inbox_out(await messages_service.acknowledge(db, user.id, message_id))
     except messages_service.MessageError as error:
@@ -97,7 +102,7 @@ async def students(
     q: str | None = Query(default=None, max_length=100, description="Часть ФИО"),
     course: int | None = Query(default=None, ge=1, le=6),
     group_id: int | None = None,
-    db: AsyncSession = Depends(get_db, scope="function"),
+    db: AsyncSession = Depends(get_db),
 ) -> list[StudentOut]:
     return [
         StudentOut(
@@ -116,37 +121,34 @@ async def students(
 )
 async def create_message(
     data: MessageIn,
-    background: BackgroundTasks,
-    db: AsyncSession = Depends(get_db, scope="function"),
+    db: AsyncSession = Depends(get_db),
     admin: str = Depends(require_admin),
 ) -> AdminMessageOut:
     try:
-        message, push_to = await messages_service.create_message(db, data, admin)
+        message = await messages_service.create_message(db, data, admin)
     except messages_service.MessageError as error:
         raise _raise(error) from error
 
-    background.add_task(push_service.notify_message, message.id, push_to, reminder=False)
-    counts = await messages_service.counts(db, message.id)
-    return await _admin_out(db, message, *counts)
+    return await _admin_out(db, message, *(await messages_service.counts(db, message.id)))
 
 
 @admin_router.get("/messages", response_model=list[AdminMessageOut], summary="Сообщения и прогресс прочтения")
-async def admin_messages(db: AsyncSession = Depends(get_db, scope="function")) -> list[AdminMessageOut]:
-    rows = await messages_service.admin_list(db)
-    return [await _admin_out(db, *row) for row in rows]
+async def admin_messages(include_automatic: bool = False, db: AsyncSession = Depends(get_db)) -> list[AdminMessageOut]:
+    rows = await messages_service.admin_list(db, include_automatic)
+    stats = await messages_service.push_stats(db, [row[0].id for row in rows])
+    titles = await messages_service.target_titles(db, [row[0] for row in rows])
+    return [await _admin_out(db, *row, push=stats[row[0].id], target_title=titles[row[0].id]) for row in rows]
 
 
 @admin_router.get("/messages/{message_id}", response_model=AdminMessageDetailOut, summary="Получатели и их статусы")
-async def admin_message(message_id: int, db: AsyncSession = Depends(get_db, scope="function")) -> AdminMessageDetailOut:
+async def admin_message(message_id: int, db: AsyncSession = Depends(get_db)) -> AdminMessageDetailOut:
     try:
         message, recipients = await messages_service.admin_detail(db, message_id)
     except messages_service.MessageError as error:
         raise _raise(error) from error
 
-    counts = await messages_service.counts(db, message.id)
-    summary = await _admin_out(db, message, *counts)
     return AdminMessageDetailOut(
-        **summary.model_dump(),
+        **(await _admin_out(db, message, *(await messages_service.counts(db, message.id)))).model_dump(),
         recipients=[
             RecipientStatusOut(
                 user_id=recipient.user_id,
@@ -162,18 +164,17 @@ async def admin_message(message_id: int, db: AsyncSession = Depends(get_db, scop
 
 
 @admin_router.post("/messages/{message_id}/remind", response_model=RemindOut, summary="Напомнить непрочитавшим")
-async def remind(message_id: int, background: BackgroundTasks, db: AsyncSession = Depends(get_db, scope="function")) -> RemindOut:
+async def remind(message_id: int, db: AsyncSession = Depends(get_db)) -> RemindOut:
     try:
-        user_ids = await messages_service.remind(db, message_id)
+        reminded, devices = await messages_service.remind(db, message_id)
     except messages_service.MessageError as error:
         raise _raise(error) from error
 
-    background.add_task(push_service.notify_message, message_id, user_ids, reminder=True)
-    return RemindOut(reminded=len(user_ids))
+    return RemindOut(reminded=reminded, devices=devices, push_configured=push_service.is_configured())
 
 
 @admin_router.delete("/messages/{message_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Удалить сообщение")
-async def delete_message(message_id: int, db: AsyncSession = Depends(get_db, scope="function")) -> None:
+async def delete_message(message_id: int, db: AsyncSession = Depends(get_db)) -> None:
     try:
         await messages_service.delete_message(db, message_id)
     except messages_service.MessageError as error:

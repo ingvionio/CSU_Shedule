@@ -45,13 +45,16 @@ export type LessonChange = {
   moved_from: MovePoint | null
 }
 
+export type ScheduleEvent = { kind: ExamKind; note: string | null; groups: string[] }
+export type EventChange = { original: Partial<Record<ExamChangedField, string | null>> }
+
 export type Lesson = {
   id: string
   note_key?: string | null
   stream_diff?: string[] | null
-  /** HH:MM, заполнено всегда. */
-  start_time: string
-  end_time: string
+  /** HH:MM; null — время события не указано. */
+  start_time: string | null
+  end_time: string | null
   /** Номер пары в сетке звонков; null — пара вне сетки (например, в 19:00). */
   slot: number | null
   subject: string
@@ -62,13 +65,14 @@ export type Lesson = {
   /** Подгруппа из Excel; null — пара всей группы. */
   subgroup: number | null
   status: LessonStatus
-  change: LessonChange | null
+  change: LessonChange | EventChange | null
+  event: ScheduleEvent | null
 }
 
 export type Day = {
   /** YYYY-MM-DD */
   date: string
-  /** 1 = пн ... 6 = сб */
+  /** 1 = пн ... 7 = вс */
   weekday: number
   is_today: boolean
   /** Уже отсортированы по времени начала. */
@@ -76,6 +80,7 @@ export type Day = {
 }
 
 export type Week = {
+  schedule_pending: boolean
   number: number
   parity: WeekParity
   start_date: string
@@ -294,7 +299,10 @@ export type AdminMessage = {
   recipients_total: number
   read_count: number
   acknowledged_count: number
+  push: { configured: boolean; total: number; sent: number; pending: number; failed: number }
 }
+
+export type RemindOut = { reminded: number; devices: number; push_configured: boolean }
 
 export type RecipientStatus = {
   user_id: number
@@ -424,6 +432,35 @@ export type ImportHistory = {
   warnings_count: number
 }
 
+/* Сессия и пересдачи */
+export type ExamKind = 'session' | 'retake'
+export type ExamType = 'consultation' | 'exam' | 'credit' | 'graded_credit' | 'other'
+export type ExamChangedField = 'date' | 'start_time' | 'room'
+export type ExamGroup = { id: number; name: string; course: number }
+export type ExamValues = {
+  kind: ExamKind; date: string; start_time: string | null; subject: string
+  teacher: string | null; room: string | null; note: string | null
+  event_type: ExamType | null
+}
+export type ExamInput = ExamValues & { group_ids: number[] }
+export type ExamOriginal = Partial<Record<ExamChangedField, string | null>> | null
+export type ExamEvent = ExamValues & {
+  original: ExamOriginal
+  id: number; semester_id: number; groups: ExamGroup[]; cancelled: boolean
+  source: 'import' | 'manual'; import_id: number | null; created_at: string; updated_at: string
+}
+export type ExamWarning = { sheet: string; row: number; column: string; text: string; reason: string }
+export type ExamMapping = { short_name: string; group_id: number | null; group_name: string | null }
+export type ExamPreview = ExamValues & { sheet: string; row: number; groups: ExamGroup[]; original: ExamOriginal }
+export type ExamImportReport = {
+  events_count: number; warnings: ExamWarning[]; mappings: ExamMapping[]; rows: ExamPreview[]
+  sheets: { sheet: string; groups: string[]; academic_year: string | null; events_count: number }[]
+  applied: boolean; import_id: number | null
+}
+export type ExamImportHistory = {
+  id: number; semester_id: number; kind: ExamKind; file_name: string; events_count: number
+  warnings: ExamWarning[]; uploaded_by: string | null; uploaded_at: string
+}
 /* --- ЛК продукта (/statistic) --- */
 
 export type ProductSummary = {

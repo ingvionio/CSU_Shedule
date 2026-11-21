@@ -1,7 +1,7 @@
 import base64
 from functools import lru_cache
 
-from pydantic import SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL, make_url
 
@@ -55,6 +55,16 @@ class Settings(BaseSettings):
     vapid_private_key: str = ""
     # Контакт для push-сервисов: mailto:... или https://...
     vapid_subject: str = "mailto:admin@example.com"
+
+    # Путь к JSON сервисного аккаунта Firebase; пусто — FCM выключен.
+    fcm_credentials_file: str = ""
+
+    # Worker: опрос пустой очереди, размер пачки и параллельность push.
+    schedule_change_delay_seconds: int = Field(default=120, ge=0)
+    worker_poll_seconds: float = Field(default=2, gt=0)
+    push_batch_size: int = Field(default=100, gt=0)
+    push_concurrency: int = Field(default=8, gt=0)
+    push_max_attempts: int = Field(default=5, ge=1)
 
     # Интеграция с Moodle ИИТ ЧелГУ (eu.iit.csu.ru)
     moodle_base_url: str = "https://eu.iit.csu.ru"

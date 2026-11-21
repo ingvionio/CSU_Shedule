@@ -19,6 +19,7 @@ from app.schemas.imports import (
     ImportHistoryOut, ImportIssueOut, SemesterGroupOut, SemesterImportOut, WeeklyFileOut, WeeklyImportOut,
 )
 from app.services.excel_parser import parse_workbook
+from app.services.groups import existing_group_ids
 from app.services.importer import import_workbook
 from app.services.weeks import parity_of_week
 from app.services.schedule import ScheduleError, active_semester
@@ -131,8 +132,9 @@ async def upload_semester(db: AsyncSession, files: list[UploadFile], dry_run: bo
         lesson_counts = Counter(lesson.group_name for lesson in parsed.lessons)
         result.groups = [SemesterGroupOut(name=name, lessons_count=lesson_counts[name]) for name in group_names]
         result.warnings = [ImportIssueOut(**asdict(issue)) for issue in parsed.errors]
-        old_ids = select(Lesson.id).join(Group, Lesson.group_id == Group.id).where(
-            Lesson.semester_id == semester.id, Group.name.in_(group_names))
+        existing = await existing_group_ids(db, group_names)
+        old_ids = select(Lesson.id).where(
+            Lesson.semester_id == semester.id, Lesson.group_id.in_(list(existing.values())))
         result.lessons_replaced = await db.scalar(select(func.count()).select_from(old_ids.subquery()))
         result.overrides_deleted = await db.scalar(select(func.count()).select_from(LessonOverride).where(
             LessonOverride.lesson_id.in_(old_ids)))
@@ -140,8 +142,7 @@ async def upload_semester(db: AsyncSession, files: list[UploadFile], dry_run: bo
             result.homework_affected = await db.scalar(select(func.count()).select_from(GroupHomework).join(
                 Lesson, GroupHomework.lesson_id == Lesson.id,
             ).where(Lesson.id.in_(old_ids), GroupHomework.group_id == Lesson.group_id))
-        existing_groups = await db.scalar(select(func.count()).select_from(Group).where(Group.name.in_(group_names)))
-        result.groups_created = len(group_names) - existing_groups
+        result.groups_created = len(group_names) - len(existing)
         result.lessons_created = len(parsed.lessons)
         if not dry_run:
             report = await import_workbook(db, path, semester, file_name=name, uploaded_by=admin)

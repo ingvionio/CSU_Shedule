@@ -1,9 +1,11 @@
+from sqlalchemy.ext.asyncio import create_async_engine
 from datetime import date, time
 from zipfile import ZipFile, ZipInfo
 
 import pytest
+from tests import asgi_client
 from sqlalchemy import event, func, select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app import cli
 from app.core.db import get_db
@@ -12,14 +14,14 @@ from app.models import Base, Group, Lesson, LessonOverride, ScheduleImport, Seme
 from app.services.importer import ensure_reference_data, import_workbook
 from app.services.weekly_importer import import_weekly
 from app.services.weekly_parser import parse_weekly_workbook
-from tests import asgi_client
 
 from tests.weekly_books import DOT, ONLINE, URL, weekly_book  # noqa: F401
 
 
 @pytest.fixture
 async def weekly_db(tmp_path, monkeypatch):
-    engine = create_async_engine(f"sqlite+aiosqlite:///{(tmp_path / 'weekly.db').as_posix()}")
+    engine = create_async_engine(f"sqlite+aiosqlite:///{(tmp_path / 'weekly.db').as_posix()}",
+                           connect_args={"check_same_thread": False})
 
     @event.listens_for(engine.sync_engine, "connect")
     def foreign_keys(connection, _):
@@ -27,7 +29,7 @@ async def weekly_db(tmp_path, monkeypatch):
 
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
-    factory = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+    factory = async_sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
     async with factory() as db:
         db.add(Semester(title="Осень 2026", start_date=date(2026, 9, 1), end_date=date(2027, 1, 3),
                         total_weeks=18, first_week_parity="odd", is_active=True))
@@ -308,3 +310,55 @@ async def test_online_url_survives_overrides(weekly_db, weekly_book):
             await db.commit()
         assert (await lessons(8))[0]["online_url"] == URL
         assert [(item["status"], item["online_url"]) for item in await lessons(9)] == [("moved_in", URL), ("added", None)]
+
+
+@pytest.mark.parametrize("lines", [
+    # аудитория отдельной строкой
+    ["УПРАВЛЕНИЕ ЦИФРОВЫМ ПРОДУКТОМ*", "ВОРОБЬЕВ В.И., ГНЕДКОВА Я.Е.", "АУД. 132"],
+    # преподаватели и аудитория в одной строке
+    ["УПРАВЛЕНИЕ ЦИФРОВЫМ ПРОДУКТОМ*", "ВОРОБЬЕВ В.И., ГНЕДКОВА Я.Е. АУД. 132"],
+])
+def test_two_teachers_in_block(weekly_book, lines):
+    result = parse_weekly_workbook(weekly_book(group="МПИ 201", blocks=[("ПН", [(5, lines)])]))
+    assert not result.warnings and not result.errors
+    lesson = result.lessons[0]
+    assert (lesson.subject, lesson.teacher, lesson.room) == (
+        "УПРАВЛЕНИЕ ЦИФРОВЫМ ПРОДУКТОМ", "ВОРОБЬЕВ В.И., ГНЕДКОВА Я.Е.", "132")
+
+
+async def test_import_reuses_group_spelled_differently(weekly_db, weekly_book):
+    # Студент вошёл через Moodle раньше загрузки: группа создана как «МИТ-101».
+    async with weekly_db() as db:
+        early = Group(name="МИТ-101", course=1)
+        db.add(early)
+        await db.commit()
+        early_id = early.id
+    report = await load(weekly_db, [weekly_book(group="МИТ 101")])
+    assert report.groups_created == 0
+    async with weekly_db() as db:
+        groups = (await db.scalars(select(Group))).all()
+        assert [(item.id, item.name) for item in groups] == [(early_id, "МИТ 101")]
+        assert await db.scalar(select(func.count(Lesson.id)).where(Lesson.group_id == early_id)) > 0
+
+
+async def test_find_group_exact_then_normalized(weekly_db):
+    from app.services.groups import find_group
+
+    async with weekly_db() as db:
+        db.add_all([Group(name="ПрИ-402", course=4), Group(name="ПИ 301", course=3)])
+        await db.flush()
+        assert (await find_group(db, "ПИ 301")).name == "ПИ 301"
+        renamed = await find_group(db, "ПрИ 402")
+        assert renamed is not None and renamed.name == "ПрИ 402"
+        assert await find_group(db, "БИ 101") is None
+
+
+async def test_existing_group_ids_maps_spelling_without_renaming(weekly_db):
+    from app.services.groups import existing_group_ids
+
+    async with weekly_db() as db:
+        early = Group(name="ПрИ-402", course=4)
+        db.add(early)
+        await db.flush()
+        assert await existing_group_ids(db, ["ПрИ 402", "ПИ 101"]) == {"ПрИ 402": early.id}
+        assert early.name == "ПрИ-402"

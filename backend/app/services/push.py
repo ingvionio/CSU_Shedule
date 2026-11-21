@@ -1,42 +1,52 @@
-"""Web Push о сообщениях (VAPID, pywebpush).
-
-Инбокс — источник истины, push только сообщает о новом. Поэтому ошибки
-доставки не пробрасываются: подписки, которые push-сервис объявил
-недействительными (404/410), удаляются, остальные ошибки пишутся в лог.
-"""
+"""Подписки, запись push в очередь и отправка на одно устройство."""
 
 from __future__ import annotations
 
 import json
-import logging
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Literal
 
 from aiohttp import ClientError, ClientSession, DummyCookieJar
 from pywebpush import WebPushException, webpush_async
+
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.db import SessionLocal
-from app.models import Message, PushSubscription
-from app.services import product_events
-
-logger = logging.getLogger(__name__)
+from app.models import Message, PushDelivery, PushSubscription
 
 # Подписка больше не существует: браузер отписался или удалил данные сайта.
 GONE_STATUSES = {404, 410}
 
 
-def is_configured() -> bool:
+def web_configured() -> bool:
     settings = get_settings()
     return bool(settings.vapid_public_key and settings.vapid_private_key)
 
 
-async def subscribe(db: AsyncSession, user_id: int, endpoint: str, p256dh: str, auth: str, user_agent: str | None) -> PushSubscription:
-    """Сохраняет подписку. Тот же браузер под другим профилем — подписка переходит к нему."""
+def fcm_configured() -> bool:
+    return bool(get_settings().fcm_credentials_file)
+
+
+def is_configured() -> bool:
+    return web_configured() or fcm_configured()
+
+
+def configured_platforms() -> list[str]:
+    return (["web"] if web_configured() else []) + (["fcm"] if fcm_configured() else [])
+
+
+async def subscribe(
+    db: AsyncSession, user_id: int, endpoint: str, p256dh: str | None, auth: str | None,
+    user_agent: str | None, platform: str = "web",
+) -> PushSubscription:
+    """Сохраняет подписку. То же устройство под другим профилем — подписка переходит к нему."""
     subscription = await db.scalar(select(PushSubscription).where(PushSubscription.endpoint == endpoint))
     if subscription is None:
         subscription = PushSubscription(endpoint=endpoint)
         db.add(subscription)
+    subscription.platform = platform
     subscription.user_id = user_id
     subscription.p256dh = p256dh
     subscription.auth = auth
@@ -65,56 +75,63 @@ def payload(message: Message, reminder: bool) -> dict:
     }
 
 
-async def _send(client: ClientSession, subscription: PushSubscription, data: dict) -> None:
-    settings = get_settings()
-    await webpush_async(
-        subscription_info={"endpoint": subscription.endpoint, "keys": {"p256dh": subscription.p256dh, "auth": subscription.auth}},
-        data=json.dumps(data, ensure_ascii=False),
-        vapid_private_key=settings.vapid_private_key,
-        vapid_claims={"sub": settings.vapid_subject},
-        ttl=24 * 60 * 60,
-        timeout=10,
-        aiohttp_session=client,
+@dataclass(frozen=True)
+class SubscriptionData:
+    endpoint: str
+    p256dh: str | None
+    auth: str | None
+    platform: str = "web"
+
+
+@dataclass(frozen=True)
+class SendResult:
+    status: Literal["sent", "gone", "retry", "failed"]
+    error: str | None = None
+
+
+async def enqueue(db: AsyncSession, message_id: int, user_ids: list[int], kind: str, now: datetime) -> int:
+    """Записывает доставки без commit: их сохраняет транзакция сообщения."""
+    subscriptions = (await db.scalars(select(PushSubscription).where(
+        PushSubscription.user_id.in_(user_ids), PushSubscription.platform.in_(configured_platforms()),
+    ))).all()
+    db.add_all(
+        PushDelivery(
+            message_id=message_id, subscription_id=item.id, user_id=item.user_id,
+            kind=kind, status="pending", next_attempt_at=now, created_at=now,
+        )
+        for item in subscriptions
     )
+    return len(subscriptions)
 
 
-async def deliver(db: AsyncSession, message: Message, user_ids: list[int], reminder: bool) -> int:
-    """Отправляет push на все устройства студентов. Возвращает число доставленных."""
-    subscriptions = (await db.scalars(select(PushSubscription).where(PushSubscription.user_id.in_(user_ids)))).all()
-    data = payload(message, reminder)
-    # Соединение с БД понадобится снова только для записи результата.
-    await db.commit()
-    sent = 0
-    delivered_to: set[int] = set()
+async def _send(subscription: SubscriptionData, data: dict) -> None:
+    settings = get_settings()
     async with ClientSession(cookie_jar=DummyCookieJar(), trust_env=True) as client:
-        for subscription in subscriptions:
-            try:
-                await _send(client, subscription, data)
-                sent += 1
-                delivered_to.add(subscription.user_id)
-            except WebPushException as error:
-                status = error.response.status if error.response is not None else None
-                if status in GONE_STATUSES:
-                    await db.delete(subscription)
-                else:
-                    logger.warning("Push %s не доставлен (%s): %s", subscription.id, status, error)
-            except (ClientError, OSError) as error:
-                logger.warning("Push %s не доставлен: %s", subscription.id, error)
-    # Для статистики: одно событие на студента, сколько бы у него ни было устройств.
-    for user_id in delivered_to:
-        product_events.add_event(db, product_events.PUSH_SENT, user_id=user_id, message_id=message.id)
-    await db.commit()
-    return sent
+        await webpush_async(
+            subscription_info={"endpoint": subscription.endpoint, "keys": {"p256dh": subscription.p256dh, "auth": subscription.auth}},
+            data=json.dumps(data, ensure_ascii=False),
+            vapid_private_key=settings.vapid_private_key,
+            vapid_claims={"sub": settings.vapid_subject},
+            ttl=24 * 60 * 60,
+            timeout=10,
+            aiohttp_session=client,
+        )
 
 
-async def notify_message(message_id: int, user_ids: list[int], reminder: bool) -> None:
-    """Фоновая задача после ответа API: своя сессия, потому что запросная уже закрыта."""
-    if not user_ids:
-        return
-    if not is_configured():
-        logger.info("Push не настроен (VAPID_*): сообщение %s, получателей %s", message_id, len(user_ids))
-        return
-    async with SessionLocal() as db:
-        message = await db.get(Message, message_id)
-        if message is not None:
-            await deliver(db, message, user_ids, reminder)
+async def send_one(subscription: SubscriptionData, data: dict) -> SendResult:
+    """Возвращает исход отправки; работа с БД остаётся у worker'а."""
+    try:
+        await _send(subscription, data)
+    except WebPushException as error:
+        status = error.response.status if error.response is not None else None
+        text = str(error)[:500]
+        if status in GONE_STATUSES:
+            return SendResult("gone", text)
+        if status is None or status == 429 or status >= 500:
+            return SendResult("retry", text)
+        return SendResult("failed", text)
+    except (ClientError, OSError) as error:
+        return SendResult("retry", str(error)[:500])
+    except Exception as error:
+        return SendResult("failed", str(error)[:500])
+    return SendResult("sent")

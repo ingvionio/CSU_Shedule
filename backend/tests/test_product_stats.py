@@ -254,7 +254,7 @@ async def _send_message(client, headers, importance="high", title="Перено�
 def no_push(monkeypatch):
     from app.services import push as push_service
 
-    monkeypatch.setattr(push_service, "notify_message", AsyncMock())
+    monkeypatch.setattr(push_service, "send_one", AsyncMock())
 
 
 async def test_client_screen_events_accepted(product):
@@ -294,6 +294,9 @@ async def test_push_events(product, bare_admin_headers, test_groups, monkeypatch
         assert (await product.post("/api/v1/me/push-subscriptions", json=body, headers=headers)).status_code == 201
     await _send_message(product, bare_admin_headers, importance="normal")
     # Два устройства — одно событие доставки на студента.
+    from app.services.worker import process_push
+    async with SessionLocal() as session:
+        await process_push(session, datetime.now(timezone.utc))
     assert await _named(anya) == ["login_success", "push_subscribed", "push_subscribed", "message_received", "push_sent"]
 
 
@@ -330,7 +333,7 @@ TODAY = date(2026, 11, 19)
 
 async def _summary(days: int = 30, end: date = TODAY, now: datetime = NOW) -> dict:
     async with SessionLocal() as session:
-        return await session.run_sync(product_stats.summary, end - timedelta(days=days - 1), end, now=now)
+        return await product_stats.summary(session, end - timedelta(days=days - 1), end, now=now)
 
 
 OLD = NOW - timedelta(days=200)  # профиль создан давно — его дата не попадает в периоды теста
@@ -360,7 +363,7 @@ async def test_custom_period_in_the_past(product):
     user = await _student("Прошлый", created_at=OLD)
     await _events(("app_open", datetime(2026, 9, 10, 6, tzinfo=timezone.utc), user, "d1", "web"))
     async with SessionLocal() as session:
-        data = await session.run_sync(product_stats.summary, date(2026, 9, 1), date(2026, 9, 30), now=NOW)
+        data = await product_stats.summary(session, date(2026, 9, 1), date(2026, 9, 30), now=NOW)
     assert (data["days"], data["active_users"], data["dau"]) == (30, 1, 0)
     assert (await _summary(30))["active_users"] == 0
 
@@ -495,7 +498,7 @@ async def test_retention(product):
         ("login_success", datetime(2026, 11, 15, 5, tzinfo=timezone.utc), fresh, "d3", "web"),
     )
     async with SessionLocal() as session:
-        data = await session.run_sync(product_stats.summary, date(2026, 9, 21), TODAY, now=NOW)
+        data = await product_stats.summary(session, date(2026, 9, 21), TODAY, now=NOW)
     week = {r["week"]: (r["eligible"], r["returned"]) for r in data["retention"]}
     assert week == {1: (2, 1), 2: (2, 0), 4: (2, 0)}
 

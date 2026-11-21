@@ -1,9 +1,4 @@
-"""Рассылка сообщений студентам: адресация, прочтение, «Ознакомлен», напоминания.
-
-Инбокс — источник истины: push только сообщает о новом. Поэтому функции
-здесь возвращают id студентов, которым стоит отправить push, а саму
-отправку API ставит фоновой задачей.
-"""
+"""Рассылка сообщений студентам: адресация, прочтение, очередь уведомлений."""
 
 from __future__ import annotations
 
@@ -13,9 +8,9 @@ from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.models import Group, Message, MessageRecipient, User
-from app.schemas.message import MessageIn
-from app.services import product_events
+from app.models import Group, Message, MessageRecipient, PushDelivery, User
+from app.schemas.message import MessageIn, PushStatsOut
+from app.services import push, product_events
 
 IMPORTANCE_HIGH = "high"
 IMPORTANCE_LOW = "low"
@@ -53,7 +48,7 @@ def _pending_condition():
     )
 
 
-async def target_title(db: AsyncSession, target: dict) -> str:
+async def target_title(db: AsyncSession, target: dict, group_names: dict[int, str] | None = None) -> str:
     """Адресация человеческими словами — для списка в админке."""
     kind = target["type"]
     if kind == "all":
@@ -65,9 +60,19 @@ async def target_title(db: AsyncSession, target: dict) -> str:
         courses = target.get("courses") or []
         return title + (f" ({', '.join(str(item) for item in sorted(courses))} курс)" if courses else "")
     if kind == "group":
-        names = (await db.scalars(select(Group.name).where(Group.id.in_(target["group_ids"])).order_by(Group.name))).all()
+        if group_names is None:
+            names = (await db.scalars(select(Group.name).where(Group.id.in_(target["group_ids"])).order_by(Group.name))).all()
+        else:
+            names = sorted(group_names[group_id] for group_id in set(target["group_ids"]) if group_id in group_names)
         return ("Группы " if len(names) > 1 else "Группа ") + ", ".join(names)
     return f"Студенты ({len(target['user_ids'])})"
+
+
+async def target_titles(db: AsyncSession, messages: list[Message]) -> dict[int, str]:
+    group_ids = {group_id for message in messages if message.target["type"] == "group"
+                 for group_id in message.target["group_ids"]}
+    names = dict((await db.execute(select(Group.id, Group.name).where(Group.id.in_(group_ids)))).all()) if group_ids else {}
+    return {message.id: await target_title(db, message.target, names) for message in messages}
 
 
 def _target_condition(target: dict):
@@ -91,11 +96,8 @@ async def _matching_users(db: AsyncSession, target: dict) -> list[User]:
     return list((await db.scalars(query)).unique().all())
 
 
-async def create_message(db: AsyncSession, data: MessageIn, admin: str, now: datetime | None = None) -> tuple[Message, list[int]]:
-    """Сохраняет сообщение и материализует получателей одной транзакцией.
-
-    Возвращает сообщение и id студентов для push (у неважных push нет).
-    """
+async def create_message(db: AsyncSession, data: MessageIn, admin: str, now: datetime | None = None, *, commit: bool = True) -> Message:
+    """Сохраняет сообщение, получателей и очередь push одной транзакцией."""
     now = now or datetime.now(timezone.utc)
     target = data.target.model_dump(exclude_defaults=True)
     if target["type"] == "group" and await db.scalar(
@@ -121,9 +123,13 @@ async def create_message(db: AsyncSession, data: MessageIn, admin: str, now: dat
     )
     for user in users:
         product_events.add_event(db, product_events.MESSAGE_RECEIVED, user_id=user.id, now=now, message_id=message.id)
-    await db.commit()
-    push_to = [] if message.importance == IMPORTANCE_LOW else [user.id for user in users]
-    return message, push_to
+    if message.importance != IMPORTANCE_LOW and push.is_configured():
+        await push.enqueue(db, message.id, [user.id for user in users], "message", now)
+    if commit:
+        await db.commit()
+    else:
+        await db.flush()
+    return message
 
 
 async def attach_recent_messages(db: AsyncSession, user: User, now: datetime) -> list[int]:
@@ -224,7 +230,7 @@ async def _get(db: AsyncSession, message_id: int) -> Message:
     return message
 
 
-async def admin_list(db: AsyncSession) -> list[tuple[Message, int, int, int]]:
+async def admin_list(db: AsyncSession, include_automatic: bool = False) -> list[tuple[Message, int, int, int]]:
     """Сообщения с прогрессом: всего получателей, прочитали, подтвердили."""
     rows = (await db.execute(
         select(
@@ -235,6 +241,7 @@ async def admin_list(db: AsyncSession) -> list[tuple[Message, int, int, int]]:
         )
         .outerjoin(MessageRecipient, MessageRecipient.message_id == Message.id)
         .where(Message.deleted_at.is_(None))
+        .where(True if include_automatic else (Message.created_by.is_(None) | (Message.created_by != "system")))
         .group_by(Message.id)
         .order_by(Message.sent_at.desc(), Message.id.desc())
     )).all()
@@ -252,6 +259,26 @@ async def counts(db: AsyncSession, message_id: int) -> tuple[int, int, int]:
     return tuple(row)
 
 
+async def push_stats(db: AsyncSession, message_ids: list[int]) -> dict[int, PushStatsOut]:
+    """Одна агрегирующая выборка на список сообщений, оба вида доставок."""
+    configured = push.is_configured()
+    stats = {message_id: PushStatsOut(configured=configured) for message_id in message_ids}
+    if not message_ids:
+        return stats
+    rows = (await db.execute(
+        select(
+            PushDelivery.message_id,
+            func.count(PushDelivery.id),
+            func.sum(case((PushDelivery.status == "sent", 1), else_=0)),
+            func.sum(case((PushDelivery.status == "pending", 1), else_=0)),
+            func.sum(case((PushDelivery.status.in_(["failed", "gone", "skipped"]), 1), else_=0)),
+        ).where(PushDelivery.message_id.in_(message_ids)).group_by(PushDelivery.message_id)
+    )).all()
+    for message_id, total, sent, pending, failed in rows:
+        stats[message_id] = PushStatsOut(configured=configured, total=total, sent=sent, pending=pending, failed=failed)
+    return stats
+
+
 async def admin_detail(db: AsyncSession, message_id: int) -> tuple[Message, list[tuple[MessageRecipient, str | None]]]:
     message = await _get(db, message_id)
     rows = (await db.execute(
@@ -264,8 +291,8 @@ async def admin_detail(db: AsyncSession, message_id: int) -> tuple[Message, list
     return message, [(recipient, group_name) for recipient, group_name in rows]
 
 
-async def remind(db: AsyncSession, message_id: int, now: datetime | None = None) -> list[int]:
-    """Напоминание тем, кто не прочитал (у важных — не подтвердил). Возвращает id студентов."""
+async def remind(db: AsyncSession, message_id: int, now: datetime | None = None) -> tuple[int, int]:
+    """Записывает напоминание непрочитавшим и возвращает число студентов и устройств."""
     now = now or datetime.now(timezone.utc)
     message = await _get(db, message_id)
     if message.importance == IMPORTANCE_LOW:
@@ -285,13 +312,15 @@ async def remind(db: AsyncSession, message_id: int, now: datetime | None = None)
         )).unique().all()
     )
     if not pending:
-        return []
+        return 0, 0
 
     for recipient in pending:
         recipient.reminded_at = now
     message.last_reminded_at = now
+    user_ids = [recipient.user_id for recipient in pending]
+    devices = await push.enqueue(db, message.id, user_ids, "reminder", now) if push.is_configured() else 0
     await db.commit()
-    return [recipient.user_id for recipient in pending]
+    return len(user_ids), devices
 
 
 async def delete_message(db: AsyncSession, message_id: int, now: datetime | None = None) -> None:

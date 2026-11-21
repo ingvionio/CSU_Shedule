@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Цвет значка уведомления: синий с логотипа ИИТ. -->
+    <color name="notification_accent">#1E74BB</color>
+</resources>

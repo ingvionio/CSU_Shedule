@@ -2,10 +2,12 @@ import os
 import unicodedata
 from collections.abc import AsyncIterator
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import AsyncMock
 
 # База для тестов — отдельный SQLite-файл, настройки читаются при импорте app.core.db.
-TEST_DB = Path(__file__).parent / "test_api.db"
+TEST_DB_DIR = TemporaryDirectory(prefix="csu-api-tests-")
+TEST_DB = Path(TEST_DB_DIR.name) / "test_api.db"
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{TEST_DB.as_posix()}"
 os.environ["ADMIN_LOGIN"] = "admin"
 os.environ["ADMIN_PASSWORD"] = "secret"

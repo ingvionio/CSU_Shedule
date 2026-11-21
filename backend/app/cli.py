@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import sys
 from datetime import date, timedelta
 
@@ -221,6 +222,7 @@ def parse_args() -> argparse.Namespace:
     authors = sub.add_parser("feedback-authors", help="подписать старые обращения ФИО по устройству студента")
     authors.add_argument("--apply", action="store_true", help="записать; без флага — только показать")
 
+    sub.add_parser("worker", help="отправлять push и письма из очереди")
     return parser.parse_args()
 
 
@@ -244,6 +246,11 @@ async def run_command(args: argparse.Namespace) -> None:
             await send_emails(args.test)
         elif args.command == "generate-vapid":
             generate_vapid()
+        elif args.command == "worker":
+            from app.services.worker import run
+
+            logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+            await run()
         elif args.command == "feedback-authors":
             await feedback_authors(args.apply)
     finally:

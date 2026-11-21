@@ -9,9 +9,10 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, time, timedelta
 
+from starlette.concurrency import run_in_threadpool
+
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.concurrency import run_in_threadpool
 
 from app.models import (
     Group,
@@ -26,9 +27,9 @@ from app.models import (
     Teacher,
     TimeSlot,
 )
-from app.services import weeks
+from app.services import weeks, schedule_changes
 from app.services.excel_parser import ParsedLesson, ParseResult, parse_workbook
-from app.services.groups import direction_of
+from app.services.groups import direction_of, find_group
 from app.services.homework_rebind import HomeworkBinding, collect_homework, rebind_homework
 
 # Форматы пар. Таблица, а не enum — список расширяется без миграции.
@@ -155,7 +156,7 @@ async def import_workbook(
     groups_created = 0
     group_ids: dict[str, int] = {}
     for parsed_group in result.groups:
-        group = await session.scalar(select(Group).where(Group.name == parsed_group.name))
+        group = await find_group(session, parsed_group.name)
         if group is None:
             group = Group(name=parsed_group.name, course=parsed_group.course)
             session.add(group)
@@ -220,6 +221,8 @@ async def import_workbook(
     record.status = ImportStatus.PUBLISHED.value
     await session.flush()
     homework_rebound, homework_unbound = await rebind_homework(session, semester, homework, new_lessons)
+    for group_id in sorted(set(group_ids.values())):
+        await schedule_changes.record(session, group_id=group_id, source="import", action="uploaded", text="Расписание обновлено")
     await session.commit()
 
     return ImportReport(

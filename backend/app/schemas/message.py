@@ -53,6 +53,14 @@ class InboxOut(BaseModel):
     messages: list[InboxMessageOut]
 
 
+class PushStatsOut(BaseModel):
+    configured: bool
+    total: int = 0
+    sent: int = 0
+    pending: int = 0
+    failed: int = 0
+
+
 class AdminMessageOut(BaseModel):
     id: int
     title: str
@@ -66,6 +74,7 @@ class AdminMessageOut(BaseModel):
     recipients_total: int
     read_count: int
     acknowledged_count: int
+    push: PushStatsOut
 
 
 class RecipientStatusOut(BaseModel):
@@ -83,6 +92,8 @@ class AdminMessageDetailOut(AdminMessageOut):
 
 class RemindOut(BaseModel):
     reminded: int
+    devices: int
+    push_configured: bool
 
 
 class StudentOut(BaseModel):
