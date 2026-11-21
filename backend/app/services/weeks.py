@@ -21,6 +21,7 @@ class WeekInfo:
     is_current: bool
     prev: int | None
     next: int | None
+    schedule_pending: bool = False
 
 
 def first_monday(semester: Semester) -> date:

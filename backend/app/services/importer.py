@@ -25,7 +25,7 @@ from app.models import (
     Teacher,
     TimeSlot,
 )
-from app.services import weeks
+from app.services import weeks, schedule_changes
 from app.services.excel_parser import ParsedLesson, ParseResult, parse_workbook
 from app.services.groups import direction_of
 from app.services.homework_rebind import HomeworkBinding, collect_homework, rebind_homework
@@ -219,6 +219,8 @@ def import_workbook(
     record.status = ImportStatus.PUBLISHED.value
     session.flush()
     homework_rebound, homework_unbound = rebind_homework(session, semester, homework, new_lessons)
+    for group_id in sorted(set(group_ids.values())):
+        schedule_changes.record(session, group_id=group_id, source="import", action="uploaded", text="Расписание обновлено")
     session.commit()
 
     return ImportReport(

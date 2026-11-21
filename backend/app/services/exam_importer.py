@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.models import Group, Semester
 from app.models.exam import ExamEvent, ExamImport, exam_event_groups
 from app.schemas.exam import ExamImportOut, ExamKind, ExamMappingOut, ExamPreviewRow
+from app.services import schedule_changes
 from app.services.exam_parser import ExamRow, ExamWarning, parse_workbook
 from app.services.session_grid_parser import parse_workbook as parse_session_grid
 
@@ -72,6 +73,8 @@ def import_workbook(db: Session, payload: bytes, semester: Semester, kind: ExamK
     try:
         old_ids = select(ExamEvent.id).where(ExamEvent.semester_id == semester.id, ExamEvent.kind == kind,
                                            ExamEvent.source == "import")
+        affected = set(db.scalars(select(exam_event_groups.c.group_id).where(exam_event_groups.c.event_id.in_(old_ids))))
+        affected.update(group.id for _, groups in records for group in groups)
         db.execute(delete(exam_event_groups).where(exam_event_groups.c.event_id.in_(old_ids)))
         db.execute(delete(ExamEvent).where(ExamEvent.id.in_(old_ids)), execution_options={"synchronize_session": "fetch"})
         record = ExamImport(semester_id=semester.id, kind=kind, file_name=file_name, events_count=len(records),
@@ -79,6 +82,9 @@ def import_workbook(db: Session, payload: bytes, semester: Semester, kind: ExamK
         db.add(record)
         db.flush()
         _insert_events(db, records, semester.id, kind, record.id)
+        for group_id in sorted(affected):
+            schedule_changes.record(db, group_id=group_id, source="import", action="uploaded",
+                                    text="Опубликовано расписание сессии" if kind == "session" else "Опубликовано расписание пересдач")
         report.import_id = record.id
         db.commit()
         report.applied = True

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.models import Group, Semester
 from app.models.exam import ExamEvent, ExamImport
 from app.schemas.exam import ExamCreate, ExamPatch, GroupExamsOut
+from app.services import schedule_changes
 from app.services.schedule import ScheduleError, active_semester
 
 KIND_NAMES = {"session": "Сессия", "retake": "Пересдача"}
@@ -70,6 +71,8 @@ def create_event(db: Session, data: ExamCreate) -> ExamEvent:
     event = ExamEvent(semester_id=semester(db).id, source="manual", groups=_groups(db, data.group_ids),
                       **data.model_dump(exclude={"group_ids"}))
     db.add(event)
+    db.flush()
+    schedule_changes.record_exam(db, event, "created")
     db.commit()
     db.refresh(event)
     return event
@@ -77,6 +80,8 @@ def create_event(db: Session, data: ExamCreate) -> ExamEvent:
 
 def patch_event(db: Session, event_id: int, data: ExamPatch) -> ExamEvent:
     event = _event(db, event_id)
+    before = schedule_changes.exam_snapshot(event)
+    previous_groups = {group.id for group in event.groups}
     values = data.model_dump(exclude_unset=True)
     if "group_ids" in values:
         event.groups = _groups(db, values.pop("group_ids"))
@@ -89,6 +94,8 @@ def patch_event(db: Session, event_id: int, data: ExamPatch) -> ExamEvent:
                 del original[field]
             event.original = original or None
         setattr(event, field, value)
+    if before != schedule_changes.exam_snapshot(event):
+        schedule_changes.record_exam(db, event, "changed", before, previous_groups | {group.id for group in event.groups})
     db.commit()
     db.refresh(event)
     return event
@@ -96,14 +103,19 @@ def patch_event(db: Session, event_id: int, data: ExamPatch) -> ExamEvent:
 
 def cancel_event(db: Session, event_id: int, cancelled: bool) -> ExamEvent:
     event = _event(db, event_id)
-    event.cancelled = cancelled
+    before = schedule_changes.exam_snapshot(event)
+    if event.cancelled != cancelled:
+        event.cancelled = cancelled
+        schedule_changes.record_exam(db, event, "changed", before)
     db.commit()
     db.refresh(event)
     return event
 
 
 def delete_event(db: Session, event_id: int) -> None:
-    db.delete(_event(db, event_id))
+    event = _event(db, event_id)
+    schedule_changes.record_exam(db, event, "removed")
+    db.delete(event)
     db.commit()
 
 

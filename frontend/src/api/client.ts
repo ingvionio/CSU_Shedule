@@ -181,7 +181,9 @@ export const api = {
     )
     return request<Student[]>(`/admin/users?${query}`, { token })
   },
-  adminMessages: (token: string) => request<AdminMessage[]>('/admin/messages', { token }),
+  adminMessages: (token: string, includeAutomatic = false) => request<AdminMessage[]>(
+    '/admin/messages?include_automatic=' + includeAutomatic, { token },
+  ),
   adminMessage: (token: string, id: number) => request<AdminMessageDetail>(`/admin/messages/${id}`, { token }),
   sendMessage: (token: string, body: MessageInput) =>
     request<AdminMessage>('/admin/messages', { method: 'POST', body, token }),

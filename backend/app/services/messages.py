@@ -96,7 +96,7 @@ def _matching_users(db: Session, target: dict) -> list[User]:
     return list(db.scalars(query).unique().all())
 
 
-def create_message(db: Session, data: MessageIn, admin: str, now: datetime | None = None) -> Message:
+def create_message(db: Session, data: MessageIn, admin: str, now: datetime | None = None, *, commit: bool = True) -> Message:
     """Сохраняет сообщение, получателей и очередь push одной транзакцией."""
     now = now or datetime.now(timezone.utc)
     target = data.target.model_dump(exclude_defaults=True)
@@ -123,7 +123,10 @@ def create_message(db: Session, data: MessageIn, admin: str, now: datetime | Non
     )
     if message.importance != IMPORTANCE_LOW and push.is_configured():
         push.enqueue(db, message.id, [user.id for user in users], "message", now)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return message
 
 
@@ -219,7 +222,7 @@ def _get(db: Session, message_id: int) -> Message:
     return message
 
 
-def admin_list(db: Session) -> list[tuple[Message, int, int, int]]:
+def admin_list(db: Session, include_automatic: bool = False) -> list[tuple[Message, int, int, int]]:
     """Сообщения с прогрессом: всего получателей, прочитали, подтвердили."""
     rows = db.execute(
         select(
@@ -230,6 +233,7 @@ def admin_list(db: Session) -> list[tuple[Message, int, int, int]]:
         )
         .outerjoin(MessageRecipient, MessageRecipient.message_id == Message.id)
         .where(Message.deleted_at.is_(None))
+        .where(True if include_automatic else (Message.created_by.is_(None) | (Message.created_by != "system")))
         .group_by(Message.id)
         .order_by(Message.sent_at.desc(), Message.id.desc())
     ).all()

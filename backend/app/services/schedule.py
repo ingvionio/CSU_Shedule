@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, time, timedelta
 import hashlib
 import json
@@ -26,6 +27,7 @@ from app.models import (
 )
 from app.services import weeks
 from app.services.weeks import WeekInfo
+from app.services.groups import level_of
 
 # Поля пары, которые может поменять `replace`; их прежние значения уходят в change.original.
 CHANGEABLE_FIELDS = ("start_time", "end_time", "slot", "subject", "type", "room", "teacher")
@@ -66,7 +68,11 @@ def build_week_schedule(
         )
 
     week = weeks.build_week_info(semester, week_number, today)
-    return week, _assemble_days(session, group, semester, week, today)
+    days = _assemble_days(session, group, semester, week, today)
+    pending = (level_of(group.direction) == "master"
+               and week_number >= weeks.current_week_number(semester, today)
+               and not any(day["lessons"] for day in days))
+    return replace(week, schedule_pending=pending), days
 
 
 def build_day(session: Session, group: Group, semester: Semester, day: date, today: date) -> dict:

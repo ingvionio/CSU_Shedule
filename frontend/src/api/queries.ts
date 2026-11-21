@@ -323,10 +323,10 @@ export function usePersonalNoteMutations() {
 
 /* --- Рассылка: методист --- */
 
-export function useAdminMessages(token: string) {
+export function useAdminMessages(token: string, includeAutomatic = false) {
   return useQuery({
-    queryKey: ['admin-messages'],
-    queryFn: () => api.adminMessages(token),
+    queryKey: ['admin-messages', { includeAutomatic }],
+    queryFn: () => api.adminMessages(token, includeAutomatic),
     refetchInterval: 60 * 1000,
   })
 }

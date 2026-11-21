@@ -76,6 +76,7 @@ export type Day = {
 }
 
 export type Week = {
+  schedule_pending: boolean
   number: number
   parity: WeekParity
   start_date: string

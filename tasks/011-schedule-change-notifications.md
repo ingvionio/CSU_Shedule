@@ -123,4 +123,27 @@
 
 ## Отчёт
 
-(заполняет исполнитель)
+Выполнены части А и Б.
+
+- Добавлена модель `ScheduleChange` и миграция `f6e8a0b2c357_schedule_changes.py`: таблица, CHECK, внешние ключи CASCADE / SET NULL, индексы. Перед началом `alembic heads` показал `f5d7e9a1b246`; новая миграция ссылается на него, после добавления единственная голова — `f6e8a0b2c357`.
+- `app/services/schedule_changes.py`: `record` без commit, фильтр прошлых дат, русские даты и тексты всех видов изменений. Запись подключена к созданию/откату изменений пар (включая неявное удаление прежней правки при замене), CRUD событий сессии и всем трём импортёрам. При смене групп события уведомляются прежние и новые группы. На группу — одна строка загрузки; если пакет понедельных книг содержит несколько недель одной группы, их подписи соединяются в этой строке.
+- Worker собирает группу после `SCHEDULE_CHANGE_DELAY_SECONDS` тишины (120 по умолчанию), гасит создание/удаление, сортирует строки по дате, ограничивает текст десятью строками и «и ещё N». Повторное использование id после удаления в SQLite не гасит последующее создание. Группа и строки захватываются с `FOR UPDATE SKIP LOCKED`; писатель берёт совместимую с FK блокировку группы. Сообщение, получатели, push outbox и отметки обработки фиксируются одной транзакцией через `messages.create_message(..., commit=False)`.
+- В API списка рассылок добавлен `include_automatic` (по умолчанию false). В админке — переключатель «Показать автоматические», пометка «автоматически» в списке и деталях; статистика и обычный путь прочтения сохранены.
+- Бэкенд вычисляет `week.schedule_pending` для текущих/будущих пустых недель магистратуры. Уровень определяется существующей `level_of(direction)`, как и `groups.level` в API. Плашка показана в режимах дня и недели. Отдельного публичного GET дня в проекте нет.
+
+Файлы:
+
+- Новые: `backend/app/models/schedule_change.py`, `backend/app/services/schedule_changes.py`, `backend/migrations/versions/f6e8a0b2c357_schedule_changes.py`.
+- Бэкенд: `app/models/__init__.py`, `app/core/config.py`, `app/schemas/schedule.py`, `app/api/v1/messages.py`, сервисы `messages.py`, `worker.py`, `overrides.py`, `exams.py`, `importer.py`, `weekly_importer.py`, `exam_importer.py`, `schedule.py`, `weeks.py`.
+- Фронтенд: `src/App.tsx`, `src/ScheduleComponents.tsx`, `src/api/{client,queries,types}.ts`, `src/pages/admin/AdminMessages.tsx`, `src/styles.css`.
+- Тесты: новые `backend/tests/test_schedule_changes.py`, `test_schedule_change_api.py`, `test_schedule_change_imports.py`, `test_schedule_change_migration.py`, `frontend/tests/schedule-changes.test.mjs`; обновлён тест порядка шагов worker в `test_notification_worker.py`.
+
+Проверка:
+
+- Из `backend/`: `.venv\Scripts\python -m pytest -q` — 373 passed, 35 skipped (нет рабочего Excel), 5 warnings; ошибок нет. Предупреждения: устаревающие API сторонних пакетов и запрет записи pytest cache в этой среде.
+- Из `frontend/`: `npm test` — 31 passed.
+- `npm run build`: обе проверки TypeScript прошли, штатная загрузка Vite-конфига остановилась на ограничении среды: esbuild не может читать родительский каталог (`Access is denied`). Выполнена production-сборка через программный `vite.build` с тем же исходным конфигом и плагинами; обойдён только загрузчик конфига (`configFile: false`), сборка приложения и service worker успешна. Вспомогательный скрипт находится в системной временной папке, конфиг и зависимости проекта не изменены ради обхода.
+- Новые тесты проверяют транзакции и откаты, прошлые даты, поток, тексты, задержку после последнего изменения, гашение/замену, повторную обработку, outbox, проверку/применение всех импортов, флаг недели в сервисе и API, фильтр/права рассылки, оба вида интерфейса и миграцию SQLite / SQL PostgreSQL.
+- Реальные параллельные worker'ы на PostgreSQL и миграция рабочей базы не запускались: база не используется. Проверены SQL блокировок PostgreSQL, повторные вызовы и атомарность на SQLite. Рабочего Excel в репозитории нет, соответствующие прежние тесты пропускаются.
+
+Новых зависимостей и CLI-команд нет. Перед запуском обновлённого API/worker применить `python -m alembic upgrade head`; при необходимости задержка задаётся переменной окружения `SCHEDULE_CHANGE_DELAY_SECONDS`. `.env`, `backend/secrets`, ключи и посторонние файлы не менялись. Корневые документы и README не редактировались; изменение JSON-контракта остаётся архитектору. Коммита нет.

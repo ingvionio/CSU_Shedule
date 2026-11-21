@@ -310,8 +310,9 @@ def test_shutdown_finishes_current_pass(monkeypatch):
 
     monkeypatch.setattr(worker.signal, "signal", register)
     monkeypatch.setattr(worker, "SessionLocal", Database)
+    monkeypatch.setattr(worker, "process_schedule_changes", lambda *_: calls.append("schedule") or 0)
     monkeypatch.setattr(worker, "process_push", push_batch)
     monkeypatch.setattr(worker, "process_email", email_batch)
     worker.run()
-    assert calls == ["push", "email"]
+    assert calls == ["schedule", "push", "email"]
     assert all(handler is None for handler in handlers.values())

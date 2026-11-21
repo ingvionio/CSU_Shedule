@@ -1,3 +1,4 @@
+from app.models.schedule_change import ScheduleChange
 from app.models.base import Base
 from app.models.catalog import Group, LessonType, Room, Semester, Subject, Teacher, TimeSlot
 from app.models.enums import (
@@ -21,6 +22,7 @@ from app.models.note import PersonalNote
 
 __all__ = [
     "Base",
+    "ScheduleChange",
     "ExamEvent",
     "ExamImport",
     "exam_event_groups",

@@ -212,11 +212,17 @@ function lessonsCount(count: number): string {
   return `${count} пар`
 }
 
-export function DaySchedule({ day, renderLessonExtras, onLessonClick }: {
+function SchedulePending() {
+  return <div className="state-note schedule-pending" role="status">Методист ещё не загрузил расписание, оно появится позже</div>
+}
+
+export function DaySchedule({ day, renderLessonExtras, onLessonClick, schedulePending = false }: {
+  schedulePending?: boolean
   day: Day
   renderLessonExtras?: (lesson: Lesson, day: Day) => ReactNode
   onLessonClick?: (lesson: Lesson, day: Day) => void
 }) {
+  if (schedulePending) return <SchedulePending />
   return (
     <section className="day-section">
       <div className="day-heading">
@@ -245,7 +251,9 @@ export function WeekGrid({
   onEmptySlotClick,
   notedKeys,
   homeworkCounts,
+  schedulePending = false,
 }: {
+  schedulePending?: boolean
   days: Day[]
   slots: TimeSlot[]
   currentMinutes: number
@@ -254,6 +262,7 @@ export function WeekGrid({
   notedKeys?: Set<string>
   homeworkCounts?: Map<string, number>
 }) {
+  if (schedulePending) return <SchedulePending />
   const todayIndex = days.findIndex((day) => day.is_today)
   const gridStart = slots.length ? minutesOf(slots[0].start_time) : 0
   const gridEnd = slots.length ? minutesOf(slots[slots.length - 1].end_time) : 0

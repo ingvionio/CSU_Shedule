@@ -81,6 +81,7 @@ class DayOut(BaseModel):
 
 
 class WeekOut(BaseModel):
+    schedule_pending: bool = False
     number: int
     parity: ParityLiteral
     start_date: date

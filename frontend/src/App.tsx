@@ -588,7 +588,7 @@ export function App() {
 
                   {schedule.data &&
                     (view === 'week' ? (
-                      <WeekGrid days={days} slots={timeSlots.data ?? []} currentMinutes={currentMinutes} />
+                      <WeekGrid days={days} slots={timeSlots.data ?? []} currentMinutes={currentMinutes} schedulePending={week?.schedule_pending} />
                     ) : (
                       <>
                         <div className="week-picker-clip">
@@ -619,6 +619,7 @@ export function App() {
                         </div>
                         {days[selectedDay] && (
                           <DaySchedule
+                            schedulePending={week?.schedule_pending}
                             day={days[selectedDay]}
                             onLessonClick={mobileCards && studentSession && personalNotes.isSuccess ? openNote : undefined}
                             renderLessonExtras={

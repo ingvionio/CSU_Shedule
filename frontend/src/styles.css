@@ -454,6 +454,13 @@ h1 { margin-top: 7px; font-size: 24px; line-height: 1.16; letter-spacing: -.045e
 .choice-row.five .choice { padding: 0 4px; }
 .stream-groups.single { grid-template-columns: 1fr; max-height: 220px; }
 .feedback-filters .choice { display: inline-flex; align-items: center; gap: 4px; }
+.automatic-message-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 16px 0;
+}
+
 .read-progress { display: flex; flex-direction: column; gap: 5px; width: 100%; }
 .read-progress-bar { height: 5px; overflow: hidden; border-radius: 999px; background: #eceef2; }
 .read-progress-bar i { display: block; height: 100%; border-radius: inherit; background: var(--green); }
