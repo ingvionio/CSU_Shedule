@@ -313,7 +313,7 @@ export function WeekGrid({
 
   const hasUntimed = days.some(day => day.lessons.some(lesson => lesson.start_time === null))
   const rowOffset = hasUntimed ? 3 : 2
-  const renderLesson = (lesson: Lesson, day: Day) => {
+  const renderLesson = (lesson: Lesson, day: Day, untimedRow = false) => {
     const canOpen = Boolean(onLessonClick && !lesson.event)
     return (
       <div
@@ -333,7 +333,8 @@ export function WeekGrid({
           }
         } : undefined}
       >
-        <b>{lesson.start_time ?? 'Время не указано'}</b>
+        {/* В строке «Без времени» подпись уже стоит в столбце часов. */}
+        {!untimedRow && <b>{lesson.start_time ?? 'Время не указано'}</b>}
         {lesson.stream_diff?.length ? <strong className="stream-diff-mark">У групп по-разному</strong> : null}
         <span>{lesson.subject}</span>
         <small>{lesson.event && <span className="badge event-type-badge">{lesson.type.name}</span>}{!lesson.event && lesson.type.name}{lesson.subgroup !== null ? ` · ${lesson.subgroup} п/гр` : ''}</small>
@@ -358,9 +359,12 @@ export function WeekGrid({
           </div>
         ))}
 
+        {hasUntimed && (
+          <div className="grid-time grid-time-untimed" style={{ gridRow: 2, gridColumn: 1 }}>Без времени</div>
+        )}
         {hasUntimed && days.map((day, column) => (
           <div className="grid-untimed" key={day.date} style={{ gridColumn: column + 2, gridRow: 2 }}>
-            {day.lessons.filter(lesson => lesson.start_time === null).map(lesson => renderLesson(lesson, day))}
+            {day.lessons.filter(lesson => lesson.start_time === null).map(lesson => renderLesson(lesson, day, true))}
           </div>
         ))}
         {slots.map((slot, row) => (

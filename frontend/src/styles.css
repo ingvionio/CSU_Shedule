@@ -776,7 +776,9 @@ button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visibl
 .event-note { padding: 8px; margin-top: 6px; border-left: 3px solid #bd6a13; border-radius: 5px; background: #fff0d3; font-size: 11px; overflow-wrap: anywhere; white-space: pre-wrap; }
 .event-groups, .event-original { margin-top: 6px; color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
 .event-original { display: flex; flex-wrap: wrap; gap: 6px; }
-.grid-untimed { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); min-width: 0; }
+/* Строка событий без времени: отдельно от сетки звонков, чтобы не читалась как «до 8:00». */
+.grid-untimed { min-width: 0; padding: 4px; border-right: 1px solid var(--line); border-bottom: 2px solid var(--line-strong); background: var(--canvas); }
+.grid-time.grid-time-untimed { align-items: center; padding: 4px 2px; border-bottom: 2px solid var(--line-strong); background: var(--canvas); font-weight: 700; line-height: 1.2; text-align: center; }
 .grid-lesson.schedule-event .event-note { padding: 5px; font-size: 9px; }
 .schedule-event.cancelled .lesson-time { text-decoration: line-through; }
 .grid-lesson.schedule-event.cancelled { border-color: #d9dbe0; background: #eceef1; color: #777b83; }
