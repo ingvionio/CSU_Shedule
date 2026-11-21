@@ -11,7 +11,6 @@ import { AdminFeedback } from './pages/admin/AdminFeedback'
 import { AdminSchedule } from './pages/admin/AdminSchedule'
 import { AdminMessages } from './pages/admin/AdminMessages'
 import { AdminExams } from './pages/admin/AdminExams'
-import { StudentExams } from './pages/exams/StudentExams'
 import { AdminImports } from './pages/admin/AdminImports'
 import { AdminHomeworkEditors } from './pages/admin/AdminHomeworkEditors'
 import { useNavigation } from './navigation'
@@ -31,7 +30,7 @@ import type { AdminSession, Day, Group, Lesson, StudentSession, View } from './t
 
 type InboxPushEvent = { type: 'messages-updated' } | { type: 'open-message'; url: string }
 
-const WEEKDAY_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
+const WEEKDAY_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 const COURSES = [1, 2, 3, 4]
 const mobileCardsQuery = window.matchMedia('(max-width: 600px)')
 const subscribeMobileCards = (notify: () => void) => {
@@ -526,11 +525,11 @@ export function App() {
                 <StudentMessages group={selectedGroup} onChooseGroup={() => nav('group')} requestedId={requestedMessage} onRequestHandled={clearRequestedMessage} />
               )}
 
-              {groupId === null && (view === 'day' || view === 'week' || view === 'exams') && !groups.isLoading && !groups.isError && (
+              {groupId === null && (view === 'day' || view === 'week') && !groups.isLoading && !groups.isError && (
                 <div className="state-note">Ваша группа определяется через Moodle…</div>
               )}
 
-              {groupId !== null && (view === 'day' || view === 'week' || view === 'exams') && (
+              {groupId !== null && (view === 'day' || view === 'week') && (
                 <>
                   <div className="segmented" aria-label="Режим расписания">
                       <button className={view === 'day' ? 'active' : ''} onClick={() => setView('day')}>
@@ -539,9 +538,7 @@ export function App() {
                       <button className={view === 'week' ? 'active' : ''} onClick={() => setView('week')}>
                         На неделю
                       </button>
-                      <button className={view === 'exams' ? 'active' : ''} onClick={() => setView('exams')}>Сессия</button>
                   </div>
-                  {view === 'exams' ? <StudentExams groupId={groupId} /> : <>
                   <section className="schedule-intro">
                     <div className="week-line">
                       <div>
@@ -588,14 +585,15 @@ export function App() {
 
                   {schedule.data &&
                     (view === 'week' ? (
-                      <WeekGrid days={days} slots={timeSlots.data ?? []} currentMinutes={currentMinutes} schedulePending={week?.schedule_pending} />
+                      <WeekGrid groupName={schedule.data.group.name} days={days} slots={timeSlots.data ?? []} currentMinutes={currentMinutes} schedulePending={week?.schedule_pending} />
                     ) : (
                       <>
                         <div className="week-picker-clip">
                           <div
                             key={week?.number}
                             className={`date-strip week-picker ${dragging ? 'dragging' : `slide-${slideDirection}`}`}
-                            style={dragging ? { transform: `translateX(${dragX}px)` } : undefined}
+                            style={{ gridTemplateColumns: `repeat(${days.length}, 1fr)`,
+                               ...(dragging ? { transform: `translateX(${dragX}px)` } : {}) }}
                             onPointerDown={handleDragStart}
                             onPointerMove={handleDragMove}
                             onPointerUp={handleDragEnd}
@@ -621,6 +619,7 @@ export function App() {
                           <DaySchedule
                             schedulePending={week?.schedule_pending}
                             day={days[selectedDay]}
+                            groupName={schedule.data.group.name}
                             onLessonClick={mobileCards && studentSession && personalNotes.isSuccess ? openNote : undefined}
                             renderLessonExtras={
                               studentSession
@@ -638,7 +637,7 @@ export function App() {
                                           onOpen={mobileCards ? undefined : () => openNote(lesson, day)}
                                         />
                                       )}
-                                      {!mobileCards && (
+                                      {!mobileCards && !lesson.event && (
                                         <button
                                           className="button button-secondary personal-note-button"
                                           disabled={!personalNotes.isSuccess || !lesson.note_key}
@@ -688,7 +687,6 @@ export function App() {
                       </button>
                     </div>
                   )}
-                  </>}
                 </>
               )}
 

@@ -1,4 +1,4 @@
-"""API сессии: публичный список и инструменты методиста."""
+"""API сессии: инструменты методиста."""
 from collections.abc import Callable
 from typing import TypeVar
 from xml.etree.ElementTree import ParseError
@@ -11,11 +11,10 @@ from sqlalchemy.orm import Session
 
 from app.core.db import get_db
 from app.core.security import require_admin
-from app.schemas.exam import ExamCreate, ExamEventOut, ExamImportHistoryOut, ExamImportOut, ExamKind, ExamPatch, GroupExamsOut
+from app.schemas.exam import ExamCreate, ExamEventOut, ExamImportHistoryOut, ExamImportOut, ExamKind, ExamPatch
 from app.services import exams
 from app.services.exam_importer import import_workbook
 
-router = APIRouter()
 admin_router = APIRouter(prefix="/admin/exams", dependencies=[Depends(require_admin)])
 T = TypeVar("T")
 
@@ -25,11 +24,6 @@ def _call(action: Callable[[], T]) -> T:
         return action()
     except exams.ExamError as error:
         raise HTTPException(error.status_code, str(error)) from error
-
-
-@router.get("/groups/{group_id}/exams", response_model=GroupExamsOut)
-def group_exams(group_id: int, db: Session = Depends(get_db)) -> GroupExamsOut:
-    return _call(lambda: exams.student_events(db, group_id))
 
 
 @admin_router.post("/import", response_model=ExamImportOut)

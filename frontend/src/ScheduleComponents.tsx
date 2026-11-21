@@ -10,8 +10,8 @@ export function PersonalNotePreview({ body, onOpen }: { body: string; onOpen?: (
     : <div className="private-note-preview">{text}</div>
 }
 
-const WEEKDAY_NAMES = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота']
-const WEEKDAY_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
+const WEEKDAY_NAMES = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье']
+const WEEKDAY_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 
 /** Пометки для статусов временных изменений. Для `regular` пометки нет. */
 const STATUS_LABELS: Record<string, string> = {
@@ -40,7 +40,7 @@ function pointLabel(point: MovePoint): string {
 
 /** Прежние значения изменённой пары: «ауд. 132Б», «13:15–14:45»… */
 function originalLabel(lesson: Lesson): string | null {
-  const original = lesson.change?.original
+  const original: Record<string, unknown> | null | undefined = lesson.change?.original
   if (!original) return null
   const parts: string[] = []
   if ('start_time' in original || 'end_time' in original) {
@@ -56,7 +56,7 @@ function originalLabel(lesson: Lesson): string | null {
 /** Пояснения к изменённой паре для студента и админа. */
 export function changeDetails(lesson: Lesson): string[] {
   const change = lesson.change
-  if (!change) return []
+  if (!change || !('kind' in change)) return []
   return [
     change.moved_to && `Перенесена на ${pointLabel(change.moved_to)}`,
     change.moved_from && `Перенесена с ${pointLabel(change.moved_from)}`,
@@ -141,6 +141,30 @@ export function Header({
   )
 }
 
+function timeLabel(lesson: Lesson): string {
+  if (!lesson.start_time) return 'Время не указано'
+  return lesson.end_time ? lesson.start_time + '–' + lesson.end_time : lesson.start_time
+}
+
+function eventClass(lesson: Lesson): string {
+  return lesson.event ? ' schedule-event schedule-event-' + lesson.type.code : ''
+}
+
+function EventDetails({ lesson, groupName }: { lesson: Lesson; groupName?: string }) {
+  if (!lesson.event) return null
+  const original = lesson.change?.original
+  const others = lesson.event.groups.filter(name => name !== groupName)
+  return <>
+    {original && <p className="event-original">
+      {'date' in original && <del>{dayLabel(String(original.date))}</del>}
+      {'start_time' in original && <del>{original.start_time ? String(original.start_time) : 'Время не указано'}</del>}
+      {'room' in original && <del>{original.room ? 'Ауд. ' + String(original.room) : 'Аудитория не указана'}</del>}
+    </p>}
+    {lesson.event.note && <p className="event-note">{lesson.event.note}</p>}
+    {others.length > 0 && <p className="event-groups">Вместе с {others.join(', ')}</p>}
+  </>
+}
+
 /** Подпись времени: номер пары сверху, если она стоит по звонку, и время под ним. */
 function LessonTime({ lesson }: { lesson: Lesson }) {
   return (
@@ -148,7 +172,7 @@ function LessonTime({ lesson }: { lesson: Lesson }) {
       <Clock3 size={14} />
       <span>
         {lesson.slot !== null && <b>{lesson.slot} пара</b>}
-        <i>{lesson.start_time}–{lesson.end_time}</i>
+        <i>{timeLabel(lesson)}</i>
       </span>
     </div>
   )
@@ -164,11 +188,12 @@ export function OnlineLessonLink({ lesson }: { lesson: Lesson }) {
     }}>Подключиться</a>
 }
 
-export function LessonCard({ lesson, children, onOpen }: { lesson: Lesson; children?: ReactNode; onOpen?: () => void }) {
+export function LessonCard({ lesson, children, onOpen, groupName }: { lesson: Lesson; children?: ReactNode; onOpen?: () => void; groupName?: string }) {
   const label = STATUS_LABELS[lesson.status]
+  if (lesson.event) onOpen = undefined
 
   return (
-    <article className={`lesson-card ${statusClass(lesson.status)}${onOpen ? ' lesson-card-selectable' : ''}`}
+    <article className={`lesson-card ${statusClass(lesson.status)}${eventClass(lesson)}${onOpen ? ' lesson-card-selectable' : ''}`}
       role={onOpen ? 'button' : undefined}
       tabIndex={onOpen ? 0 : undefined}
       aria-haspopup={onOpen ? 'dialog' : undefined}
@@ -180,6 +205,7 @@ export function LessonCard({ lesson, children, onOpen }: { lesson: Lesson; child
       <div className="lesson-main">
         <div className="lesson-heading">
           <h3>{lesson.subject}</h3>
+          {lesson.event && <span className="badge event-type-badge">{lesson.type.name}</span>}
           {label && (
             <span className={`badge ${lesson.status === 'cancelled' ? 'badge-cancelled' : 'badge-changed'}`}>
               {label}
@@ -187,9 +213,10 @@ export function LessonCard({ lesson, children, onOpen }: { lesson: Lesson; child
           )}
         </div>
         {changeDetails(lesson).map((line) => <p className="change-note" key={line}>{line}</p>)}
+        <EventDetails lesson={lesson} groupName={groupName} />
         {lesson.stream_diff?.length ? <span className="stream-diff-mark" title={lesson.stream_diff.join('\n')}>У групп по-разному</span> : null}
         <div className="lesson-meta">
-          <span>{lesson.type.name}</span>
+          {!lesson.event && <span>{lesson.type.name}</span>}
           {lesson.subgroup !== null && <span>{lesson.subgroup} подгруппа</span>}
           {lesson.teacher && <span><UserRound size={13} />{lesson.teacher}</span>}
           {lesson.online_url ? <span>Онлайн</span>
@@ -216,9 +243,10 @@ function SchedulePending() {
   return <div className="state-note schedule-pending" role="status">Методист ещё не загрузил расписание, оно появится позже</div>
 }
 
-export function DaySchedule({ day, renderLessonExtras, onLessonClick, schedulePending = false }: {
+export function DaySchedule({ day, renderLessonExtras, onLessonClick, schedulePending = false, groupName }: {
   schedulePending?: boolean
   day: Day
+  groupName?: string
   renderLessonExtras?: (lesson: Lesson, day: Day) => ReactNode
   onLessonClick?: (lesson: Lesson, day: Day) => void
 }) {
@@ -234,7 +262,7 @@ export function DaySchedule({ day, renderLessonExtras, onLessonClick, schedulePe
       </div>
       {day.lessons.length
         ? <div className="lesson-list">
-          {day.lessons.map((lesson) => <LessonCard key={lesson.id} lesson={lesson}
+          {day.lessons.map((lesson) => <LessonCard key={lesson.id} lesson={lesson} groupName={groupName}
             onOpen={onLessonClick && lesson.note_key ? () => onLessonClick(lesson, day) : undefined}
           >{renderLessonExtras?.(lesson, day)}</LessonCard>)}
         </div>
@@ -252,9 +280,11 @@ export function WeekGrid({
   notedKeys,
   homeworkCounts,
   schedulePending = false,
+  groupName,
 }: {
   schedulePending?: boolean
   days: Day[]
+  groupName?: string
   slots: TimeSlot[]
   currentMinutes: number
   onLessonClick?: (lesson: Lesson, day: Day) => void
@@ -275,24 +305,66 @@ export function WeekGrid({
       const index = slots.findIndex((slot) => slot.number === lesson.slot)
       if (index >= 0) return index
     }
+    if (lesson.start_time === null) return 0
     const start = minutesOf(lesson.start_time)
     const nearest = slots.findIndex((slot) => minutesOf(slot.end_time) >= start)
     return nearest >= 0 ? nearest : Math.max(0, slots.length - 1)
   }
 
+  const hasUntimed = days.some(day => day.lessons.some(lesson => lesson.start_time === null))
+  const rowOffset = hasUntimed ? 3 : 2
+  const renderLesson = (lesson: Lesson, day: Day) => {
+    const canOpen = Boolean(onLessonClick && !lesson.event)
+    return (
+      <div
+        key={lesson.id}
+        className={`grid-lesson ${statusClass(lesson.status)}${eventClass(lesson)} ${canOpen ? 'grid-lesson-selectable' : ''}`}
+        title={`${timeLabel(lesson)} · ${lesson.subject} · ${lesson.type.name}`
+          + `${lesson.teacher ? ` · ${lesson.teacher}` : ''}${lesson.online_url ? ' · Онлайн' : lesson.room ? ` · ауд. ${lesson.room}` : ''}`
+          + (lesson.event ? '\nПравится в разделе „Сессия“' : '')
+          + (lesson.stream_diff?.length ? `\nУ групп по-разному\n${lesson.stream_diff.join('\n')}` : '')}
+        role={canOpen ? 'button' : undefined}
+        tabIndex={canOpen ? 0 : undefined}
+        onClick={canOpen ? () => onLessonClick?.(lesson, day) : undefined}
+        onKeyDown={canOpen ? (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            onLessonClick?.(lesson, day)
+          }
+        } : undefined}
+      >
+        <b>{lesson.start_time ?? 'Время не указано'}</b>
+        {lesson.stream_diff?.length ? <strong className="stream-diff-mark">У групп по-разному</strong> : null}
+        <span>{lesson.subject}</span>
+        <small>{lesson.event && <span className="badge event-type-badge">{lesson.type.name}</span>}{!lesson.event && lesson.type.name}{lesson.subgroup !== null ? ` · ${lesson.subgroup} п/гр` : ''}</small>
+        <small>{[lesson.teacher, lesson.online_url ? 'Онлайн' : lesson.room].filter(Boolean).join(' · ')}</small>
+        <EventDetails lesson={lesson} groupName={groupName} />
+        {STATUS_LABELS[lesson.status] && <em>{STATUS_LABELS[lesson.status]}</em>}
+        {lesson.note_key && notedKeys?.has(lesson.note_key) && <small className="private-note-mark">Моя заметка</small>}
+        {homeworkCounts?.has(`${day.date}:${lesson.id}`) && <small className="lesson-homework-badge">Домашка · {homeworkCounts.get(`${day.date}:${lesson.id}`)}</small>}
+      </div>
+    )
+  }
+
   return (
     <div className="week-grid-scroll">
-      <div className="week-grid" style={{ gridTemplateRows: `auto repeat(${slots.length}, 1fr)` }}>
+      <div className="week-grid" style={{ gridTemplateRows: `auto ${hasUntimed ? 'auto ' : ''}repeat(${slots.length}, 1fr)`,
+        gridTemplateColumns: `var(--grid-time-width, 48px) repeat(${days.length}, minmax(var(--grid-day-width, 104px), 1fr))` }}>
         <div className="grid-corner" />
-        {days.map((day, index) => (
+        {days.map((day) => (
           <div className={`grid-day ${day.is_today ? 'today' : ''}`} key={day.date}>
-            <b>{WEEKDAY_SHORT[index]}</b>
+            <b>{WEEKDAY_SHORT[day.weekday - 1]}</b>
             <span>{dayNumber(day.date)}</span>
           </div>
         ))}
 
+        {hasUntimed && days.map((day, column) => (
+          <div className="grid-untimed" key={day.date} style={{ gridColumn: column + 2, gridRow: 2 }}>
+            {day.lessons.filter(lesson => lesson.start_time === null).map(lesson => renderLesson(lesson, day))}
+          </div>
+        ))}
         {slots.map((slot, row) => (
-          <div className="grid-time" key={slot.number} style={{ gridRow: row + 2, gridColumn: 1 }}>
+          <div className="grid-time" key={slot.number} style={{ gridRow: row + rowOffset, gridColumn: 1 }}>
             {slot.start_time}
           </div>
         ))}
@@ -300,16 +372,16 @@ export function WeekGrid({
           <div
             className="grid-cell"
             key={`${day.date}-${slot.number}`}
-            style={{ gridColumn: column + 2, gridRow: row + 2 }}
+            style={{ gridColumn: column + 2, gridRow: row + rowOffset }}
           />
         )))}
         {days.map((day, column) => slots.map((slot, row) => {
-          const lessons = groupByRow(day.lessons, rowOf).find(([lessonRow]) => lessonRow === row)?.[1] ?? []
+          const lessons = groupByRow(day.lessons.filter(lesson => lesson.start_time !== null), rowOf).find(([lessonRow]) => lessonRow === row)?.[1] ?? []
           const canAdd = Boolean(onEmptySlotClick && lessons.length === 0)
           return <div
             className={`grid-slot ${canAdd ? 'grid-slot-empty' : ''}`}
             key={`${day.date}-${slot.number}`}
-            style={{ gridColumn: column + 2, gridRow: row + 2 }}
+            style={{ gridColumn: column + 2, gridRow: row + rowOffset }}
             onClick={(event) => {
               if (event.target === event.currentTarget) onEmptySlotClick?.(day, slot)
             }}
@@ -323,39 +395,13 @@ export function WeekGrid({
               }
             }}
           >
-            {lessons.map((lesson) => (
-              <div
-                key={lesson.id}
-                className={`grid-lesson ${statusClass(lesson.status)} ${onLessonClick ? 'grid-lesson-selectable' : ''}`}
-                title={`${lesson.start_time}–${lesson.end_time} · ${lesson.subject} · ${lesson.type.name}`
-                  + `${lesson.teacher ? ` · ${lesson.teacher}` : ''}${lesson.online_url ? ' · Онлайн' : lesson.room ? ` · ауд. ${lesson.room}` : ''}`
-                  + (lesson.stream_diff?.length ? `\nУ групп по-разному\n${lesson.stream_diff.join('\n')}` : '')}
-                role={onLessonClick ? 'button' : undefined}
-                tabIndex={onLessonClick ? 0 : undefined}
-                onClick={onLessonClick ? () => onLessonClick(lesson, day) : undefined}
-                onKeyDown={onLessonClick ? (event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault()
-                    onLessonClick(lesson, day)
-                  }
-                } : undefined}
-              >
-                <b>{lesson.start_time}</b>
-                {lesson.stream_diff?.length ? <strong className="stream-diff-mark">У групп по-разному</strong> : null}
-                <span>{lesson.subject}</span>
-                <small>{lesson.type.name}{lesson.subgroup !== null ? ` · ${lesson.subgroup} п/гр` : ''}</small>
-                <small>{[lesson.teacher, lesson.online_url ? 'Онлайн' : lesson.room].filter(Boolean).join(' · ')}</small>
-                {STATUS_LABELS[lesson.status] && <em>{STATUS_LABELS[lesson.status]}</em>}
-                {lesson.note_key && notedKeys?.has(lesson.note_key) && <small className="private-note-mark">Моя заметка</small>}
-                {homeworkCounts?.has(`${day.date}:${lesson.id}`) && <small className="lesson-homework-badge">Домашка · {homeworkCounts.get(`${day.date}:${lesson.id}`)}</small>}
-              </div>
-            ))}
+            {lessons.map((lesson) => renderLesson(lesson, day))}
           </div>
         }))}
         {lineVisible && (
           <div
             className="current-time-track"
-            style={{ gridColumn: todayIndex + 2, gridRow: `2 / span ${slots.length}` }}
+            style={{ gridColumn: todayIndex + 2, gridRow: `${rowOffset} / span ${slots.length}` }}
           >
             <div className="current-time-line" style={{ top: `${lineTop}%` }} />
             <div className="current-time-label" style={{ top: `${lineTop}%` }}>
@@ -392,8 +438,8 @@ export function BottomNav({
       {items.map(({ label, icon: Icon, target, badge }) => (
         <button
           key={label}
-          className={`nav-item ${view === target || (target === 'day' && (view === 'week' || view === 'exams')) ? 'active' : ''}`}
-          aria-current={view === target || (target === 'day' && (view === 'week' || view === 'exams')) ? 'page' : undefined}
+          className={`nav-item ${view === target || (target === 'day' && view === 'week') ? 'active' : ''}`}
+          aria-current={view === target || (target === 'day' && view === 'week') ? 'page' : undefined}
           onClick={() => onNavigate(target)}
         >
           <span className="nav-icon">

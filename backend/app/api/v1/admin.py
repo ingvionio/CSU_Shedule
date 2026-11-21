@@ -29,7 +29,9 @@ def stream_schedule(
         groups = stream_service.load_groups(db, group_ids)
         semester = schedule_service.active_semester(db)
         today = datetime.now().date()
-        number = week or weeks_service.current_week_number(semester, today)
+        number = week or weeks_service.current_week_number(
+            semester, today, weeks_service.last_available_week(db, semester)
+        )
         info, days = stream_service.build_stream_schedule(db, groups, semester, number, today)
     except stream_service.StreamScheduleError as error:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error

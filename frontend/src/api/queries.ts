@@ -4,7 +4,7 @@ import { api } from './client'
 import { feedbackToken, readCache, writeCache } from './cache'
 import { asStudent, useStudentSession } from './student'
 import type {
-  ExamKind, ExamInput, GroupExams,
+  ExamKind, ExamInput,
   Catalog,
   CurrentWeek,
   Direction,
@@ -384,21 +384,6 @@ export function useMessageMutations(token: string) {
 }
 
 /* --- Сессия --- */
-export function useExams(groupId: number | null) {
-  const key = groupId === null ? null : 'exams-' + groupId
-  return useQuery({
-    queryKey: ['exams', groupId],
-    queryFn: async () => writeCache(key!, await api.exams(groupId!)),
-    initialData: () => key ? readCache<GroupExams>(key) ?? undefined : undefined,
-    initialDataUpdatedAt: 0,
-    enabled: groupId !== null,
-    staleTime: 5 * 60 * 1000,
-    refetchOnMount: 'always',
-    refetchOnWindowFocus: 'always',
-    refetchInterval: 60 * 1000,
-  })
-}
-
 export function useAdminExams(token: string, filters: { kind: string; course: string; group_id: string }) {
   return useQuery({ queryKey: ['admin-exams', token, filters], queryFn: () => api.adminExams(token, filters) })
 }
@@ -410,7 +395,8 @@ export function useExamImports(token: string) {
 export function useExamMutations(token: string) {
   const client = useQueryClient()
   const refresh = () => Promise.all([
-    client.invalidateQueries({ queryKey: ['exams'] }),
+    client.invalidateQueries({ queryKey: ['schedule'] }),
+    client.invalidateQueries({ queryKey: ['current-week'] }),
     client.invalidateQueries({ queryKey: ['admin-exams'] }),
     client.invalidateQueries({ queryKey: ['exam-imports'] }),
   ])

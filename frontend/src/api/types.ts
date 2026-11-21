@@ -45,13 +45,16 @@ export type LessonChange = {
   moved_from: MovePoint | null
 }
 
+export type ScheduleEvent = { kind: ExamKind; note: string | null; groups: string[] }
+export type EventChange = { original: Partial<Record<ExamChangedField, string | null>> }
+
 export type Lesson = {
   id: string
   note_key?: string | null
   stream_diff?: string[] | null
-  /** HH:MM, заполнено всегда. */
-  start_time: string
-  end_time: string
+  /** HH:MM; null — время события не указано. */
+  start_time: string | null
+  end_time: string | null
   /** Номер пары в сетке звонков; null — пара вне сетки (например, в 19:00). */
   slot: number | null
   subject: string
@@ -62,13 +65,14 @@ export type Lesson = {
   /** Подгруппа из Excel; null — пара всей группы. */
   subgroup: number | null
   status: LessonStatus
-  change: LessonChange | null
+  change: LessonChange | EventChange | null
+  event: ScheduleEvent | null
 }
 
 export type Day = {
   /** YYYY-MM-DD */
   date: string
-  /** 1 = пн ... 6 = сб */
+  /** 1 = пн ... 7 = вс */
   weekday: number
   is_today: boolean
   /** Уже отсортированы по времени начала. */
@@ -457,11 +461,3 @@ export type ExamImportHistory = {
   id: number; semester_id: number; kind: ExamKind; file_name: string; events_count: number
   warnings: ExamWarning[]; uploaded_by: string | null; uploaded_at: string
 }
-export type StudentExam = Omit<ExamValues, 'kind' | 'event_type'> & {
-  id: number; kind: { code: ExamKind; name: string }; groups: string[]
-  type: { code: ExamType; name: string } | null
-  status: 'regular' | 'changed' | 'cancelled'
-  change: { date: string | null; start_time: string | null; room: string | null; fields: ExamChangedField[] } | null
-  is_past: boolean; days_left: number
-}
-export type GroupExams = { group: ExamGroup; kinds: ExamKind[]; events: StudentExam[] }

@@ -1,5 +1,5 @@
 import type {
-  ExamKind, ExamInput, ExamEvent, ExamImportReport, ExamImportHistory, GroupExams,
+  ExamKind, ExamInput, ExamEvent, ExamImportReport, ExamImportHistory,
   ImportHistory,
   SemesterImportReport,
   WeeklyImportReport,
@@ -87,7 +87,6 @@ async function request<T>(path: string, { method = 'GET', body, token, feedbackT
 }
 
 export const api = {
-  exams: (groupId: number) => request<GroupExams>('/groups/' + groupId + '/exams'),
   adminExams: (token: string, filters: { kind: string; course: string; group_id: string }) => {
     const params = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== ''))
     return request<ExamEvent[]>('/admin/exams?' + params, { token })

@@ -10,7 +10,6 @@ from app.core.security import issue_token
 from app.main import app
 from app.models import Base, Group, Semester
 from app.models.exam import ExamEvent, ExamImport
-from app.services import exams
 from app.services.exam_importer import import_workbook
 from tests.test_exam_parser import HEADER, book_bytes
 from tests.test_session_grid_parser import grid_bytes
@@ -123,9 +122,14 @@ def test_patch_first_original_and_return_to_baseline(exam_db):
     assert client.patch(path, headers=admin_headers(), json={"subject": "Новое"}).status_code == 404
 
 
-def test_student_sorted_status_dates_and_groups(exam_db, monkeypatch):
+def week_events(client, group_id, week=6):
+    response = client.get(f"/api/v1/groups/{group_id}/schedule?week={week}")
+    assert response.status_code == 200, response.text
+    return [item for day in response.json()["days"] for item in day["lessons"]]
+
+
+def test_student_sorted_status_dates_and_groups(exam_db):
     _, _, groups, client = exam_db
-    monkeypatch.setattr(exams, "today", lambda: date(2026, 10, 5))
     future = create(client, [groups[0].id, groups[1].id], date="2026-10-08", kind="retake")
     past = create(client, [groups[0].id], date="2026-10-04")
     late = create(client, [groups[0].id], start_time="17:00")
@@ -133,18 +137,20 @@ def test_student_sorted_status_dates_and_groups(exam_db, monkeypatch):
     unknown_time = create(client, [groups[0].id], start_time=None)
     client.patch(f"/api/v1/admin/exams/{future['id']}", headers=admin_headers(), json={"room": "122"})
     client.post(f"/api/v1/admin/exams/{past['id']}/cancel", headers=admin_headers())
-    result = client.get(f"/api/v1/groups/{groups[0].id}/exams").json()
-    assert result["kinds"] == ["session", "retake"]
-    assert [e["id"] for e in result["events"]] == [past["id"], early["id"], late["id"], unknown_time["id"], future["id"]]
-    first, *_, last = result["events"]
-    assert first["is_past"] and first["days_left"] == -1 and first["status"] == "cancelled"
-    assert last["status"] == "changed" and last["change"]["room"] == "132"
-    assert last["days_left"] == 3 and not last["is_past"]
-    assert last["kind"] == {"code": "retake", "name": "Пересдача"}
-    assert last["groups"] == [g.name for g in groups[:2]]
-    assert result["events"][1]["days_left"] == 0
-    assert result["events"][1]["status"] == "regular" and result["events"][1]["change"] is None
-    assert client.get("/api/v1/groups/99999/exams").status_code == 404
+    result = week_events(client, groups[0].id)
+    assert [e["id"] for e in result] == [f"e-{e['id']}" for e in [unknown_time, early, late, future]]
+    assert result[0]["start_time"] is None
+    assert result[0]["status"] == "regular" and result[0]["change"] is None
+    last = result[-1]
+    assert last["status"] == "changed" and last["change"] == {"original": {"room": "132"}}
+    assert last["type"] == {"code": "retake", "name": "Пересдача"}
+    assert last["event"]["groups"] == [g.name for g in groups[:2]]
+    assert [e["id"] for e in week_events(client, groups[1].id)] == [last["id"]]
+    assert week_events(client, groups[2].id) == []
+    previous = client.get(f"/api/v1/groups/{groups[0].id}/schedule?week=5").json()
+    assert previous["days"][-1]["weekday"] == 7
+    assert previous["days"][-1]["lessons"][0]["status"] == "cancelled"
+    assert client.get(f"/api/v1/groups/{groups[0].id}/exams").status_code == 404
     assert client.get(f"/api/v1/admin/exams?kind=retake&group_id={groups[0].id}&course=1", headers=admin_headers()).json()[0]["id"] == future["id"]
     assert client.get("/api/v1/admin/exams?course=2", headers=admin_headers()).json() == []
 
@@ -201,26 +207,26 @@ def test_original_null_fields_and_independent_reverts(exam_db):
         assert result["original"] == {"start_time": None, "room": None}
         db.expire_all()
         assert db.get(ExamEvent, item["id"]).original == {"start_time": None, "room": None}
-    student = client.get(f"/api/v1/groups/{groups[0].id}/exams").json()["events"][0]
+    student = week_events(client, groups[0].id)[0]
     assert student["type"] == {"code": "consultation", "name": "Консультация"}
     assert student["status"] == "changed"
-    assert student["change"] == {"date": None, "start_time": None, "room": None, "fields": ["start_time", "room"]}
+    assert student["change"] == {"original": {"start_time": None, "room": None}}
     result = client.patch(path, headers=admin_headers(), json={"start_time": None, "event_type": "exam"}).json()
     assert result["original"] == {"room": None} and result["event_type"] == "exam"
     result = client.patch(path, headers=admin_headers(), json={"room": None}).json()
     assert result["original"] is None
     assert db.scalar(select(ExamEvent.original.is_(None)).where(ExamEvent.id == item["id"]))
-    assert client.get(f"/api/v1/groups/{groups[0].id}/exams").json()["events"][0]["status"] == "regular"
+    assert week_events(client, groups[0].id)[0]["status"] == "regular"
     assert client.patch(path, headers=admin_headers(), json={"event_type": "invalid"}).status_code == 422
 
 
 @pytest.mark.parametrize("event_type,name", [("exam", "Экзамен"), ("credit", "Зачёт"),
-    ("graded_credit", "Дифф. зачёт"), ("other", "Другое"), (None, None)])
+    ("graded_credit", "Дифф. зачёт"), ("other", "Аттестация"), (None, "Аттестация")])
 def test_student_event_types(exam_db, event_type, name):
     _, _, groups, client = exam_db
     create(client, [groups[0].id], event_type=event_type)
-    item = client.get(f"/api/v1/groups/{groups[0].id}/exams").json()["events"][0]
-    assert item["type"] == ({"code": event_type, "name": name} if event_type else None)
+    item = week_events(client, groups[0].id)[0]
+    assert item["type"] == {"code": event_type or "other", "name": name}
 
 
 def test_grid_import_routing_report_replacement_and_rollback(exam_db, tmp_path, monkeypatch):

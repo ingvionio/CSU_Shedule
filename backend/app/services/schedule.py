@@ -23,8 +23,10 @@ from app.models import (
     OverrideKind,
     PublishStatus,
     Semester,
+    TimeSlot,
     WeekParity,
 )
+from app.models.exam import ExamEvent
 from app.services import weeks
 from app.services.weeks import WeekInfo
 from app.services.groups import level_of
@@ -57,20 +59,23 @@ def build_week_schedule(
     semester: Semester,
     week_number: int,
     today: date,
+    *,
+    include_exams: bool = False,
 ) -> tuple[WeekInfo, list[dict]]:
     """Возвращает информацию о неделе и дни недели с парами.
 
-    Дни отдаются пн-сб целиком, включая дни без пар.
+    Дни отдаются пн-сб целиком; воскресенье — только с событием.
     """
-    if not 1 <= week_number <= semester.total_weeks:
+    last_week = weeks.last_available_week(session, semester)
+    if not 1 <= week_number <= last_week:
         raise ScheduleError(
-            f"неделя {week_number} вне семестра (1..{semester.total_weeks})"
+            f"неделя {week_number} вне семестра (1..{last_week})"
         )
 
-    week = weeks.build_week_info(semester, week_number, today)
-    days = _assemble_days(session, group, semester, week, today)
+    week = weeks.build_week_info(semester, week_number, today, last_week)
+    days = _assemble_days(session, group, semester, week, today, include_exams=include_exams)
     pending = (level_of(group.direction) == "master"
-               and week_number >= weeks.current_week_number(semester, today)
+               and week_number >= weeks.current_week_number(semester, today, last_week)
                and not any(day["lessons"] for day in days))
     return replace(week, schedule_pending=pending), days
 
@@ -95,7 +100,8 @@ def lesson_occurs_on(semester: Semester, lesson: Lesson, day: date) -> bool:
 
 
 def _assemble_days(
-    session: Session, group: Group, semester: Semester, week: WeekInfo, today: date
+    session: Session, group: Group, semester: Semester, week: WeekInfo, today: date,
+    include_exams: bool = False,
 ) -> list[dict]:
     lessons = session.scalars(
         select(Lesson)
@@ -106,7 +112,7 @@ def _assemble_days(
             Lesson.week_parity.in_([week.parity, WeekParity.BOTH.value]),
         )
         .order_by(Lesson.weekday, Lesson.start_time)
-    ).all()
+    ).all() if week.number <= semester.total_weeks else []
 
     # Изменения, у которых исходная или новая дата попадает в неделю:
     # перенос может пересекать границу недели.
@@ -123,8 +129,16 @@ def _assemble_days(
     ).unique().all()
     by_source = {(item.lesson_id, item.date): item for item in overrides if item.lesson_id is not None}
 
+    events = session.scalars(
+        select(ExamEvent).where(
+            ExamEvent.semester_id == semester.id,
+            ExamEvent.groups.any(Group.id == group.id),
+            ExamEvent.date.between(week.start_date, week.end_date),
+        ).order_by(ExamEvent.id)
+    ).all() if include_exams else []
+    slots = {slot.start_time: slot.number for slot in session.scalars(select(TimeSlot))} if events else {}
     days: list[dict] = []
-    for offset in range(6):  # пн..сб
+    for offset in range(7 if any(event.date == week.end_date for event in events) else 6):
         day_date = week.start_date + timedelta(days=offset)
         weekday = offset + 1
 
@@ -138,8 +152,6 @@ def _assemble_days(
                 day_lessons.append(_serialize_added(override))
             elif override.kind == OverrideKind.MOVE.value and override.target_date == day_date:
                 day_lessons.append(_serialize_moved_in(override))
-
-        day_lessons.sort(key=lambda item: (item["start_time"], item["subject"]))
 
         # Identity uses the original occurrence, so moves keep the same private note.
         # A repeated Excel import with unchanged content also retains this identity.
@@ -157,6 +169,9 @@ def _assemble_days(
             else:
                 identity = [semester.id, group.id, "added", override.id]
             item["note_key"] = hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode()).hexdigest()
+
+        day_lessons.extend(_serialize_exam(event, slots) for event in events if event.date == day_date)
+        day_lessons.sort(key=lambda item: (item["start_time"] or "", item["subject"]))
 
         days.append(
             {
@@ -210,6 +225,7 @@ def _serialize_lesson(lesson: Lesson) -> dict:
         "type": {"code": lesson.type.code, "name": lesson.type.name},
         "room": lesson.room.name if lesson.room else None,
         "online_url": lesson.online_url,
+        "event": None,
         "teacher": lesson.teacher.full_name if lesson.teacher else None,
         "subgroup": lesson.subgroup,
         "status": LessonStatus.REGULAR.value,
@@ -258,6 +274,7 @@ def _serialize_added(override: LessonOverride) -> dict:
     return {
         "id": f"o-{override.id}",
         "online_url": None,
+        "event": None,
         **_override_fields(override),
         "status": LessonStatus.ADDED.value,
         "change": _change(override),
@@ -270,7 +287,30 @@ def _serialize_moved_in(override: LessonOverride) -> dict:
     return {
         "id": f"o-{override.id}",
         "online_url": source.online_url,
+        "event": None,
         **_override_fields(override),
         "status": LessonStatus.MOVED_IN.value,
         "change": _change(override, moved_from=moved_from),
+    }
+
+
+EVENT_TYPE_NAMES = {
+    "exam": "Экзамен", "consultation": "Консультация", "credit": "Зачёт",
+    "graded_credit": "Дифф. зачёт", "other": "Аттестация", "retake": "Пересдача",
+}
+
+
+def _serialize_exam(event: ExamEvent, slots: dict[time, int]) -> dict:
+    code = "retake" if event.kind == "retake" else event.event_type or "other"
+    original = {field: value for field, value in (event.original or {}).items()
+                if field in ("date", "start_time", "room")}
+    return {
+        "id": f"e-{event.id}", "start_time": _hhmm(event.start_time) if event.start_time else None,
+        "end_time": None, "slot": slots.get(event.start_time),
+        "subject": event.subject, "teacher": event.teacher, "room": event.room,
+        "online_url": None, "subgroup": None, "note_key": None, "stream_diff": None,
+        "type": {"code": code, "name": EVENT_TYPE_NAMES[code]},
+        "status": "cancelled" if event.cancelled else "changed" if original else "regular",
+        "change": {"original": original} if original and not event.cancelled else None,
+        "event": {"kind": event.kind, "note": event.note, "groups": [group.name for group in event.groups]},
     }

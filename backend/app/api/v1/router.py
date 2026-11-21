@@ -16,5 +16,4 @@ api_router.include_router(imports.router, tags=["admin", "imports"])
 api_router.include_router(feedback.router, tags=["feedback"])
 api_router.include_router(feedback.admin_router, tags=["admin", "feedback"])
 
-api_router.include_router(exams.router, tags=["public", "exams"])
 api_router.include_router(exams.admin_router, tags=["admin", "exams"])

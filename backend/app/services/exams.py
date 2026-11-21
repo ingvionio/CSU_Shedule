@@ -1,4 +1,4 @@
-"""Редактирование разовых событий и готовый список для студента."""
+"""Редактирование разовых событий сессии и пересдач."""
 from datetime import date, time
 
 from sqlalchemy import and_, select
@@ -6,13 +6,9 @@ from sqlalchemy.orm import Session
 
 from app.models import Group, Semester
 from app.models.exam import ExamEvent, ExamImport
-from app.schemas.exam import ExamCreate, ExamPatch, GroupExamsOut
+from app.schemas.exam import ExamCreate, ExamPatch
 from app.services import schedule_changes
 from app.services.schedule import ScheduleError, active_semester
-
-KIND_NAMES = {"session": "Сессия", "retake": "Пересдача"}
-TYPE_NAMES = {"consultation": "Консультация", "exam": "Экзамен", "credit": "Зачёт",
-              "graded_credit": "Дифф. зачёт", "other": "Другое"}
 
 
 def _history_value(value: date | time | str | None) -> str | None:
@@ -25,10 +21,6 @@ class ExamError(Exception):
     def __init__(self, message: str, status_code: int = 422) -> None:
         super().__init__(message)
         self.status_code = status_code
-
-
-def today() -> date:
-    return date.today()
 
 
 def semester(db: Session) -> Semester:
@@ -121,28 +113,3 @@ def delete_event(db: Session, event_id: int) -> None:
 
 def import_history(db: Session) -> list[ExamImport]:
     return list(db.scalars(select(ExamImport).order_by(ExamImport.uploaded_at.desc(), ExamImport.id.desc())))
-
-
-def student_events(db: Session, group_id: int) -> GroupExamsOut:
-    group = db.get(Group, group_id)
-    if group is None:
-        raise ExamError("Группа не найдена", 404)
-    events = list_events(db, group_id=group_id)
-    current_date = today()
-    items = []
-    for event in events:
-        changed = bool(event.original)
-        original = event.original or {}
-        items.append(dict(
-            id=event.id, kind={"code": event.kind, "name": KIND_NAMES[event.kind]},
-            type={"code": event.event_type, "name": TYPE_NAMES[event.event_type]} if event.event_type else None,
-            date=event.date, start_time=event.start_time.strftime("%H:%M") if event.start_time else None,
-            subject=event.subject, teacher=event.teacher, room=event.room, note=event.note,
-            groups=[group.name for group in event.groups],
-            status="cancelled" if event.cancelled else "changed" if changed else "regular",
-            change={"date": original.get("date"), "start_time": original.get("start_time"),
-                    "room": original.get("room"),
-                    "fields": [field for field in ("date", "start_time", "room") if field in original]} if changed else None,
-            is_past=event.date < current_date, days_left=(event.date - current_date).days,
-        ))
-    return GroupExamsOut(group=group, kinds=[kind for kind in KIND_NAMES if any(e.kind == kind for e in events)], events=items)

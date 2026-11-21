@@ -86,8 +86,9 @@ def current_week(db: Session = Depends(get_db)) -> CurrentWeekOut:
         raise HTTPException(status_code=503, detail=str(error)) from error
 
     today = _today()
-    number = weeks_service.current_week_number(semester, today)
-    info = weeks_service.build_week_info(semester, number, today)
+    last_week = weeks_service.last_available_week(db, semester)
+    number = weeks_service.current_week_number(semester, today, last_week)
+    info = weeks_service.build_week_info(semester, number, today, last_week)
 
     return CurrentWeekOut(
         number=info.number,
@@ -112,8 +113,12 @@ def group_schedule(
         semester = schedule_service.active_semester(db)
         group = schedule_service.get_group(db, group_id)
         today = _today()
-        week_number = week or weeks_service.current_week_number(semester, today)
-        info, days = schedule_service.build_week_schedule(db, group, semester, week_number, today)
+        week_number = week or weeks_service.current_week_number(
+            semester, today, weeks_service.last_available_week(db, semester)
+        )
+        info, days = schedule_service.build_week_schedule(
+            db, group, semester, week_number, today, include_exams=True
+        )
     except schedule_service.ScheduleError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
 

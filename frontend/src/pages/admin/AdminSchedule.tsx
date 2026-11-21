@@ -125,11 +125,12 @@ export function AdminSchedule({
     setLessonType(lesson?.type.code ?? 'practice')
     setTeacher(lesson?.teacher ?? '')
     setRoom(lesson?.room ?? '')
-    setComment(lesson?.change?.comment ?? '')
+    setComment(lesson?.change && 'comment' in lesson.change ? lesson.change.comment ?? '' : '')
     setError('')
   }
 
   const openLesson = (lesson: Lesson, day: Day) => {
+    if (lesson.event) return
     setSelectedCell({ kind: 'lesson', lesson, day })
     setAction(null)
     resetForm(day, undefined, lesson)
@@ -214,7 +215,7 @@ export function AdminSchedule({
   }
 
   const revert = async (lesson: Lesson) => {
-    if (!lesson.change) return
+    if (!lesson.change || !('override_id' in lesson.change)) return
     setError('')
     try {
       const result = await remove.mutateAsync({ id: lesson.change.override_id, batch: targetMode === 'stream' })
@@ -308,6 +309,7 @@ export function AdminSchedule({
       {showStream && streamSchedule.isError && <p className="form-error" role="alert">{streamSchedule.error.message}</p>}
       {schedule
         ? <WeekGrid
+            groupName={schedule.group.name}
             days={days}
             slots={slots}
             currentMinutes={currentMinutes}

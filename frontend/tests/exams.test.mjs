@@ -37,68 +37,27 @@ function states() {
     } },
   }
 }
-const cards = load('../src/pages/exams/ExamCard.tsx')
+const cards = load('../src/pages/admin/AdminExamCard.tsx')
 const group = { id: 1, name: 'ИТ1-ПИб-11', course: 1 }
 const exam = { id: 1, kind: { code: 'retake', name: 'Пересдача' }, date: '2026-10-05',
   start_time: '15:15', subject: 'Информатика', teacher: 'Николаев И.Е.', room: '132а', note: 'Получить задание!',
   groups: [group.name, 'ИТ1-БИб-11'], status: 'changed', is_past: false, days_left: 3,
   type: null, change: { date: '2026-09-28', start_time: '13:15', room: '132', fields: ['date', 'start_time', 'room'] } }
 
-test('student uses server kinds, order, countdown and status, with collapsed past events', () => {
-  const state = states()
-  const query = { data: { group, kinds: ['session', 'retake'], events: [
-    { ...exam, id: 2, kind: { code: 'session', name: 'Сессия' }, subject: 'Экзамен сессии' },
-    exam, { ...exam, id: 3, date: '2026-10-04', subject: 'Прошедший экзамен', status: 'cancelled', is_past: true, days_left: -1 },
-  ] } }
-  const { StudentExams } = load('../src/pages/exams/StudentExams.tsx', {
-    react: state.hooks, '../../api/queries': { useExams: id => { assert.equal(id, 1); return query } }, './ExamCard': cards,
-  }, { navigator: { onLine: false } })
-  const render = () => { state.reset(); return StudentExams({ groupId: 1 }) }
-  let tree = render()
-  assert.match(renderToStaticMarkup(tree), /Экзамен сессии/)
-  find(tree, node => node.type === 'button' && node.props.children === 'Пересдачи').props.onClick()
-  tree = render()
-  const html = renderToStaticMarkup(tree)
-  assert.doesNotMatch(html, /Экзамен сессии/)
-  assert.match(html, /через 3 дней/)
-  assert.match(html, /<del>13:15<\/del>/)
-  assert.match(html, /<del>132<\/del>/)
-  assert.match(html, /Вместе с ИТ1-БИб-11/)
-  assert.match(html, /Получить задание!/)
-  assert.match(html, /Прошедшие \(1\)/)
-  assert.match(html, /Отменено/)
-  assert.match(html, /Показано сохранённое расписание сессии/)
-  assert.doesNotMatch(html, /<details[^>]* open/)
-  assert(html.indexOf('Информатика') < html.indexOf('Прошедший экзамен'))
-  query.data.kinds = ['retake']
-  assert.doesNotMatch(renderToStaticMarkup(render()), /aria-label="Вид событий"/)
-  query.data.events = []
-  assert.match(renderToStaticMarkup(render()), /Расписание сессии пока не опубликовано/)
-})
-
-test('query cache is per group; applied mutations refresh student, admin and history', async () => {
+test('exam mutations refresh schedule, current week and admin data', async () => {
   const invalidated = []
-  const saved = []
-  const api = { exams: async id => ({ group: { id }, events: [] }) }
   const hooks = load('../src/api/queries.ts', {
-    '@tanstack/react-query': { useQuery: options => options, useMutation: options => options,
+    '@tanstack/react-query': { useMutation: options => options,
       useQueryClient: () => ({ invalidateQueries: value => invalidated.push(value.queryKey) }) },
-    './client': { api }, './cache': { readCache: key => ({ key }), writeCache: (key, value) => { saved.push(key); return value } }, './student': {},
+    './client': {}, './cache': {}, './student': {},
   })
-  const query = hooks.useExams(1)
-  assert.equal(query.initialData().key, 'exams-1')
-  await query.queryFn()
-  assert.deepEqual(saved, ['exams-1'])
-  assert.notEqual(JSON.stringify(query.queryKey), JSON.stringify(hooks.useExams(2).queryKey))
-  assert.equal(hooks.useExams(null).enabled, false)
-  assert.equal(query.initialDataUpdatedAt, 0)
   const mutations = hooks.useExamMutations('token')
   await mutations.upload.onSuccess({ applied: false })
   assert.equal(invalidated.length, 0)
   for (const action of ['create', 'patch', 'cancel', 'remove', 'upload']) {
     invalidated.length = 0
     await mutations[action].onSuccess({ applied: true })
-    assert.deepEqual(invalidated.map(key => key[0]), ['exams', 'admin-exams', 'exam-imports'])
+    assert.deepEqual(invalidated.map(key => key[0]), ['schedule', 'current-week', 'admin-exams', 'exam-imports'])
   }
 })
 
@@ -111,7 +70,7 @@ test('admin preview gates application and changing file or kind invalidates it',
   const mutations = { create: mutation, patch: mutation, cancel: mutation, remove: mutation,
     upload: { isPending: false, mutateAsync: async args => { applied = args; return { ...report, applied: args.apply } } } }
   const { AdminExams } = load('../src/pages/admin/AdminExams.tsx', {
-    react: state.hooks, '../../api/client': { ApiError: class extends Error {} }, '../exams/ExamCard': cards,
+    react: state.hooks, '../../api/client': { ApiError: class extends Error {} }, './AdminExamCard': cards,
     '../../api/queries': { useAdminExams: (_, value) => { filters = value; return { data: [] } },
       useExamImports: () => ({ data: [] }), useExamMutations: () => mutations },
   })
@@ -142,11 +101,11 @@ test('admin preview gates application and changing file or kind invalidates it',
   assert.equal(filters.kind, '')
 })
 
-test('session route and bottom schedule navigation are restored', () => {
+test('legacy exams route opens day and keeps schedule navigation active', () => {
   const navigation = load('../src/navigation.ts')
-  assert.equal(navigation.viewFromUrl('https://localhost/#/exams', true), 'exams')
+  assert.equal(navigation.viewFromUrl('https://localhost/#/exams', true), 'day')
   const { BottomNav } = load('../src/ScheduleComponents.tsx')
-  const html = renderToStaticMarkup(React.createElement(BottomNav, { view: 'exams', onNavigate() {} }))
+  const html = renderToStaticMarkup(React.createElement(BottomNav, { view: 'day', onNavigate() {} }))
   assert.match(html, /class="nav-item active" aria-current="page"/)
 })
 
@@ -160,7 +119,7 @@ test('admin creates, edits, cancels, restores and deletes through mutations', as
   }]))
   const query = { data: [event] }
   const { AdminExams } = load('../src/pages/admin/AdminExams.tsx', {
-    react: state.hooks, '../../api/client': { ApiError: class extends Error {} }, '../exams/ExamCard': cards,
+    react: state.hooks, '../../api/client': { ApiError: class extends Error {} }, './AdminExamCard': cards,
     '../../api/queries': { useAdminExams: () => query, useExamImports: () => ({ data: [] }), useExamMutations: () => mutations },
   })
   const render = () => { state.reset(); return AdminExams({ token: 'admin', groups: [group], onUnauthorized() {} }) }
@@ -196,7 +155,7 @@ test('admin creates, edits, cancels, restores and deletes through mutations', as
 })
 
 test('cards distinguish consultation and exam and show originally empty fields', () => {
-  const render = (type, original) => renderToStaticMarkup(React.createElement(cards.ExamCard, {
+  const render = (type, original) => renderToStaticMarkup(React.createElement(cards.AdminExamCard, {
     event: { ...exam, type }, original, cancelled: false,
   }))
   const consultation = render({ code: 'consultation', name: 'Консультация' }, { start_time: null, room: null })
@@ -210,20 +169,6 @@ test('cards distinguish consultation and exam and show originally empty fields',
   assert.doesNotMatch(examination, /<del>/)
 })
 
-test('student uses change.fields for empty originals and displays the server type', () => {
-  const state = states()
-  const { StudentExams } = load('../src/pages/exams/StudentExams.tsx', {
-    react: state.hooks, './ExamCard': cards, '../../api/queries': { useExams: () => ({ data: {
-      group, kinds: ['session'], events: [{ ...exam, kind: { code: 'session', name: 'Сессия' },
-        type: { code: 'credit', name: 'Зачёт' }, change: { date: null, start_time: null, room: null, fields: ['room'] } }],
-    } }) },
-  }, { navigator: { onLine: true } })
-  const html = renderToStaticMarkup(StudentExams({ groupId: 1 }))
-  assert.match(html, /Зачёт/)
-  assert.match(html, /<del>Аудитория не указана<\/del>/)
-  assert.doesNotMatch(html, /<del>Время не указано<\/del>/)
-})
-
 test('admin form saves event type and preview shows sheet groups and academic year', async () => {
   let state = states()
   const report = { events_count: 1, applied: false, warnings: [], mappings: [],
@@ -233,7 +178,7 @@ test('admin form saves event type and preview shows sheet groups and academic ye
   const mutation = { isPending: false, mutateAsync: async () => {} }
   const { AdminExams } = load('../src/pages/admin/AdminExams.tsx', {
     react: { ...React, useEffect() {}, useState: initial => state.hooks.useState(initial) },
-    '../../api/client': { ApiError: class extends Error {} }, '../exams/ExamCard': cards,
+    '../../api/client': { ApiError: class extends Error {} }, './AdminExamCard': cards,
     '../../api/queries': { useAdminExams: () => ({ data: [] }), useExamImports: () => ({ data: [] }),
       useExamMutations: () => ({ create: mutation, upload: { ...mutation, mutateAsync: async () => report } }) },
   })
@@ -258,7 +203,7 @@ test('admin form saves event type and preview shows sheet groups and academic ye
   assert.equal(saved.event_type, 'graded_credit')
   const uploadState = states()
   const { AdminExams: UploadAdmin } = load('../src/pages/admin/AdminExams.tsx', {
-    react: uploadState.hooks, '../../api/client': { ApiError: class extends Error {} }, '../exams/ExamCard': cards,
+    react: uploadState.hooks, '../../api/client': { ApiError: class extends Error {} }, './AdminExamCard': cards,
     '../../api/queries': { useAdminExams: () => ({ data: [] }), useExamImports: () => ({ data: [] }),
       useExamMutations: () => ({ upload: { ...mutation, mutateAsync: async () => report } }) },
   })

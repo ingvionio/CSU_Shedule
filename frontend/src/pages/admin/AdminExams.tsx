@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { ApiError } from '../../api/client'
 import { useAdminExams, useExamImports, useExamMutations } from '../../api/queries'
 import type { ExamEvent, ExamImportReport, ExamInput, ExamKind, ExamType, Group } from '../../api/types'
-import { ExamCard, examDateLabel, examTypeLabels } from '../exams/ExamCard'
+import { AdminExamCard, examDateLabel, examTypeLabels } from './AdminExamCard'
 
 const labels: Record<ExamKind, string> = { session: 'Сессия', retake: 'Пересдачи' }
 
@@ -140,7 +140,7 @@ export function AdminExams({ token, groups, onUnauthorized }: { token: string; g
     {events.isPending && <p>Загружаем события…</p>}
     {events.isError && <p className="state-note error-note">{events.error.message}<button className="button button-secondary" onClick={() => void events.refetch()}>Повторить</button></p>}
     {events.data?.length === 0 && <p className="empty-day">Событий нет</p>}
-    {events.data?.map(event => <ExamCard key={event.id} event={event} original={event.original} cancelled={event.cancelled}>
+    {events.data?.map(event => <AdminExamCard key={event.id} event={event} original={event.original} cancelled={event.cancelled}>
       <p>{examDateLabel(event.date)} · {labels[event.kind]}</p>
       <p className="muted">{event.groups.map(group => group.name).join(', ')} · {event.source === 'manual' ? 'Вручную' : 'Загрузка № ' + event.import_id}</p>
       <div className="exam-actions">
@@ -148,7 +148,7 @@ export function AdminExams({ token, groups, onUnauthorized }: { token: string; g
         <button className="button button-secondary" disabled={busy} onClick={() => void action(() => mutations.cancel.mutateAsync({ id: event.id, cancelled: !event.cancelled }))}>{event.cancelled ? 'Вернуть' : 'Отменить'}</button>
         <button className="button button-secondary" disabled={busy} onClick={() => void action(() => mutations.remove.mutateAsync(event.id))}>Удалить</button>
       </div>
-    </ExamCard>)}
+    </AdminExamCard>)}
     <h2>История загрузок</h2>
     {history.isPending && <p>Загружаем историю…</p>}
     {history.isError && <p className="state-note error-note">{history.error.message}<button className="button button-secondary" onClick={() => void history.refetch()}>Повторить</button></p>}

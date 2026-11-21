@@ -10,7 +10,7 @@ export function examDateLabel(value: string) {
   return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }) + ', ' + date.toLocaleDateString('ru-RU', { weekday: 'short' })
 }
 
-export function ExamCard({ event, original, cancelled, children }: {
+export function AdminExamCard({ event, original, cancelled, children }: {
   event: Omit<ExamValues, 'kind' | 'event_type'> & {
     event_type?: ExamType | null; type?: { code: ExamType; name: string } | null
   }; original: ExamOriginal; cancelled: boolean; children?: ReactNode
