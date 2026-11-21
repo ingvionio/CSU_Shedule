@@ -32,6 +32,63 @@ IP студентов: uvicorn по умолчанию доверяет заго
 Ниже `$REL` — имя релиза, `<короткий коммит>-<ГГГГММДД>`, например
 `bbf3c3d-20261121`.
 
+## 0. APK — собирает владелец ключа (sadtowa)
+
+Опубликованные версии приложения (до 1.1.1, `versionCode 3`) подписаны
+ключом `csu-release-key.jks` (сертификат `CN=CSU Schedule`). Android ставит
+обновление поверх установленного, только если подпись **та же**, а
+`versionCode` **больше**. Поэтому APK собирает тот, у кого ключ, — ключ и
+пароль никуда не пересылаются.
+
+**Что нужно на машине:** Node.js 22+, JDK 21, Android SDK с платформой API 36
+(`ANDROID_HOME` или `sdk.dir` в `frontend/android/local.properties`),
+подробнее — [frontend/README.md](frontend/README.md#android-apk).
+
+1. **Код.** Ветка `feature/notifications` (после слияния — `master`):
+   ```bash
+   git fetch && git checkout feature/notifications && git pull
+   ```
+2. **Firebase.** Взять у Лёши `google-services.json` (проект `iit-app`) и
+   положить в `frontend/android/app/`. Без него APK соберётся, но push
+   работать не будет. Файл исключён из Git.
+3. **Ключ.** Положить `csu-release-key.jks` в `frontend/android/` и создать
+   рядом `frontend/android/keystore.properties`:
+   ```properties
+   storeFile=csu-release-key.jks
+   storePassword=ПАРОЛЬ_ХРАНИЛИЩА
+   keyAlias=csu-release-key
+   keyPassword=ПАРОЛЬ_КЛЮЧА
+   ```
+   Имя ключа (`keyAlias`) — как при создании; посмотреть:
+   `keytool -list -keystore csu-release-key.jks`.
+   Формат изменился по сравнению с веткой `feature/apk-build`: читаются только
+   эти четыре ключа (`keystore.file`, `keystore.password` и т. п. — нет), и
+   паролей по умолчанию в `build.gradle` больше нет. `*.jks` и
+   `keystore.properties` исключены из Git — перед любым коммитом проверить,
+   что `git status` их не показывает.
+4. **Сборка** (PowerShell, из `frontend`). Адрес API передаётся только в эту
+   команду — сайт собирается без него:
+   ```powershell
+   npm.cmd ci
+   $env:VITE_API_URL='https://iit-app.ru'; npm.cmd run build:apk:release; Remove-Item Env:VITE_API_URL
+   ```
+   Без `keystore.properties` сборка остановится с понятной ошибкой.
+5. **Проверка** — подпись та же, что у опубликованной версии, версия 1.2:
+   ```powershell
+   $bt = "$env:LOCALAPPDATA\Android\Sdk\build-tools\36.1.0"
+   & "$bt\apksigner.bat" verify --print-certs android\app\build\outputs\apk\release\app-release.apk   # Signer #1 certificate DN: CN=CSU Schedule, …
+   & "$bt\aapt2.exe" dump badging android\app\build\outputs\apk\release\app-release.apk | Select-String "^package:"   # versionCode='4' versionName='1.2'
+   ```
+   Если DN другой — APK подписан не тем ключом, раздавать нельзя.
+6. **Передать** `android/app/build/outputs/apk/release/app-release.apk` тому,
+   кто выкатывает (это не секрет, его и так скачивают студенты).
+
+> Пароль ключа раньше был записан значением по умолчанию в `build.gradle`
+> ветки `feature/apk-build`. Если репозиторий публичный, пароли стоит сменить —
+> подпись при этом не меняется, обновления продолжат ставиться:
+> `keytool -storepasswd -keystore csu-release-key.jks` и
+> `keytool -keypasswd -alias csu-release-key -keystore csu-release-key.jks`.
+
 ## 1. Подготовка у разработчика
 
 Из корня репозитория, ветка `master` после слияния (Git Bash):
@@ -41,29 +98,18 @@ REL=$(git rev-parse --short master)-$(date +%Y%m%d)
 git archive --format=tar.gz -o backend-$REL.tar.gz master backend deploy
 ```
 
-**APK** (Windows, PowerShell, из `frontend`) — ключ `csu-release-key.jks` и
-`keystore.properties` должны лежать в `frontend/android/`
-([frontend/README.md](frontend/README.md#android-apk)):
-
-```powershell
-$env:VITE_API_URL='https://iit-app.ru'; npm.cmd run build:apk:release; Remove-Item Env:VITE_API_URL
-```
-
-Проверить подпись — она должна совпадать с опубликованной версией
-(`CN=CSU Schedule`), а `versionCode` быть больше прежнего (3):
-
-```powershell
-& "$env:LOCALAPPDATA\Android\Sdk\build-tools\36.1.0\apksigner.bat" verify --print-certs android\app\build\outputs\apk\release\app-release.apk
-```
+**APK** — готовый файл от sadtowa (раздел 0), подписанный и проверенный.
 
 **Сайт** — собирается **без** `VITE_API_URL` (сайт открыт на двух доменах
-и ходит на `/api` своего домена), потом в сборку кладётся новый APK:
+и ходит на `/api` своего домена), потом в сборку кладётся новый APK
+(`APK=` — путь к файлу от sadtowa):
 
 ```bash
+APK=~/Downloads/app-release.apk
 cd frontend
 npm ci
 npm run build
-cp android/app/build/outputs/apk/release/app-release.apk dist/downloads/raspisanie-iit.apk
+cp "$APK" dist/downloads/raspisanie-iit.apk
 tar -czf ../frontend-$REL.tar.gz -C dist .
 cd ..
 ```
