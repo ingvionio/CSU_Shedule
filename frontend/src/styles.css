@@ -75,6 +75,15 @@ h1 { margin-top: 7px; font-size: 24px; line-height: 1.16; letter-spacing: -.045e
 .segmented { display: grid; grid-template-columns: 1fr 1fr; margin-top: 19px; padding: 4px; border: 1px solid var(--line); border-radius: 12px; background: #eceef2; }
 .segmented button { min-height: 34px; border: 0; border-radius: 9px; background: transparent; color: #676c76; font-size: 13px; font-weight: 600; }
 .segmented button.active { background: var(--surface); color: var(--purple); box-shadow: 0 1px 3px rgba(35, 35, 45, .1); }
+/* «На день / На неделю»: белая подложка переезжает под активную кнопку. */
+.segmented.view-switch { position: relative; isolation: isolate; }
+.segmented.view-switch::before { content: ""; position: absolute; z-index: -1; top: 4px; bottom: 4px; left: 4px; width: calc(50% - 4px); border-radius: 9px; background: var(--surface); box-shadow: 0 1px 3px rgba(35, 35, 45, .1); transition: transform .28s cubic-bezier(.2, .8, .2, 1); }
+.segmented.view-switch.view-switch-week::before { transform: translateX(100%); }
+.segmented.view-switch button { transition: color .2s ease; }
+.segmented.view-switch button.active { background: transparent; box-shadow: none; }
+/* Содержимое режима мягко проявляется при переключении. */
+.view-pane { animation: view-pane-in .26s ease both; }
+@keyframes view-pane-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
 .date-strip { display: grid; grid-template-columns: repeat(6, 1fr); gap: 7px; margin-bottom: 18px; }
 .week-picker-clip { width: 100%; overflow: hidden; }

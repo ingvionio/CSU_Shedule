@@ -560,7 +560,7 @@ export function App() {
                         <ChevronRight size={18} />
                       </button>
                     </div>
-                    <div className="segmented">
+                    <div className={`segmented view-switch ${view === 'week' ? 'view-switch-week' : ''}`}>
                       <button className={view === 'day' ? 'active' : ''} onClick={() => setView('day')}>
                         На день
                       </button>
@@ -583,8 +583,9 @@ export function App() {
 
                   {!schedule.data && schedule.isLoading && <div className="state-note">Загружаем неделю…</div>}
 
-                  {schedule.data &&
-                    (view === 'week' ? (
+                  {/* key={view}: при смене режима содержимое мягко проявляется заново. */}
+                  {schedule.data && (<div className="view-pane" key={view}>
+                    {view === 'week' ? (
                       <WeekGrid
                         groupName={schedule.data.group.name}
                         days={days}
@@ -665,7 +666,8 @@ export function App() {
                           />
                         )}
                       </>
-                    ))}
+                    )}
+                  </div>)}
 
                   {schedule.data && schedule.isStale && !navigator.onLine && (
                     <div className="state-note muted">
