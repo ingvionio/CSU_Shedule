@@ -45,9 +45,8 @@ class ExamEvent(Base):
     room: Mapped[str | None] = mapped_column(String(200))
     note: Mapped[str | None] = mapped_column(Text)
     cancelled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
-    original_date: Mapped[dt.date | None] = mapped_column(Date)
-    original_start_time: Mapped[dt.time | None] = mapped_column(Time)
-    original_room: Mapped[str | None] = mapped_column(String(200))
+    original: Mapped[dict[str, str | None] | None] = mapped_column(JSON(none_as_null=True))
+    event_type: Mapped[str | None] = mapped_column(String(24))
     source: Mapped[str] = mapped_column(String(16))
     import_id: Mapped[int | None] = mapped_column(ForeignKey("exam_imports.id", ondelete="SET NULL"))
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -59,5 +58,6 @@ class ExamEvent(Base):
     __table_args__ = (
         CheckConstraint("kind IN ('session','retake')", name="ck_exam_events_kind"),
         CheckConstraint("source IN ('import','manual')", name="ck_exam_events_source"),
+        CheckConstraint("event_type IN ('consultation','exam','credit','graded_credit','other')", name="ck_exam_events_event_type"),
         Index("ix_exam_events_semester_kind_date", "semester_id", "kind", "date"),
     )

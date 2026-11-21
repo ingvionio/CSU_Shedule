@@ -1,8 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { ApiError } from '../../api/client'
 import { useAdminExams, useExamImports, useExamMutations } from '../../api/queries'
-import type { ExamEvent, ExamImportReport, ExamInput, ExamKind, Group } from '../../api/types'
-import { ExamCard, examDateLabel } from '../exams/ExamCard'
+import type { ExamEvent, ExamImportReport, ExamInput, ExamKind, ExamType, Group } from '../../api/types'
+import { ExamCard, examDateLabel, examTypeLabels } from '../exams/ExamCard'
 
 const labels: Record<ExamKind, string> = { session: 'Сессия', retake: 'Пересдачи' }
 
@@ -12,6 +12,7 @@ function ExamForm({ event, groups, busy, onSave, onClose }: {
 }) {
   const [form, setForm] = useState<ExamInput>(() => ({
     kind: event?.kind ?? 'session', date: event?.date ?? '', start_time: event?.start_time ?? null,
+    event_type: event?.event_type ?? null,
     subject: event?.subject ?? '', teacher: event?.teacher ?? null, room: event?.room ?? null,
     note: event?.note ?? null, group_ids: event?.groups.map(group => group.id) ?? [],
   }))
@@ -29,6 +30,11 @@ function ExamForm({ event, groups, busy, onSave, onClose }: {
         <label className="admin-field">Вид<select className="select-field" value={form.kind}
           onChange={e => setForm({ ...form, kind: e.target.value as ExamKind })}>
           <option value="session">Сессия</option><option value="retake">Пересдачи</option>
+        </select></label>
+        <label className="admin-field">Тип события<select className="select-field" aria-label="Тип события" value={form.event_type ?? ''}
+          onChange={e => setForm({ ...form, event_type: (e.target.value || null) as ExamType | null })}>
+          <option value="">Не указан</option>
+          {Object.entries(examTypeLabels).map(([code, name]) => <option key={code} value={code}>{name}</option>)}
         </select></label>
         <label className="admin-field">Дата<input className="text-field" type="date" required value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} /></label>
         <label className="admin-field">Время<input className="text-field" type="time" value={form.start_time ?? ''} onChange={e => setForm({ ...form, start_time: e.target.value || null })} /></label>
@@ -53,12 +59,16 @@ function ExamForm({ event, groups, busy, onSave, onClose }: {
 function ImportReport({ report }: { report: ExamImportReport }) {
   return <div className="exam-report">
     <h3>{report.applied ? 'Загружено' : 'Результат проверки'}: {report.events_count} событий</h3>
+    <ul>{report.sheets.map(sheet => <li key={sheet.sheet}>
+      {sheet.sheet} · {sheet.academic_year ?? 'Год не указан'} · {sheet.events_count} событий · {sheet.groups.join(', ')}
+    </li>)}</ul>
     <div className="import-table-scroll"><table className="import-table"><thead><tr><th>Лист / строка</th><th>Дата / время</th><th>Событие</th><th>Группы</th><th>Аудитория / примечание</th></tr></thead>
       <tbody>{report.rows.map((row, index) => <tr key={index}>
         <td>{row.sheet} / {row.row}</td>
-        <td><del>{row.original_date && examDateLabel(row.original_date)}</del> {examDateLabel(row.date)}<br /><del>{row.original_start_time}</del> {row.start_time ?? '—'}</td>
-        <td>{row.subject}<small>{row.teacher}</small></td><td>{row.groups.map(group => group.name).join(', ')}</td>
-        <td><del>{row.original_room}</del> {row.room}<small>{row.note}</small></td>
+        <td>{row.original?.date && <del>{examDateLabel(row.original.date)}</del>} {examDateLabel(row.date)}<br />
+          {row.original && 'start_time' in row.original && <del>{row.original.start_time ?? 'Время не указано'}</del>} {row.start_time ?? '—'}</td>
+        <td>{row.event_type && <small>{examTypeLabels[row.event_type]}</small>}{row.subject}<small>{row.teacher}</small></td><td>{row.groups.map(group => group.name).join(', ')}</td>
+        <td>{row.original && 'room' in row.original && <del>{row.original.room ?? 'Аудитория не указана'}</del>} {row.room}<small>{row.note}</small></td>
       </tr>)}</tbody></table></div>
     <h4>Сопоставление групп</h4>
     <ul>{report.mappings.map(item => <li key={item.short_name}>{item.short_name} → {item.group_name ?? 'не найдена'}</li>)}</ul>
@@ -130,7 +140,7 @@ export function AdminExams({ token, groups, onUnauthorized }: { token: string; g
     {events.isPending && <p>Загружаем события…</p>}
     {events.isError && <p className="state-note error-note">{events.error.message}<button className="button button-secondary" onClick={() => void events.refetch()}>Повторить</button></p>}
     {events.data?.length === 0 && <p className="empty-day">Событий нет</p>}
-    {events.data?.map(event => <ExamCard key={event.id} event={event} original={event} cancelled={event.cancelled}>
+    {events.data?.map(event => <ExamCard key={event.id} event={event} original={event.original} cancelled={event.cancelled}>
       <p>{examDateLabel(event.date)} · {labels[event.kind]}</p>
       <p className="muted">{event.groups.map(group => group.name).join(', ')} · {event.source === 'manual' ? 'Вручную' : 'Загрузка № ' + event.import_id}</p>
       <div className="exam-actions">

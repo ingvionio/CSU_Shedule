@@ -20,6 +20,9 @@ def test_exam_migration_sqlite(tmp_path, monkeypatch):
                 connection.execute(text(f"INSERT INTO {table} (id) VALUES (1)"))
             monkeypatch.setattr(migration, "op", Operations(MigrationContext.configure(connection)))
             migration.upgrade()
+            columns = {item["name"] for item in inspect(connection).get_columns("exam_events")}
+            assert {"original", "event_type"} <= columns
+            assert not {"original_date", "original_start_time", "original_room"} & columns
             connection.execute(text("INSERT INTO exam_imports (id, semester_id, kind, file_name, events_count, warnings) VALUES (1, 1, 'session', 'test.xlsx', 1, '[]')"))
             connection.execute(text("INSERT INTO exam_events (id, semester_id, kind, date, subject, source, import_id) VALUES (1, 1, 'session', '2026-10-01', 'История', 'import', 1)"))
             connection.execute(text("INSERT INTO exam_event_groups VALUES (1, 1)"))
@@ -27,6 +30,7 @@ def test_exam_migration_sqlite(tmp_path, monkeypatch):
             assert connection.execute(text("SELECT created_at, updated_at FROM exam_events")).one()[0] is not None
             assert "ix_exam_events_semester_kind_date" in {item["name"] for item in inspect(connection).get_indexes("exam_events")}
             for statement in ("UPDATE exam_events SET kind='wrong'", "UPDATE exam_events SET source='wrong'",
+                              "UPDATE exam_events SET event_type='wrong'",
                               "UPDATE exam_imports SET kind='wrong'", "INSERT INTO exam_event_groups VALUES (1, 1)"):
                 with pytest.raises(IntegrityError):
                     connection.execute(text(statement))
@@ -54,3 +58,4 @@ def test_exam_postgres_sql(monkeypatch):
     assert "TIMESTAMP WITH TIME ZONE" in sql
     assert "ON DELETE SET NULL" in sql and "ON DELETE CASCADE" in sql
     assert "CHECK (kind IN ('session','retake'))" in sql
+    assert "original JSON" in sql and "event_type VARCHAR(24)" in sql

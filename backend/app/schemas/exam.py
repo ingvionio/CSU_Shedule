@@ -5,6 +5,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 ExamKind = Literal["session", "retake"]
+ExamType = Literal["consultation", "exam", "credit", "graded_credit", "other"]
+ExamChangedField = Literal["date", "start_time", "room"]
 
 
 class ExamWarningOut(BaseModel):
@@ -25,6 +27,7 @@ class ExamGroupOut(BaseModel):
 class ExamFields(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: ExamKind
+    event_type: ExamType | None = None
     date: dt.date
     start_time: dt.time | None = None
     subject: str = Field(min_length=1, max_length=300)
@@ -52,6 +55,7 @@ class ExamCreate(ExamFields):
 class ExamPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: ExamKind | None = None
+    event_type: ExamType | None = None
     date: dt.date | None = None
     start_time: dt.time | None = None
     subject: str | None = Field(default=None, min_length=1, max_length=300)
@@ -77,15 +81,13 @@ class ExamEventOut(ExamFields):
     semester_id: int
     groups: list[ExamGroupOut]
     cancelled: bool
-    original_date: dt.date | None
-    original_start_time: dt.time | None
-    original_room: str | None
+    original: dict[ExamChangedField, str | None] | None
     source: Literal["import", "manual"]
     import_id: int | None
     created_at: dt.datetime
     updated_at: dt.datetime
 
-    @field_serializer("start_time", "original_start_time")
+    @field_serializer("start_time")
     def format_time(self, value: dt.time | None) -> str | None:
         return value.strftime("%H:%M") if value else None
 
@@ -100,13 +102,18 @@ class ExamPreviewRow(ExamFields):
     sheet: str
     row: int
     groups: list[ExamGroupOut]
-    original_date: dt.date | None
-    original_start_time: dt.time | None
-    original_room: str | None
+    original: dict[ExamChangedField, str | None] | None
 
-    @field_serializer("start_time", "original_start_time")
+    @field_serializer("start_time")
     def format_time(self, value: dt.time | None) -> str | None:
         return value.strftime("%H:%M") if value else None
+
+
+class ExamSheetOut(BaseModel):
+    sheet: str
+    groups: list[str]
+    academic_year: str | None
+    events_count: int
 
 
 class ExamImportOut(BaseModel):
@@ -114,6 +121,7 @@ class ExamImportOut(BaseModel):
     warnings: list[ExamWarningOut]
     mappings: list[ExamMappingOut]
     rows: list[ExamPreviewRow]
+    sheets: list[ExamSheetOut]
     applied: bool = False
     import_id: int | None = None
 
@@ -135,15 +143,22 @@ class ExamKindOut(BaseModel):
     name: str
 
 
+class ExamTypeOut(BaseModel):
+    code: ExamType
+    name: str
+
+
 class ExamChangeOut(BaseModel):
     date: dt.date | None
     start_time: str | None
     room: str | None
+    fields: list[ExamChangedField]
 
 
 class StudentExamOut(BaseModel):
     id: int
     kind: ExamKindOut
+    type: ExamTypeOut | None
     date: dt.date
     start_time: str | None
     subject: str

@@ -42,7 +42,7 @@ const group = { id: 1, name: 'ИТ1-ПИб-11', course: 1 }
 const exam = { id: 1, kind: { code: 'retake', name: 'Пересдача' }, date: '2026-10-05',
   start_time: '15:15', subject: 'Информатика', teacher: 'Николаев И.Е.', room: '132а', note: 'Получить задание!',
   groups: [group.name, 'ИТ1-БИб-11'], status: 'changed', is_past: false, days_left: 3,
-  change: { date: '2026-09-28', start_time: '13:15', room: '132' } }
+  type: null, change: { date: '2026-09-28', start_time: '13:15', room: '132', fields: ['date', 'start_time', 'room'] } }
 
 test('student uses server kinds, order, countdown and status, with collapsed past events', () => {
   const state = states()
@@ -106,7 +106,7 @@ test('admin preview gates application and changing file or kind invalidates it',
   const state = states()
   let applied
   let filters
-  const report = { events_count: 1, applied: false, rows: [], warnings: [], mappings: [] }
+  const report = { events_count: 1, applied: false, rows: [], warnings: [], mappings: [], sheets: [] }
   const mutation = { isPending: false, mutateAsync: async () => {} }
   const mutations = { create: mutation, patch: mutation, cancel: mutation, remove: mutation,
     upload: { isPending: false, mutateAsync: async args => { applied = args; return { ...report, applied: args.apply } } } }
@@ -154,7 +154,7 @@ test('admin creates, edits, cancels, restores and deletes through mutations', as
   const state = states()
   const calls = []
   const event = { ...exam, kind: 'retake', groups: [group], cancelled: false, source: 'manual',
-    original_date: '2026-09-28', original_start_time: '13:15', original_room: '132' }
+    original: { date: '2026-09-28', start_time: '13:15', room: '132' } }
   const mutations = Object.fromEntries(['create', 'patch', 'cancel', 'remove', 'upload'].map(name => [name, {
     isPending: false, mutateAsync: async value => { calls.push({ name, value }) },
   }]))
@@ -193,4 +193,84 @@ test('admin creates, edits, cancels, restores and deletes through mutations', as
   await new Promise(resolve => setImmediate(resolve))
   assert.equal(calls.at(-1).name, 'remove')
   assert.equal(calls.at(-1).value, 1)
+})
+
+test('cards distinguish consultation and exam and show originally empty fields', () => {
+  const render = (type, original) => renderToStaticMarkup(React.createElement(cards.ExamCard, {
+    event: { ...exam, type }, original, cancelled: false,
+  }))
+  const consultation = render({ code: 'consultation', name: 'Консультация' }, { start_time: null, room: null })
+  assert.match(consultation, /exam-type-consultation/)
+  assert.match(consultation, /Консультация/)
+  assert.match(consultation, /<del>Время не указано<\/del>/)
+  assert.match(consultation, /<del>Аудитория не указана<\/del>/)
+  const examination = render({ code: 'exam', name: 'Экзамен' }, null)
+  assert.match(examination, /exam-type-exam/)
+  assert.match(examination, /Экзамен/)
+  assert.doesNotMatch(examination, /<del>/)
+})
+
+test('student uses change.fields for empty originals and displays the server type', () => {
+  const state = states()
+  const { StudentExams } = load('../src/pages/exams/StudentExams.tsx', {
+    react: state.hooks, './ExamCard': cards, '../../api/queries': { useExams: () => ({ data: {
+      group, kinds: ['session'], events: [{ ...exam, kind: { code: 'session', name: 'Сессия' },
+        type: { code: 'credit', name: 'Зачёт' }, change: { date: null, start_time: null, room: null, fields: ['room'] } }],
+    } }) },
+  }, { navigator: { onLine: true } })
+  const html = renderToStaticMarkup(StudentExams({ groupId: 1 }))
+  assert.match(html, /Зачёт/)
+  assert.match(html, /<del>Аудитория не указана<\/del>/)
+  assert.doesNotMatch(html, /<del>Время не указано<\/del>/)
+})
+
+test('admin form saves event type and preview shows sheet groups and academic year', async () => {
+  let state = states()
+  const report = { events_count: 1, applied: false, warnings: [], mappings: [],
+    sheets: [{ sheet: '3 курс', groups: ['ПИ-301', 'ПрИ-301'], academic_year: '2025-2026', events_count: 1 }],
+    rows: [{ ...exam, kind: 'session', event_type: 'exam', sheet: '3 курс', row: 13, groups: [group], original: { room: null } }],
+  }
+  const mutation = { isPending: false, mutateAsync: async () => {} }
+  const { AdminExams } = load('../src/pages/admin/AdminExams.tsx', {
+    react: { ...React, useEffect() {}, useState: initial => state.hooks.useState(initial) },
+    '../../api/client': { ApiError: class extends Error {} }, '../exams/ExamCard': cards,
+    '../../api/queries': { useAdminExams: () => ({ data: [] }), useExamImports: () => ({ data: [] }),
+      useExamMutations: () => ({ create: mutation, upload: { ...mutation, mutateAsync: async () => report } }) },
+  })
+  const render = () => { state.reset(); return AdminExams({ token: 'admin', groups: [group], onUnauthorized() {} }) }
+  let tree = render()
+  find(tree, node => node.type === 'button' && node.props.children === 'Добавить').props.onClick()
+  tree = render()
+  const form = find(tree, node => typeof node.type === 'function' && node.props.onSave)
+  state = states()
+  let saved
+  const formProps = { ...form.props, onSave: async body => { saved = body } }
+  state.reset()
+  let formTree = form.type(formProps)
+  const selector = find(formTree, node => node.type === 'select' && node.props['aria-label'] === 'Тип события')
+  assert(selector)
+  selector.props.onChange({ target: { value: 'graded_credit' } })
+  state.reset()
+  formTree = form.type(formProps)
+  assert.equal(find(formTree, node => node.type === 'select' && node.props['aria-label'] === 'Тип события').props.value, 'graded_credit')
+  find(formTree, node => node.type === 'form').props.onSubmit({ preventDefault() {} })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(saved.event_type, 'graded_credit')
+  const uploadState = states()
+  const { AdminExams: UploadAdmin } = load('../src/pages/admin/AdminExams.tsx', {
+    react: uploadState.hooks, '../../api/client': { ApiError: class extends Error {} }, '../exams/ExamCard': cards,
+    '../../api/queries': { useAdminExams: () => ({ data: [] }), useExamImports: () => ({ data: [] }),
+      useExamMutations: () => ({ upload: { ...mutation, mutateAsync: async () => report } }) },
+  })
+  const uploadRender = () => { uploadState.reset(); return UploadAdmin({ token: 'admin', groups: [group], onUnauthorized() {} }) }
+  tree = uploadRender()
+  find(tree, node => node.type === 'input' && node.props.type === 'file').props.onChange({ target: { files: [{ name: 'grid.xlsx' }] } })
+  tree = uploadRender()
+  find(tree, node => node.type === 'button' && node.props.children === 'Проверить').props.onClick()
+  await new Promise(resolve => setImmediate(resolve))
+  const html = renderToStaticMarkup(uploadRender())
+  assert.match(html, /2025-2026/)
+  assert.match(html, /ПИ-301, ПрИ-301/)
+  assert.match(html, /Экзамен/)
+  assert.match(html, /<del>Аудитория не указана<\/del>/)
 })

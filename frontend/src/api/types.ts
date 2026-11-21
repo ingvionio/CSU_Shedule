@@ -429,32 +429,38 @@ export type ImportHistory = {
 
 /* Сессия и пересдачи */
 export type ExamKind = 'session' | 'retake'
+export type ExamType = 'consultation' | 'exam' | 'credit' | 'graded_credit' | 'other'
+export type ExamChangedField = 'date' | 'start_time' | 'room'
 export type ExamGroup = { id: number; name: string; course: number }
 export type ExamValues = {
   kind: ExamKind; date: string; start_time: string | null; subject: string
   teacher: string | null; room: string | null; note: string | null
+  event_type: ExamType | null
 }
 export type ExamInput = ExamValues & { group_ids: number[] }
-export type ExamOriginal = { original_date: string | null; original_start_time: string | null; original_room: string | null }
-export type ExamEvent = ExamValues & ExamOriginal & {
+export type ExamOriginal = Partial<Record<ExamChangedField, string | null>> | null
+export type ExamEvent = ExamValues & {
+  original: ExamOriginal
   id: number; semester_id: number; groups: ExamGroup[]; cancelled: boolean
   source: 'import' | 'manual'; import_id: number | null; created_at: string; updated_at: string
 }
 export type ExamWarning = { sheet: string; row: number; column: string; text: string; reason: string }
 export type ExamMapping = { short_name: string; group_id: number | null; group_name: string | null }
-export type ExamPreview = ExamValues & ExamOriginal & { sheet: string; row: number; groups: ExamGroup[] }
+export type ExamPreview = ExamValues & { sheet: string; row: number; groups: ExamGroup[]; original: ExamOriginal }
 export type ExamImportReport = {
   events_count: number; warnings: ExamWarning[]; mappings: ExamMapping[]; rows: ExamPreview[]
+  sheets: { sheet: string; groups: string[]; academic_year: string | null; events_count: number }[]
   applied: boolean; import_id: number | null
 }
 export type ExamImportHistory = {
   id: number; semester_id: number; kind: ExamKind; file_name: string; events_count: number
   warnings: ExamWarning[]; uploaded_by: string | null; uploaded_at: string
 }
-export type StudentExam = Omit<ExamValues, 'kind'> & {
+export type StudentExam = Omit<ExamValues, 'kind' | 'event_type'> & {
   id: number; kind: { code: ExamKind; name: string }; groups: string[]
+  type: { code: ExamType; name: string } | null
   status: 'regular' | 'changed' | 'cancelled'
-  change: { date: string | null; start_time: string | null; room: string | null } | null
+  change: { date: string | null; start_time: string | null; room: string | null; fields: ExamChangedField[] } | null
   is_past: boolean; days_left: number
 }
 export type GroupExams = { group: ExamGroup; kinds: ExamKind[]; events: StudentExam[] }

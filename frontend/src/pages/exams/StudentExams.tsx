@@ -16,10 +16,8 @@ function ExamDates({ events, groupName }: { events: StudentExam[]; groupName: st
   for (const event of events) dates.set(event.date, [...(dates.get(event.date) ?? []), event])
   return <>{[...dates].map(([date, items]) => <section className="exam-date" key={date}>
     <h2>{examDateLabel(date)} {!items[0].is_past && <small>{relativeDate(items[0].days_left)}</small>}</h2>
-    {items.map(event => <ExamCard key={event.id} event={event} cancelled={event.status === 'cancelled'} original={{
-      original_date: event.change?.date ?? null, original_start_time: event.change?.start_time ?? null,
-      original_room: event.change?.room ?? null,
-    }}>
+    {items.map(event => <ExamCard key={event.id} event={event} cancelled={event.status === 'cancelled'}
+      original={event.change ? Object.fromEntries((event.change.fields ?? []).map(field => [field, event.change?.[field] ?? null])) : null}>
       {event.status === 'changed' && <span className="badge badge-changed">Изменено</span>}
       {event.groups.some(group => group !== groupName) && <p className="muted">Вместе с {event.groups.filter(group => group !== groupName).join(', ')}</p>}
     </ExamCard>)}

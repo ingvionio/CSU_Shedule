@@ -726,6 +726,10 @@ button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visibl
 .exam-card { padding: 18px; margin: 10px 0; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); overflow-wrap: anywhere; }
 .exam-card h3 { margin: 8px 0; }
 .exam-card p { margin: 7px 0; line-height: 1.5; }
+.exam-type-consultation { border-left: 3px solid var(--line-strong); }
+.exam-type-consultation .exam-type-badge { color: var(--muted); background: var(--canvas); }
+.exam-type-exam { border-left: 4px solid var(--primary); }
+.exam-type-exam .exam-type-badge { color: var(--primary); background: var(--purple-soft); font-weight: 700; }
 .exam-time { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-weight: 600; }
 .exam-card del, .exam-report del { color: var(--muted); margin-right: 6px; }
 .exam-cancelled .exam-main { text-decoration: line-through; opacity: .65; }

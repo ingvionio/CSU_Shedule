@@ -9,6 +9,7 @@ from app.models import Group, Semester
 from app.models.exam import ExamEvent, ExamImport, exam_event_groups
 from app.schemas.exam import ExamImportOut, ExamKind, ExamMappingOut, ExamPreviewRow
 from app.services.exam_parser import ExamRow, ExamWarning, parse_workbook
+from app.services.session_grid_parser import parse_workbook as parse_session_grid
 
 
 def normalize_group(value: str) -> str:
@@ -30,7 +31,7 @@ def _insert_events(db: Session, records: list[tuple[ExamRow, list[Group]]], seme
                    kind: ExamKind, import_id: int) -> None:
     for row, groups in records:
         values = {key: getattr(row, key) for key in ["date", "start_time", "subject", "teacher", "room", "note",
-                                                  "original_date", "original_start_time", "original_room"]}
+                                                  "original", "event_type"]}
         db.add(ExamEvent(semester_id=semester_id, kind=kind, source="import", import_id=import_id,
                          groups=groups, **values))
     db.flush()
@@ -40,7 +41,7 @@ def import_workbook(db: Session, payload: bytes, semester: Semester, kind: ExamK
                     file_name: str, uploaded_by: str, *, apply: bool = False) -> ExamImportOut:
     if kind not in ("session", "retake"):
         raise ValueError("Неизвестный вид расписания")
-    parsed = parse_workbook(payload)
+    parsed = parse_session_grid(payload, semester.start_date) if kind == "session" else parse_workbook(payload)
     group_lookup = {normalize_group(group.name): group for group in db.scalars(select(Group).order_by(Group.id))}
     mappings: dict[str, ExamMappingOut] = {}
     records: list[tuple[ExamRow, list[Group]]] = []
@@ -62,6 +63,7 @@ def import_workbook(db: Session, payload: bytes, semester: Semester, kind: ExamK
     report = ExamImportOut(
         events_count=len(records), warnings=[asdict(issue) for issue in parsed.warnings],
         mappings=list(mappings.values()),
+        sheets=[asdict(sheet) for sheet in parsed.sheets],
         rows=[ExamPreviewRow(kind=kind, groups=groups, **{key: value for key, value in asdict(row).items()
                              if key not in ("groups", "group_column")}) for row, groups in records],
     )

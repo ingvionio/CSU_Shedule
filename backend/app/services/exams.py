@@ -1,5 +1,5 @@
 """Редактирование разовых событий и готовый список для студента."""
-from datetime import date
+from datetime import date, time
 
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
@@ -10,6 +10,14 @@ from app.schemas.exam import ExamCreate, ExamPatch, GroupExamsOut
 from app.services.schedule import ScheduleError, active_semester
 
 KIND_NAMES = {"session": "Сессия", "retake": "Пересдача"}
+TYPE_NAMES = {"consultation": "Консультация", "exam": "Экзамен", "credit": "Зачёт",
+              "graded_credit": "Дифф. зачёт", "other": "Другое"}
+
+
+def _history_value(value: date | time | str | None) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat() if isinstance(value, date) else value.strftime("%H:%M") if isinstance(value, time) else value
 
 
 class ExamError(Exception):
@@ -74,11 +82,12 @@ def patch_event(db: Session, event_id: int, data: ExamPatch) -> ExamEvent:
         event.groups = _groups(db, values.pop("group_ids"))
     for field, value in values.items():
         if field in ("date", "start_time", "room") and getattr(event, field) != value:
-            history = f"original_{field}"
-            original = getattr(event, history)
-            if original is None:
-                original = getattr(event, field)
-            setattr(event, history, None if value == original else original)
+            original = dict(event.original or {})
+            if field not in original:
+                original[field] = _history_value(getattr(event, field))
+            if _history_value(value) == original[field]:
+                del original[field]
+            event.original = original or None
         setattr(event, field, value)
     db.commit()
     db.refresh(event)
@@ -110,17 +119,18 @@ def student_events(db: Session, group_id: int) -> GroupExamsOut:
     current_date = today()
     items = []
     for event in events:
-        changed = any(value is not None for value in
-                      [event.original_date, event.original_start_time, event.original_room])
+        changed = bool(event.original)
+        original = event.original or {}
         items.append(dict(
             id=event.id, kind={"code": event.kind, "name": KIND_NAMES[event.kind]},
+            type={"code": event.event_type, "name": TYPE_NAMES[event.event_type]} if event.event_type else None,
             date=event.date, start_time=event.start_time.strftime("%H:%M") if event.start_time else None,
             subject=event.subject, teacher=event.teacher, room=event.room, note=event.note,
             groups=[group.name for group in event.groups],
             status="cancelled" if event.cancelled else "changed" if changed else "regular",
-            change={"date": event.original_date,
-                    "start_time": event.original_start_time.strftime("%H:%M") if event.original_start_time else None,
-                    "room": event.original_room} if changed else None,
+            change={"date": original.get("date"), "start_time": original.get("start_time"),
+                    "room": original.get("room"),
+                    "fields": [field for field in ("date", "start_time", "room") if field in original]} if changed else None,
             is_past=event.date < current_date, days_left=(event.date - current_date).days,
         ))
     return GroupExamsOut(group=group, kinds=[kind for kind in KIND_NAMES if any(e.kind == kind for e in events)], events=items)

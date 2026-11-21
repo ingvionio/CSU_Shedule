@@ -64,11 +64,11 @@ def test_rich_strike_and_whole_cell_strike(tmp_path):
     book.close()
     parsed = parse_workbook(path.read_bytes())
     first, second, third = parsed.rows
-    assert (first.date, first.original_date) == (date(2026, 10, 5), date(2026, 9, 28))
-    assert (first.start_time, first.original_start_time) == (time(15, 15), time(13, 15))
-    assert (first.room, first.original_room) == ("132а", "132")
+    assert (first.date, first.original["date"]) == (date(2026, 10, 5), "2026-09-28")
+    assert (first.start_time, first.original["start_time"]) == (time(15, 15), "13:15")
+    assert (first.room, first.original["room"]) == ("132а", "132")
     assert first.note == "Внимание! Получить задание!!!"
-    assert second.room is None and second.original_room == "307 (11 корпус)"
+    assert second.room is None and second.original["room"] == "307 (11 корпус)"
     assert third.sheet == "2 курс"
     assert len(parsed.warnings) == 1
 

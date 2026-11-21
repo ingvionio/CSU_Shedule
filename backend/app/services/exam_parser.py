@@ -32,16 +32,32 @@ class ExamRow:
     teacher: str | None
     room: str | None
     note: str | None
-    original_date: date | None = None
-    original_start_time: time | None = None
-    original_room: str | None = None
+    original: dict[str, str | None] | None = None
+    event_type: str | None = None
     group_column: str = ""
+
+
+@dataclass
+class ExamSheet:
+    sheet: str
+    groups: list[str]
+    academic_year: str | None
+    events_count: int = 0
 
 
 @dataclass
 class ParsedExams:
     rows: list[ExamRow] = field(default_factory=list)
     warnings: list[ExamWarning] = field(default_factory=list)
+    sheets: list[ExamSheet] = field(default_factory=list)
+
+
+def original_values(current: dict[str, object], old: dict[str, object]) -> dict[str, str | None] | None:
+    result: dict[str, str | None] = {}
+    for key, value in old.items():
+        if value is not None and value != current[key]:
+            result[key] = value.strftime("%H:%M") if isinstance(value, time) else value.isoformat() if isinstance(value, date) else str(value)
+    return result or None
 
 
 def clean(text: object) -> str:
@@ -83,7 +99,10 @@ def _time(value: object) -> time | None:
         return value
     match = re.fullmatch(r"(\d{1,2})[:.](\d{2})", clean(value))
     if match:
-        return time(int(match[1]), int(match[2]))
+        try:
+            return time(int(match[1]), int(match[2]))
+        except ValueError as error:
+            raise ValueError("неверное время") from error
     raise ValueError("неверное время")
 
 
@@ -122,6 +141,8 @@ def parse_workbook(payload: bytes) -> ParsedExams:
     book = load_workbook(BytesIO(payload), rich_text=True, data_only=True)
     try:
         for sheet in book:
+            summary = ExamSheet(sheet.title, [], None)
+            result.sheets.append(summary)
             columns: dict[str, int] = {}
             for cells in sheet.iter_rows():
                 header = {_HEADERS[key]: index for index, cell in enumerate(cells)
@@ -154,11 +175,15 @@ def parse_workbook(payload: bytes) -> ParsedExams:
                     teacher = clean(values["teacher"][0]) or None
                     if len(teacher or "") > 200:
                         raise ValueError("преподаватель длиннее 200 символов")
+                    groups = parse_groups(values["groups"][0])
+                    summary.groups.extend(name for name in groups if name not in summary.groups)
+                    summary.events_count += 1
                     result.rows.append(ExamRow(
                         sheet=sheet.title, row=cells[0].row, date=current_date, start_time=current_time,
-                        groups=parse_groups(values["groups"][0]), subject=subject, teacher=teacher,
-                        room=room, note=note, original_date=old_date, original_start_time=old_time,
-                        original_room=old_room, group_column=get_column_letter(columns["groups"] + 1),
+                        groups=groups, subject=subject, teacher=teacher, room=room, note=note,
+                        original=original_values({"date": current_date, "start_time": current_time, "room": room},
+                                                 {"date": old_date, "start_time": old_time, "room": old_room}),
+                        group_column=get_column_letter(columns["groups"] + 1),
                     ))
                 except ValueError as error:
                     cell = cells[columns[current_field]]
