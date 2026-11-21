@@ -122,8 +122,9 @@ export const api = {
   timeSlots: () => request<TimeSlot[]>('/time-slots'),
   lessonTypes: () => request<LessonType[]>('/lesson-types'),
   currentWeek: () => request<CurrentWeek>('/weeks/current'),
+  // events=1: этот клиент умеет показывать экзамены (старые APK их не получают).
   schedule: (groupId: number, week?: number) =>
-    request<WeekSchedule>(`/groups/${groupId}/schedule${week ? `?week=${week}` : ''}`),
+    request<WeekSchedule>(`/groups/${groupId}/schedule?events=1${week ? `&week=${week}` : ''}`),
   streamSchedule: (token: string, groupIds: number[], week: number) => {
     const params = new URLSearchParams(groupIds.map((id) => ['group_ids', String(id)]))
     params.set('week', String(week))

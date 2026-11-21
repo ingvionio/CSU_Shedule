@@ -26,7 +26,7 @@ def test_mixed_day_order_and_event_contract(stream_client, stream_db):
         no_time = add_event(db, groups=groups, event_type="consultation")
         off_grid = add_event(db, groups=groups, start_time=time(15, 15))
         ids = [f"e-{no_time.id}", "l-1", f"e-{timed.id}", f"e-{off_grid.id}"]
-    data = stream_client.get("/api/v1/groups/1/schedule?week=12").json()
+    data = stream_client.get("/api/v1/groups/1/schedule?events=1&week=12").json()
     items = data["days"][0]["lessons"]
     assert [item["id"] for item in items] == ids
     assert items[0]["start_time"] is None and items[0]["slot"] is None
@@ -60,24 +60,24 @@ def test_extended_range_and_default_week(stream_client, stream_db, monkeypatch):
         assert week.next == 19
     from app.api.v1 import public
     monkeypatch.setattr(public, "_today", lambda: date(2027, 1, 19))
-    response = stream_client.get("/api/v1/groups/1/schedule?week=21")
+    response = stream_client.get("/api/v1/groups/1/schedule?events=1&week=21")
     assert response.status_code == 200, response.text
     assert lessons(response.json()) == []
     week = response.json()["week"]
     assert week["next"] is None and week["prev"] == 20 and week["parity"] == "odd"
-    assert stream_client.get("/api/v1/groups/1/schedule?week=22").status_code == 404
-    default = stream_client.get("/api/v1/groups/1/schedule").json()["week"]
+    assert stream_client.get("/api/v1/groups/1/schedule?events=1&week=22").status_code == 404
+    default = stream_client.get("/api/v1/groups/1/schedule?events=1").json()["week"]
     assert default["number"] == 21 and default["is_current"]
     assert stream_client.get("/api/v1/weeks/current").json()["number"] == 21
-    sunday = stream_client.get("/api/v1/groups/2/schedule?week=21").json()["days"][-1]
+    sunday = stream_client.get("/api/v1/groups/2/schedule?events=1&week=21").json()["days"][-1]
     assert sunday["date"] == "2027-01-24" and sunday["weekday"] == 7
     assert sunday["lessons"][0]["start_time"] == "15:00"
 
 
 def test_original_range_without_events(stream_client):
-    data = stream_client.get("/api/v1/groups/1/schedule?week=18").json()
+    data = stream_client.get("/api/v1/groups/1/schedule?events=1&week=18").json()
     assert data["week"]["next"] is None and len(data["days"]) == 6
-    assert stream_client.get("/api/v1/groups/1/schedule?week=19").status_code == 404
+    assert stream_client.get("/api/v1/groups/1/schedule?events=1&week=19").status_code == 404
 
 
 def test_events_do_not_conflict_or_enter_stream_and_notes(stream_client, stream_db, headers):
@@ -91,7 +91,7 @@ def test_events_do_not_conflict_or_enter_stream_and_notes(stream_client, stream_
     assert response.status_code == 201, response.text
     assert not any(item["id"].startswith("e-") for item in lessons(stream(stream_client, headers).json()))
     assert any(item["id"].startswith("e-") for item in lessons(
-        stream_client.get("/api/v1/groups/1/schedule?week=12").json()))
+        stream_client.get("/api/v1/groups/1/schedule?events=1&week=12").json()))
 
 
 def test_master_exam_only_is_not_pending(stream_client, stream_db, monkeypatch):
@@ -99,7 +99,7 @@ def test_master_exam_only_is_not_pending(stream_client, stream_db, monkeypatch):
     monkeypatch.setattr(public, "_today", lambda: date(2026, 11, 16))
     with stream_db() as db:
         add_event(db, groups=[db.get(Group, 3)])
-    data = stream_client.get("/api/v1/groups/3/schedule?week=12").json()
+    data = stream_client.get("/api/v1/groups/3/schedule?events=1&week=12").json()
     assert data["week"]["schedule_pending"] is False
     assert len(lessons(data)) == 1
 
@@ -115,7 +115,22 @@ def test_filled_empty_field_is_not_a_change(stream_client, stream_db):
                           original={"start_time": None, "room": "132"})
         ids = {f"e-{filled.id}": "filled", f"e-{moved.id}": "moved"}
     items = {ids[item["id"]]: item for item in
-             stream_client.get("/api/v1/groups/1/schedule?week=12").json()["days"][0]["lessons"] if item["id"] in ids}
+             stream_client.get("/api/v1/groups/1/schedule?events=1&week=12").json()["days"][0]["lessons"] if item["id"] in ids}
     assert items["filled"]["status"] == "regular" and items["filled"]["change"] is None
     assert items["moved"]["status"] == "changed"
     assert items["moved"]["change"] == {"original": {"room": "132"}}
+
+
+def test_old_clients_get_schedule_without_events(stream_client, stream_db):
+    # APK 1.1.1 не просит события: неделя как раньше — без экзаменов и без воскресенья
+    with stream_db() as db:
+        groups = list(db.scalars(select(Group).where(Group.id == 1)))
+        add_event(db, groups=groups, event_type="exam")  # без времени — старый клиент на таком падал
+        add_event(db, groups=groups, date=date(2026, 11, 22), start_time=time(10, 0))  # воскресенье
+    old = stream_client.get("/api/v1/groups/1/schedule?week=12").json()
+    assert all(not item["id"].startswith("e-") for day in old["days"] for item in day["lessons"])
+    assert all(item["start_time"] and item["end_time"] for day in old["days"] for item in day["lessons"])
+    assert len(old["days"]) == 6
+    new = stream_client.get("/api/v1/groups/1/schedule?events=1&week=12").json()
+    assert sum(item["id"].startswith("e-") for day in new["days"] for item in day["lessons"]) == 2
+    assert len(new["days"]) == 7

@@ -123,7 +123,7 @@ def test_patch_first_original_and_return_to_baseline(exam_db):
 
 
 def week_events(client, group_id, week=6):
-    response = client.get(f"/api/v1/groups/{group_id}/schedule?week={week}")
+    response = client.get(f"/api/v1/groups/{group_id}/schedule?events=1&week={week}")
     assert response.status_code == 200, response.text
     return [item for day in response.json()["days"] for item in day["lessons"]]
 
@@ -147,7 +147,7 @@ def test_student_sorted_status_dates_and_groups(exam_db):
     assert last["event"]["groups"] == [g.name for g in groups[:2]]
     assert [e["id"] for e in week_events(client, groups[1].id)] == [last["id"]]
     assert week_events(client, groups[2].id) == []
-    previous = client.get(f"/api/v1/groups/{groups[0].id}/schedule?week=5").json()
+    previous = client.get(f"/api/v1/groups/{groups[0].id}/schedule?events=1&week=5").json()
     assert previous["days"][-1]["weekday"] == 7
     assert previous["days"][-1]["lessons"][0]["status"] == "cancelled"
     assert client.get(f"/api/v1/groups/{groups[0].id}/exams").status_code == 404

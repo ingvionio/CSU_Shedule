@@ -107,6 +107,9 @@ def current_week(db: Session = Depends(get_db)) -> CurrentWeekOut:
 def group_schedule(
     group_id: int,
     week: int | None = Query(default=None, ge=1, description="Номер недели; без него -- текущая"),
+    # Старые клиенты (APK 1.1.1) не умеют события без времени и падают на них —
+    # экзамены получают только клиенты, которые явно об этом просят.
+    events: bool = Query(default=False, description="Включить события сессии и пересдач"),
     db: Session = Depends(get_db),
 ) -> WeekScheduleOut:
     try:
@@ -117,7 +120,7 @@ def group_schedule(
             semester, today, weeks_service.last_available_week(db, semester)
         )
         info, days = schedule_service.build_week_schedule(
-            db, group, semester, week_number, today, include_exams=True
+            db, group, semester, week_number, today, include_exams=events
         )
     except schedule_service.ScheduleError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
