@@ -154,15 +154,18 @@ test('admin creates, edits, cancels, restores and deletes through mutations', as
   assert.equal(calls.at(-1).value, 1)
 })
 
-test('cards distinguish consultation and exam and show originally empty fields', () => {
+test('cards distinguish consultation and exam; only previously filled fields are struck', () => {
   const render = (type, original) => renderToStaticMarkup(React.createElement(cards.AdminExamCard, {
     event: { ...exam, type }, original, cancelled: false,
   }))
   const consultation = render({ code: 'consultation', name: 'Консультация' }, { start_time: null, room: null })
   assert.match(consultation, /exam-type-consultation/)
   assert.match(consultation, /Консультация/)
-  assert.match(consultation, /<del>Время не указано<\/del>/)
-  assert.match(consultation, /<del>Аудитория не указана<\/del>/)
+  // Пустое прежнее значение — поле дополнили, а не изменили: без зачёркивания
+  assert.doesNotMatch(consultation, /<del>/)
+  const moved = render({ code: 'consultation', name: 'Консультация' }, { start_time: '09:00', room: '214' })
+  assert.match(moved, /<del>09:00<\/del>/)
+  assert.match(moved, /<del>214<\/del>/)
   const examination = render({ code: 'exam', name: 'Экзамен' }, null)
   assert.match(examination, /exam-type-exam/)
   assert.match(examination, /Экзамен/)
@@ -217,5 +220,5 @@ test('admin form saves event type and preview shows sheet groups and academic ye
   assert.match(html, /2025-2026/)
   assert.match(html, /ПИ-301, ПрИ-301/)
   assert.match(html, /Экзамен/)
-  assert.match(html, /<del>Аудитория не указана<\/del>/)
+  assert.doesNotMatch(html, /<del>Аудитория не указана<\/del>/)
 })

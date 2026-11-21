@@ -74,9 +74,9 @@ function ImportReport({ report }: { report: ExamImportReport }) {
       <tbody>{report.rows.map((row, index) => <tr key={index}>
         <td>{row.sheet} / {row.row}</td>
         <td>{row.original?.date && <del>{examDateLabel(row.original.date)}</del>} {examDateLabel(row.date)}<br />
-          {row.original && 'start_time' in row.original && <del>{row.original.start_time ?? 'Время не указано'}</del>} {row.start_time ?? '—'}</td>
+          {row.original?.start_time && <del>{row.original.start_time}</del>} {row.start_time ?? '—'}</td>
         <td>{row.event_type && <small>{examTypeLabels[row.event_type]}</small>}{row.subject}<small>{row.teacher}</small></td><td>{row.groups.map(group => group.name).join(', ')}</td>
-        <td>{row.original && 'room' in row.original && <del>{row.original.room ?? 'Аудитория не указана'}</del>} {row.room}<small>{row.note}</small></td>
+        <td>{row.original?.room && <del>{row.original.room}</del>} {row.room}<small>{row.note}</small></td>
       </tr>)}</tbody></table></div>
     <h4>Сопоставление групп</h4>
     <ul>{report.mappings.map(item => <li key={item.short_name}>{item.short_name} → {item.group_name ?? 'не найдена'}</li>)}</ul>

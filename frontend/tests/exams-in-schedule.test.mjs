@@ -42,7 +42,7 @@ const components = load('../src/ScheduleComponents.tsx')
 const event = { id: 'e-1', start_time: '15:00', end_time: null, slot: 5,
   subject: 'Информатика', teacher: 'Иванов', room: '132', online_url: null, subgroup: null,
   type: { code: 'exam', name: 'Экзамен' }, status: 'changed',
-  change: { original: { date: '2026-11-15', start_time: null, room: '122' } },
+  change: { original: { date: '2026-11-15', start_time: '14:00', room: '122' } },
   event: { kind: 'session', note: 'Взять зачётку', groups: ['Своя', 'Другая'] } }
 const day = { date: '2026-11-16', weekday: 1, is_today: true, lessons: [event] }
 const slots = [{ number: 1, start_time: '08:00', end_time: '09:30' },
@@ -55,7 +55,7 @@ test('day card shows event badge, single time, note, other groups and struck ori
   assert(html.includes('<i>15:00</i>'))
   assert.doesNotMatch(html, /15:00–|null|undefined/)
   assert.match(html, /<del>[^<]*15 ноября/)
-  assert.match(html, /<del>[^<]*Время не указано/)
+  assert.match(html, /<del>[^<]*14:00/)
   assert.match(html, /<del>[^<]*122/)
   assert.match(html, /event-note[^>]*>Взять зачётку/)
   assert.match(html, /Вместе с Другая/)

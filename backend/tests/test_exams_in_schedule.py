@@ -102,3 +102,20 @@ def test_master_exam_only_is_not_pending(stream_client, stream_db, monkeypatch):
     data = stream_client.get("/api/v1/groups/3/schedule?week=12").json()
     assert data["week"]["schedule_pending"] is False
     assert len(lessons(data)) == 1
+
+
+def test_filled_empty_field_is_not_a_change(stream_client, stream_db):
+    with stream_db() as db:
+        groups = list(db.scalars(select(Group).where(Group.id == 1)))
+        # аудитории и времени не было — их проставили: не «изменено»
+        filled = add_event(db, groups=groups, start_time=time(9, 40), room="132а",
+                           original={"start_time": None, "room": None})
+        # аудитория была и поменялась — «изменено», прежнее значение в change
+        moved = add_event(db, groups=groups, start_time=time(11, 20), room="132а",
+                          original={"start_time": None, "room": "132"})
+        ids = {f"e-{filled.id}": "filled", f"e-{moved.id}": "moved"}
+    items = {ids[item["id"]]: item for item in
+             stream_client.get("/api/v1/groups/1/schedule?week=12").json()["days"][0]["lessons"] if item["id"] in ids}
+    assert items["filled"]["status"] == "regular" and items["filled"]["change"] is None
+    assert items["moved"]["status"] == "changed"
+    assert items["moved"]["change"] == {"original": {"room": "132"}}

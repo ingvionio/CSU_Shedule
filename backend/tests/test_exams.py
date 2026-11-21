@@ -209,8 +209,9 @@ def test_original_null_fields_and_independent_reverts(exam_db):
         assert db.get(ExamEvent, item["id"]).original == {"start_time": None, "room": None}
     student = week_events(client, groups[0].id)[0]
     assert student["type"] == {"code": "consultation", "name": "Консультация"}
-    assert student["status"] == "changed"
-    assert student["change"] == {"original": {"start_time": None, "room": None}}
+    # История хранит «было пусто», но студенту это не изменение: поля дополнили
+    assert student["status"] == "regular"
+    assert student["change"] is None
     result = client.patch(path, headers=admin_headers(), json={"start_time": None, "event_type": "exam"}).json()
     assert result["original"] == {"room": None} and result["event_type"] == "exam"
     result = client.patch(path, headers=admin_headers(), json={"room": None}).json()

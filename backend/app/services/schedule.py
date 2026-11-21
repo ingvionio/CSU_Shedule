@@ -302,8 +302,9 @@ EVENT_TYPE_NAMES = {
 
 def _serialize_exam(event: ExamEvent, slots: dict[time, int]) -> dict:
     code = "retake" if event.kind == "retake" else event.event_type or "other"
+    # Пустое прежнее значение не показываем: поле дополнили, а не изменили (решение Лёши).
     original = {field: value for field, value in (event.original or {}).items()
-                if field in ("date", "start_time", "room")}
+                if field in ("date", "start_time", "room") and value is not None}
     return {
         "id": f"e-{event.id}", "start_time": _hhmm(event.start_time) if event.start_time else None,
         "end_time": None, "slot": slots.get(event.start_time),
