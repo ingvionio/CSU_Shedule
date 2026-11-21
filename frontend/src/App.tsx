@@ -585,7 +585,17 @@ export function App() {
 
                   {schedule.data &&
                     (view === 'week' ? (
-                      <WeekGrid groupName={schedule.data.group.name} days={days} slots={timeSlots.data ?? []} currentMinutes={currentMinutes} schedulePending={week?.schedule_pending} />
+                      <WeekGrid
+                        groupName={schedule.data.group.name}
+                        days={days}
+                        slots={timeSlots.data ?? []}
+                        currentMinutes={currentMinutes}
+                        schedulePending={week?.schedule_pending}
+                        // Клик по паре открывает то же окно, что в «На день»: домашка и личная заметка.
+                        onLessonClick={studentSession && personalNotes.isSuccess ? openNote : undefined}
+                        notedKeys={studentSession ? new Set(notesByKey.keys()) : undefined}
+                        homeworkCounts={studentSession ? homeworkCounts : undefined}
+                      />
                     ) : (
                       <>
                         <div className="week-picker-clip">
