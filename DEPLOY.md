@@ -32,6 +32,26 @@ IP студентов: uvicorn по умолчанию доверяет заго
 Ниже `$REL` — имя релиза, `<короткий коммит>-<ГГГГММДД>`, например
 `bbf3c3d-20261121`.
 
+## Кто что делает (выкладка уведомлений и сессии, ноябрь 2026)
+
+Выкатывает и собирает APK — **Тоха (sadtowa)**: у него ключ подписи и доступ
+к серверу.
+
+| Кто | Что | Раздел |
+|---|---|---|
+| **Лёша** | передать Тохе `google-services.json` (Firebase, проект `iit-app`) | 0 |
+| **Лёша** | передать Тохе ключ Firebase `firebase-service-account.json` — лично, не в общий чат; это секрет | 2.4 |
+| **Лёша** | дать адрес почты для `VAPID_SUBJECT` | 2.4 |
+| **Тоха** | собрать APK 1.2 своим ключом `csu-release-key.jks` и проверить подпись | 0 |
+| **Тоха** | проверить, что `JWT_SECRET` на проде не `change-me`, и что нет групп-дублей | 2.1, 2.4 |
+| **Тоха** | бэкап → код и venv → настройки → миграции → `csu-backend` + новый `csu-worker` → сайт с новым APK → nginx | 1–2 |
+| **Тоха** | проверка: push в браузер и в APK, экзамены в расписании | 3 |
+| **Лёша** | предупредить студентов: обновить приложение со страницы «Скачать для Android» (встанет поверх старого) — старое 1.1.1 работает, но без экзаменов и push | — |
+
+Важно про загрузки после выкладки: каждая применённая загрузка расписания
+(семестр, понедельная, сессия) через 2 минуты отправляет студентам этих групп
+сообщение и push «Расписание обновлено» — загружать, когда это уместно.
+
 ## 0. APK — собирает владелец ключа (sadtowa)
 
 Опубликованные версии приложения (до 1.1.1, `versionCode 3`) подписаны
@@ -44,9 +64,9 @@ IP студентов: uvicorn по умолчанию доверяет заго
 (`ANDROID_HOME` или `sdk.dir` в `frontend/android/local.properties`),
 подробнее — [frontend/README.md](frontend/README.md#android-apk).
 
-1. **Код.** Ветка `feature/notifications` (после слияния — `master`):
+1. **Код.** Ветка `master`:
    ```bash
-   git fetch && git checkout feature/notifications && git pull
+   git fetch && git checkout master && git pull
    ```
 2. **Firebase.** Взять у Лёши `google-services.json` (проект `iit-app`) и
    положить в `frontend/android/app/`. Без него APK соберётся, но push
@@ -80,8 +100,8 @@ IP студентов: uvicorn по умолчанию доверяет заго
    & "$bt\aapt2.exe" dump badging android\app\build\outputs\apk\release\app-release.apk | Select-String "^package:"   # versionCode='4' versionName='1.2'
    ```
    Если DN другой — APK подписан не тем ключом, раздавать нельзя.
-6. **Передать** `android/app/build/outputs/apk/release/app-release.apk` тому,
-   кто выкатывает (это не секрет, его и так скачивают студенты).
+6. **Готовый файл** — `android/app/build/outputs/apk/release/app-release.apk`;
+   он кладётся в сборку сайта в разделе 1 (не секрет, его скачивают студенты).
 
 > Пароль ключа раньше был записан значением по умолчанию в `build.gradle`
 > ветки `feature/apk-build`. Если репозиторий публичный, пароли стоит сменить —
@@ -98,18 +118,15 @@ REL=$(git rev-parse --short master)-$(date +%Y%m%d)
 git archive --format=tar.gz -o backend-$REL.tar.gz master backend deploy
 ```
 
-**APK** — готовый файл от sadtowa (раздел 0), подписанный и проверенный.
-
-**Сайт** — собирается **без** `VITE_API_URL` (сайт открыт на двух доменах
-и ходит на `/api` своего домена), потом в сборку кладётся новый APK
-(`APK=` — путь к файлу от sadtowa):
+**Сайт** — собирается **после** APK из раздела 0 и **без** `VITE_API_URL`
+(сайт открыт на двух доменах и ходит на `/api` своего домена). `npm run build`
+пересобирает `dist`, поэтому APK копируется в него уже после сборки:
 
 ```bash
-APK=~/Downloads/app-release.apk
 cd frontend
 npm ci
 npm run build
-cp "$APK" dist/downloads/raspisanie-iit.apk
+cp android/app/build/outputs/apk/release/app-release.apk dist/downloads/raspisanie-iit.apk
 tar -czf ../frontend-$REL.tar.gz -C dist .
 cd ..
 ```
