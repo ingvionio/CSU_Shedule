@@ -93,6 +93,14 @@ pg_restore --list $R/database-before.dump | head      # дамп читаетс�
 Скопировать дамп **вне сервера** (у себя):
 `scp antigravity@iit-app.ru:~/csu_schedule/releases/$REL/database-before.dump .`
 
+Проверить, нет ли групп-дублей с разным написанием («ПрИ-402» и «ПрИ 402»:
+бывает, если студент вошёл через Moodle раньше загрузки файла). Пустой
+вывод — всё в порядке; иначе — сначала разобраться, не выкатывать:
+
+```bash
+sudo -u postgres psql csu_schedule -c "select lower(regexp_replace(name, '[\s_—–-]', '', 'g')) as key, string_agg(name || ' (#' || id || ')', ', ') from groups group by 1 having count(*) > 1;"
+```
+
 ### 2.2 Новый venv
 
 ```bash

@@ -75,6 +75,15 @@ h1 { margin-top: 7px; font-size: 24px; line-height: 1.16; letter-spacing: -.045e
 .segmented { display: grid; grid-template-columns: 1fr 1fr; margin-top: 19px; padding: 4px; border: 1px solid var(--line); border-radius: 12px; background: #eceef2; }
 .segmented button { min-height: 34px; border: 0; border-radius: 9px; background: transparent; color: #676c76; font-size: 13px; font-weight: 600; }
 .segmented button.active { background: var(--surface); color: var(--purple); box-shadow: 0 1px 3px rgba(35, 35, 45, .1); }
+/* «На день / На неделю»: белая подложка переезжает под активную кнопку. */
+.segmented.view-switch { position: relative; isolation: isolate; }
+.segmented.view-switch::before { content: ""; position: absolute; z-index: -1; top: 4px; bottom: 4px; left: 4px; width: calc(50% - 4px); border-radius: 9px; background: var(--surface); box-shadow: 0 1px 3px rgba(35, 35, 45, .1); transition: transform .28s cubic-bezier(.2, .8, .2, 1); }
+.segmented.view-switch.view-switch-week::before { transform: translateX(100%); }
+.segmented.view-switch button { transition: color .2s ease; }
+.segmented.view-switch button.active { background: transparent; box-shadow: none; }
+/* Содержимое режима мягко проявляется при переключении. */
+.view-pane { animation: view-pane-in .26s ease both; }
+@keyframes view-pane-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
 .date-strip { display: grid; grid-template-columns: repeat(6, 1fr); gap: 7px; margin-bottom: 18px; }
 .week-picker-clip { width: 100%; overflow: hidden; }
@@ -303,7 +312,7 @@ h1 { margin-top: 7px; font-size: 24px; line-height: 1.16; letter-spacing: -.045e
 
 @media (min-width: 900px) {
   .content { padding: 30px 40px 112px; }
-  .week-grid { grid-template-columns: 56px repeat(6, minmax(120px, 1fr)); width: 100%; }
+  .week-grid { --grid-time-width: 56px; --grid-day-width: 120px; width: 100%; }
   .week-grid-scroll { max-height: calc(100dvh - 240px); }
   .grid-time { width: 56px; }
   .current-time-label { left: -56px; width: 56px; }
@@ -454,6 +463,13 @@ h1 { margin-top: 7px; font-size: 24px; line-height: 1.16; letter-spacing: -.045e
 .choice-row.five .choice { padding: 0 4px; }
 .stream-groups.single { grid-template-columns: 1fr; max-height: 220px; }
 .feedback-filters .choice { display: inline-flex; align-items: center; gap: 4px; }
+.automatic-message-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 16px 0;
+}
+
 .read-progress { display: flex; flex-direction: column; gap: 5px; width: 100%; }
 .read-progress-bar { height: 5px; overflow: hidden; border-radius: 999px; background: #eceef2; }
 .read-progress-bar i { display: block; height: 100%; border-radius: inherit; background: var(--green); }
@@ -720,3 +736,58 @@ button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visibl
 .button-logout { background: #c92a2a; color: white; }
 .button-logout:hover { background: #a61e1e; }
 .content { padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px)); }
+
+/* Сессия и пересдачи */
+.exam-admin { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.exam-card { padding: 18px; margin: 10px 0; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); overflow-wrap: anywhere; }
+.exam-card h3 { margin: 8px 0; }
+.exam-card p { margin: 7px 0; line-height: 1.5; }
+.exam-type-consultation { border-left: 3px solid var(--line-strong); }
+.exam-type-consultation .exam-type-badge { color: var(--muted); background: var(--canvas); }
+.exam-type-exam { border-left: 4px solid var(--primary); }
+.exam-type-exam .exam-type-badge { color: var(--primary); background: var(--purple-soft); font-weight: 700; }
+.exam-time { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-weight: 600; }
+.exam-card del, .exam-report del { color: var(--muted); margin-right: 6px; }
+.exam-cancelled .exam-main { text-decoration: line-through; opacity: .65; }
+.exam-cancelled .badge { display: inline-block; text-decoration: none; }
+.exam-note { padding: 10px 12px; border-left: 3px solid var(--amber); background: var(--amber-soft); border-radius: 6px; }
+.exam-history summary { cursor: pointer; padding: 12px 0; }
+.exam-actions, .exam-filters { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+.exam-filters .admin-field { flex: 1 1 140px; }
+.exam-upload { padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+.exam-upload input[type=file] { max-width: 100%; }
+.exam-report { margin-top: 18px; }
+.exam-report ul, .exam-history ul { padding-left: 20px; overflow-wrap: anywhere; }
+.exam-report li { margin: 6px 0; }
+.exam-report small { display: block; color: var(--muted); }
+.exam-dialog { width: min(100%, 600px); max-height: calc(100dvh - 36px); overflow-y: auto; align-items: stretch; }
+.exam-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; border: 0; padding: 0; min-width: 0; }
+.exam-fields .admin-field { min-width: 0; width: 100%; }
+.exam-fields input, .exam-fields textarea, .exam-fields select { width: 100%; box-sizing: border-box; }
+.exam-fields textarea { min-height: 80px; resize: vertical; }
+.exam-group-picker { grid-column: 1 / -1; max-height: 180px; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; }
+.exam-group-picker label { display: flex; align-items: center; gap: 8px; padding: 5px; }
+.exam-group-picker input { width: auto; }
+@media (max-width: 600px) {
+  .exam-fields { grid-template-columns: 1fr; }
+  .exam-filters .admin-field { flex-basis: 100%; }
+}
+
+/* События приходят в составе расписания; оттенок задаётся типом сервера. */
+.schedule-event { border-left: 4px solid #bd6a13; }
+.schedule-event .event-type-badge { background: #fff0d3; color: #874607; }
+.schedule-event-consultation { border-left-color: #698b95; }
+.schedule-event-consultation .event-type-badge { background: #eaf2f4; color: #43616c; }
+.grid-lesson.schedule-event { border-color: #dfa857; border-left-width: 4px; background: #fff6e7; color: #75420c; }
+.grid-lesson.schedule-event-consultation { border-color: #9bb9c1; background: #eff6f7; color: #43616c; }
+.schedule-event .lesson-time { white-space: normal; }
+.schedule-event .lesson-heading { flex-wrap: wrap; }
+.event-note { padding: 8px; margin-top: 6px; border-left: 3px solid #bd6a13; border-radius: 5px; background: #fff0d3; font-size: 11px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.event-groups, .event-original { margin-top: 6px; color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
+.event-original { display: flex; flex-wrap: wrap; gap: 6px; }
+/* Строка событий без времени: отдельно от сетки звонков, чтобы не читалась как «до 8:00». */
+.grid-untimed { min-width: 0; padding: 4px; border-right: 1px solid var(--line); border-bottom: 2px solid var(--line-strong); background: var(--canvas); }
+.grid-time.grid-time-untimed { align-items: center; padding: 4px 2px; border-bottom: 2px solid var(--line-strong); background: var(--canvas); font-weight: 700; line-height: 1.2; text-align: center; }
+.grid-lesson.schedule-event .event-note { padding: 5px; font-size: 9px; }
+.schedule-event.cancelled .lesson-time { text-decoration: line-through; }
+.grid-lesson.schedule-event.cancelled { border-color: #d9dbe0; background: #eceef1; color: #777b83; }

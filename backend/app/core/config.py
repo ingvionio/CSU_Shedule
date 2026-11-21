@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     fcm_credentials_file: str = ""
 
     # Worker: опрос пустой очереди, размер пачки и параллельность push.
+    schedule_change_delay_seconds: int = Field(default=120, ge=0)
     worker_poll_seconds: float = Field(default=2, gt=0)
     push_batch_size: int = Field(default=100, gt=0)
     push_concurrency: int = Field(default=8, gt=0)

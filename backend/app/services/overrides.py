@@ -31,7 +31,7 @@ from app.models import (
 )
 from app.schemas.admin import OverrideIn
 from app.services import schedule as schedule_service
-from app.services import weeks
+from app.services import weeks, schedule_changes
 from app.services.importer import _get_or_create
 
 # Пары с такими статусами не занимают время и не мешают новой паре.
@@ -101,6 +101,12 @@ def create_overrides(
             continue
         for lesson in targets:
             # Новое изменение пары на ту же дату заменяет прежнее.
+            previous = session.scalar(select(LessonOverride).where(
+                LessonOverride.lesson_id == lesson.id, LessonOverride.date == data.date))
+            if previous is not None:
+                schedule_changes.record(session, group_id=previous.group_id, source="override", ref_id=previous.id,
+                                        action="removed", day=previous.date,
+                                        text=schedule_changes.override_text(previous, removed=True))
             session.execute(
                 delete(LessonOverride).where(LessonOverride.lesson_id == lesson.id, LessonOverride.date == data.date)
             )
@@ -123,6 +129,9 @@ def create_overrides(
         session.rollback()
         raise
 
+    for item in sorted(created, key=lambda item: item.group_id):
+        schedule_changes.record(session, group_id=item.group_id, source="override", ref_id=item.id,
+                                action="created", day=item.date, text=schedule_changes.override_text(item))
     session.commit()
     return batch_id, created
 
@@ -136,6 +145,9 @@ def delete_override(session: Session, override_id: int, whole_batch: bool) -> in
     condition = (
         LessonOverride.batch_id == override.batch_id if whole_batch else LessonOverride.id == override.id
     )
+    for item in session.scalars(select(LessonOverride).where(condition).order_by(LessonOverride.group_id)):
+        schedule_changes.record(session, group_id=item.group_id, source="override", ref_id=item.id,
+                                action="removed", day=item.date, text=schedule_changes.override_text(item, removed=True))
     deleted = session.execute(delete(LessonOverride).where(condition)).rowcount
     session.commit()
     return deleted

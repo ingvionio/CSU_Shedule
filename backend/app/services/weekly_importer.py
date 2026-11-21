@@ -12,8 +12,8 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.models import Group, Lesson, LessonOverride, Room, ScheduleImport, Semester, Subject, Teacher, TimeSlot
-from app.services import weeks
-from app.services.groups import direction_of
+from app.services import weeks, schedule_changes
+from app.services.groups import direction_of, find_group
 from app.services.homework_rebind import collect_homework, rebind_homework
 from app.services.importer import DEFAULT_TIME_SLOTS, _get_or_create, _parse_time, ensure_reference_data
 from app.services.weekly_parser import GROUP_RE, WeeklyIssue, WeeklyParseResult, parse_weekly_workbook
@@ -174,9 +174,10 @@ def import_weekly(
     session.flush()
     report.import_id = record.id
     group_ids: set[int] = set()
+    uploaded: dict[int, set[tuple[int, date]]] = {}
     for file in valid:
         parsed = file.parsed
-        group = session.scalar(select(Group).where(Group.name == parsed.group_name))
+        group = find_group(session, parsed.group_name)
         if group is None:
             group = Group(name=parsed.group_name, course=parsed.course, direction=direction_of(parsed.group_name))
             session.add(group)
@@ -196,6 +197,7 @@ def import_weekly(
         session.execute(delete(LessonOverride).where(LessonOverride.lesson_id.in_(old_ids)))
         session.execute(delete(Lesson).where(*condition))
         monday = weeks.monday_of_week(semester, parsed.week_number)
+        uploaded.setdefault(group.id, set()).add((parsed.week_number, monday))
         new_lessons: list[Lesson] = []
         for lesson, (start, end, slot) in zip(parsed.lessons, file.times, strict=True):
             subject = _get_or_create(session, Subject, Subject.name, lesson.subject)
@@ -215,6 +217,9 @@ def import_weekly(
         rebound, unbound = rebind_homework(session, semester, homework, new_lessons)
         report.homework_rebound += rebound
         report.homework_unbound += unbound
+    for group_id, periods in sorted(uploaded.items()):
+        text = "; ".join(schedule_changes.weekly_text(number, monday) for number, monday in sorted(periods))
+        schedule_changes.record(session, group_id=group_id, source="import", action="uploaded", text=text)
     report.groups_count = len(group_ids)
     record.lessons_count = report.lessons_created
     session.flush()

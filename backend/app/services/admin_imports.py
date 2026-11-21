@@ -11,11 +11,12 @@ from typing import TYPE_CHECKING
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Group, GroupHomework, Lesson, LessonOverride, ScheduleImport, Semester
+from app.models import GroupHomework, Lesson, LessonOverride, ScheduleImport, Semester
 from app.schemas.imports import (
     ImportHistoryOut, ImportIssueOut, SemesterGroupOut, SemesterImportOut, WeeklyFileOut, WeeklyImportOut,
 )
 from app.services.excel_parser import parse_workbook
+from app.services.groups import existing_group_ids
 from app.services.importer import import_workbook
 from app.services.weeks import parity_of_week
 from app.services.schedule import ScheduleError, active_semester
@@ -118,8 +119,10 @@ def upload_semester(db: Session, files: list[UploadFile], dry_run: bool, admin: 
         lesson_counts = Counter(lesson.group_name for lesson in parsed.lessons)
         result.groups = [SemesterGroupOut(name=name, lessons_count=lesson_counts[name]) for name in group_names]
         result.warnings = [ImportIssueOut(**asdict(issue)) for issue in parsed.errors]
-        old_ids = select(Lesson.id).join(Group, Lesson.group_id == Group.id).where(
-            Lesson.semester_id == semester.id, Group.name.in_(group_names))
+        # Группа могла появиться раньше под другим написанием («ПрИ-402») — считаем её своей.
+        existing = existing_group_ids(db, group_names)
+        old_ids = select(Lesson.id).where(Lesson.semester_id == semester.id,
+                                          Lesson.group_id.in_(list(existing.values())))
         result.lessons_replaced = db.scalar(select(func.count()).select_from(old_ids.subquery()))
         result.overrides_deleted = db.scalar(select(func.count()).select_from(LessonOverride).where(
             LessonOverride.lesson_id.in_(old_ids)))
@@ -127,8 +130,7 @@ def upload_semester(db: Session, files: list[UploadFile], dry_run: bool, admin: 
             result.homework_affected = db.scalar(select(func.count()).select_from(GroupHomework).join(
                 Lesson, GroupHomework.lesson_id == Lesson.id,
             ).where(Lesson.id.in_(old_ids), GroupHomework.group_id == Lesson.group_id))
-        existing_groups = db.scalar(select(func.count()).select_from(Group).where(Group.name.in_(group_names)))
-        result.groups_created = len(group_names) - existing_groups
+        result.groups_created = len(group_names) - len(existing)
         result.lessons_created = len(parsed.lessons)
         if not dry_run:
             report = import_workbook(db, path, semester, file_name=name, uploaded_by=admin)

@@ -10,12 +10,14 @@ from datetime import datetime, timedelta, timezone
 from threading import Event
 from typing import Callable, TypeVar
 
-from sqlalchemy import delete, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
-from app.models import EmailOutbox, Message, PushDelivery, PushSubscription
+from app.models import EmailOutbox, Group, Message, PushDelivery, PushSubscription, ScheduleChange
+from app.schemas.message import MessageIn
+from app.services import messages
 from app.services import fcm, mailer, push
 
 logger = logging.getLogger(__name__)
@@ -174,6 +176,60 @@ def process_email(db: Session, now: datetime, sender: EmailSender | None = None,
     return result
 
 
+def process_schedule_changes(db: Session, now: datetime) -> int:
+    cutoff = now - timedelta(seconds=get_settings().schedule_change_delay_seconds)
+    candidates = list(db.scalars(
+        select(ScheduleChange.group_id).where(ScheduleChange.processed_at.is_(None))
+        .group_by(ScheduleChange.group_id).having(func.max(ScheduleChange.created_at) < cutoff)
+        .order_by(ScheduleChange.group_id)
+    ))
+    sent = 0
+    for group_id in candidates:
+        # Замок группы не даёт двум worker'ам разделить одну пачку.
+        # FOR NO KEY UPDATE: не мешает вставке новых изменений со ссылкой на группу.
+        group = db.scalar(select(Group).where(Group.id == group_id).with_for_update(skip_locked=True, key_share=True))
+        if group is None:
+            db.commit()
+            continue
+        rows = list(db.scalars(
+            select(ScheduleChange).where(ScheduleChange.group_id == group_id, ScheduleChange.processed_at.is_(None))
+            .order_by(ScheduleChange.created_at, ScheduleChange.id).with_for_update(skip_locked=True)
+            .execution_options(populate_existing=True)
+        ))
+        if not rows or max(_aware(row.created_at) for row in rows) >= cutoff:
+            db.commit()
+            continue
+        cancelled: set[int] = set()
+        created: dict[tuple[str, int], list[int]] = {}
+        for index, row in enumerate(rows):
+            if row.ref_id is None:
+                continue
+            key = (row.source, row.ref_id)
+            if row.action == "created":
+                created.setdefault(key, []).append(index)
+            elif row.action == "removed" and created.get(key):
+                start = created[key].pop()
+                cancelled.update(item.id for item in rows[start:index + 1]
+                                 if (item.source, item.ref_id) == key)
+        active = sorted((row for row in rows if row.id not in cancelled),
+                        key=lambda row: (row.day is None, row.day or now.date(), _aware(row.created_at), row.id))
+        message = None
+        if active:
+            body = "\n".join(row.text for row in active[:10])
+            if len(active) > 10:
+                body += f"\nи ещё {len(active) - 10}"
+            title = active[0].text[:200] if len(active) == 1 and active[0].action == "uploaded" else "Изменение расписания"
+            message = messages.create_message(db, MessageIn(
+                title=title, body=body, importance="normal", target={"type": "group", "group_ids": [group_id]},
+            ), "system", now, commit=False)
+            sent += 1
+        for row in rows:
+            row.processed_at = now
+            row.message_id = message.id if message is not None and row.id not in cancelled else None
+        db.commit()
+    return sent
+
+
 def run() -> None:
     stop = Event()
 
@@ -186,9 +242,10 @@ def run() -> None:
             try:
                 with SessionLocal() as db:
                     now = datetime.now(timezone.utc)
+                    changed = process_schedule_changes(db, now)
                     pushed = process_push(db, now)
                     emailed = process_email(db, now)
-                if not pushed.processed and not emailed.processed:
+                if not changed and not pushed.processed and not emailed.processed:
                     stop.wait(get_settings().worker_poll_seconds)
             except Exception:
                 logger.exception("Ошибка прохода worker'а")

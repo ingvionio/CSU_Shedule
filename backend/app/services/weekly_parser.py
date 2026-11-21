@@ -21,6 +21,10 @@ NUMBER_RE = re.compile(r"(?<!\d)[1-6]\d{2}(?!\d)")
 DOT_RE = re.compile(r"(?:с\s+(\d{1,2}:\d{2})\s+)?с использованием дистанционных образовательных технологий", re.IGNORECASE)
 ROOM_RE = re.compile(r"АУД\.\s*(\S.*)", re.IGNORECASE)
 TEACHER_RE = re.compile(r"[А-ЯЁ][А-ЯЁа-яё-]+\s+[А-ЯЁ]\.\s*[А-ЯЁ]\.", re.IGNORECASE)
+# Пару могут вести несколько преподавателей: «ВОРОБЬЕВ В.И., ГНЕДКОВА Я.Е.».
+TEACHERS_RE = re.compile(rf"{TEACHER_RE.pattern}(?:\s*,\s*{TEACHER_RE.pattern})*", re.IGNORECASE)
+# Преподаватели и аудитория в одной строке: «ВОРОБЬЕВ В.И., ГНЕДКОВА Я.Е. АУД. 132».
+TEACHERS_ROOM_RE = re.compile(rf"({TEACHERS_RE.pattern})\s*,?\s*АУД\.\s*(\S.*)", re.IGNORECASE)
 FREE_WORDS = {"ДЕНЬ", "САМОСТОЯТЕЛЬНЫХ", "ЗАНЯТИЙ"}
 
 
@@ -155,10 +159,13 @@ def parse_weekly_workbook(path: str | Path | bytes, file_name: str | None = None
                 result.errors.append(WeeklyIssue(sheet.title, f"B{block.min_row}", label, "Не удалось разобрать номер пары"))
                 continue
             custom_start = online_url = room = None
-            if len(lines) == 3 and ROOM_RE.fullmatch(lines[2]) and TEACHER_RE.fullmatch(lines[1]):
+            if len(lines) == 3 and ROOM_RE.fullmatch(lines[2]) and TEACHERS_RE.fullmatch(lines[1]):
                 subject, teacher = lines[:2]
                 room = ROOM_RE.fullmatch(lines[2])[1]
-            elif len(lines) == 4 and DOT_RE.fullmatch(lines[0]) and TEACHER_RE.fullmatch(lines[3]):
+            elif len(lines) == 2 and (match := TEACHERS_ROOM_RE.fullmatch(lines[1])):
+                subject = lines[0]
+                teacher, room = _clean(match[1]), match[2]
+            elif len(lines) == 4 and DOT_RE.fullmatch(lines[0]) and TEACHERS_RE.fullmatch(lines[3]):
                 custom_start = DOT_RE.fullmatch(lines[0])[1]
                 online_url, subject, teacher = lines[1:]
                 if custom_start is not None:

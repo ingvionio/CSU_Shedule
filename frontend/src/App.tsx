@@ -10,6 +10,7 @@ import { AdminLogin } from './pages/admin/AdminLogin'
 import { AdminFeedback } from './pages/admin/AdminFeedback'
 import { AdminSchedule } from './pages/admin/AdminSchedule'
 import { AdminMessages } from './pages/admin/AdminMessages'
+import { AdminExams } from './pages/admin/AdminExams'
 import { AdminImports } from './pages/admin/AdminImports'
 import { AdminHomeworkEditors } from './pages/admin/AdminHomeworkEditors'
 import { useNavigation } from './navigation'
@@ -29,7 +30,7 @@ import type { AdminSession, Day, Group, Lesson, StudentSession, View } from './t
 
 type InboxPushEvent = { type: 'messages-updated' } | { type: 'open-message'; url: string }
 
-const WEEKDAY_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
+const WEEKDAY_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 const COURSES = [1, 2, 3, 4]
 const mobileCardsQuery = window.matchMedia('(max-width: 600px)')
 const subscribeMobileCards = (notify: () => void) => {
@@ -42,6 +43,7 @@ const ADMIN_SUBTITLES = {
   feedback: 'Обращения студентов',
   homework: 'Редакторы групповой домашки',
   imports: 'Загрузка расписаний',
+  exams: 'Сессия и пересдачи',
 }
 
 /**
@@ -93,7 +95,7 @@ export function App() {
     }
   }, [menuOpen])
   const [adminSession, setAdminSession] = useState<AdminSession | null>(() => readAdminSession())
-  const [adminSection, setAdminSection] = useState<'schedule' | 'messages' | 'feedback' | 'homework' | 'imports'>('schedule')
+  const [adminSection, setAdminSection] = useState<'schedule' | 'messages' | 'feedback' | 'homework' | 'imports' | 'exams'>('schedule')
 
   // Выбор группы на экране настройки.
   const [course, setCourse] = useState(1)
@@ -558,7 +560,7 @@ export function App() {
                         <ChevronRight size={18} />
                       </button>
                     </div>
-                    <div className="segmented">
+                    <div className={`segmented view-switch ${view === 'week' ? 'view-switch-week' : ''}`}>
                       <button className={view === 'day' ? 'active' : ''} onClick={() => setView('day')}>
                         На день
                       </button>
@@ -581,16 +583,28 @@ export function App() {
 
                   {!schedule.data && schedule.isLoading && <div className="state-note">Загружаем неделю…</div>}
 
-                  {schedule.data &&
-                    (view === 'week' ? (
-                      <WeekGrid days={days} slots={timeSlots.data ?? []} currentMinutes={currentMinutes} />
+                  {/* key={view}: при смене режима содержимое мягко проявляется заново. */}
+                  {schedule.data && (<div className="view-pane" key={view}>
+                    {view === 'week' ? (
+                      <WeekGrid
+                        groupName={schedule.data.group.name}
+                        days={days}
+                        slots={timeSlots.data ?? []}
+                        currentMinutes={currentMinutes}
+                        schedulePending={week?.schedule_pending}
+                        // Клик по паре открывает то же окно, что в «На день»: домашка и личная заметка.
+                        onLessonClick={studentSession && personalNotes.isSuccess ? openNote : undefined}
+                        notedKeys={studentSession ? new Set(notesByKey.keys()) : undefined}
+                        homeworkCounts={studentSession ? homeworkCounts : undefined}
+                      />
                     ) : (
                       <>
                         <div className="week-picker-clip">
                           <div
                             key={week?.number}
                             className={`date-strip week-picker ${dragging ? 'dragging' : `slide-${slideDirection}`}`}
-                            style={dragging ? { transform: `translateX(${dragX}px)` } : undefined}
+                            style={{ gridTemplateColumns: `repeat(${days.length}, 1fr)`,
+                               ...(dragging ? { transform: `translateX(${dragX}px)` } : {}) }}
                             onPointerDown={handleDragStart}
                             onPointerMove={handleDragMove}
                             onPointerUp={handleDragEnd}
@@ -614,7 +628,9 @@ export function App() {
                         </div>
                         {days[selectedDay] && (
                           <DaySchedule
+                            schedulePending={week?.schedule_pending}
                             day={days[selectedDay]}
+                            groupName={schedule.data.group.name}
                             onLessonClick={mobileCards && studentSession && personalNotes.isSuccess ? openNote : undefined}
                             renderLessonExtras={
                               studentSession
@@ -632,7 +648,7 @@ export function App() {
                                           onOpen={mobileCards ? undefined : () => openNote(lesson, day)}
                                         />
                                       )}
-                                      {!mobileCards && (
+                                      {!mobileCards && !lesson.event && (
                                         <button
                                           className="button button-secondary personal-note-button"
                                           disabled={!personalNotes.isSuccess || !lesson.note_key}
@@ -650,7 +666,8 @@ export function App() {
                           />
                         )}
                       </>
-                    ))}
+                    )}
+                  </div>)}
 
                   {schedule.data && schedule.isStale && !navigator.onLine && (
                     <div className="state-note muted">
@@ -695,6 +712,7 @@ export function App() {
                   >
                     Расписание
                   </button>
+                  <button className={adminSection === 'exams' ? 'active' : ''} onClick={() => setAdminSection('exams')}>Сессия</button>
                   <button
                     className={adminSection === 'imports' ? 'active' : ''}
                     onClick={() => setAdminSection('imports')}
@@ -720,6 +738,10 @@ export function App() {
                     Домашка
                   </button>
                 </div>
+              )}
+
+              {view === 'admin' && adminSession && adminSection === 'exams' && (
+                <AdminExams token={adminSession.token} groups={groups.data ?? []} onUnauthorized={logoutAdmin} />
               )}
 
               {view === 'admin' && adminSession && adminSection === 'imports' && (

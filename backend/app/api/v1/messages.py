@@ -133,8 +133,8 @@ def create_message(
 
 
 @admin_router.get("/messages", response_model=list[AdminMessageOut], summary="Сообщения и прогресс прочтения")
-def admin_messages(db: Session = Depends(get_db)) -> list[AdminMessageOut]:
-    rows = messages_service.admin_list(db)
+def admin_messages(include_automatic: bool = False, db: Session = Depends(get_db)) -> list[AdminMessageOut]:
+    rows = messages_service.admin_list(db, include_automatic)
     stats = messages_service.push_stats(db, [row[0].id for row in rows])
     titles = messages_service.target_titles(db, [row[0] for row in rows])
     return [_admin_out(db, *row, push=stats[row[0].id], target_title=titles[row[0].id]) for row in rows]

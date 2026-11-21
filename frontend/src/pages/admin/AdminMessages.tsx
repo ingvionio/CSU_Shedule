@@ -25,7 +25,8 @@ export function AdminMessages({ token, groups, onUnauthorized }: AdminMessagesPr
   const [composing, setComposing] = useState(false)
   const [openId, setOpenId] = useState<number | null>(null)
   const [notice, setNotice] = useState('')
-  const list = useAdminMessages(token)
+  const [includeAutomatic, setIncludeAutomatic] = useState(false)
+  const list = useAdminMessages(token, includeAutomatic)
 
   useEffect(() => {
     if (isUnauthorized(list.error)) onUnauthorized()
@@ -70,6 +71,10 @@ export function AdminMessages({ token, groups, onUnauthorized }: AdminMessagesPr
           <button className="button button-secondary" onClick={() => list.refetch()}><RefreshCw size={16} />Повторить</button>
         </div>
       )}
+      <label className="automatic-message-filter">
+        <input type="checkbox" checked={includeAutomatic} onChange={(event) => setIncludeAutomatic(event.target.checked)} />
+        Показать автоматические
+      </label>
       {list.isLoading && <div className="state-note">Загружаем сообщения…</div>}
       {list.data && !list.data.length && <div className="empty-day">Сообщений пока нет.</div>}
 
@@ -81,6 +86,7 @@ export function AdminMessages({ token, groups, onUnauthorized }: AdminMessagesPr
               <span className={`badge importance-${item.importance}`}>{IMPORTANCE_TITLES[item.importance]}</span>
             </div>
             <strong className="message-title">{item.title}</strong>
+            {item.created_by === 'system' && <span className="badge">автоматически</span>}
             <ReadProgress item={item} />
           </button>
         ))}
@@ -371,7 +377,7 @@ function MessageDetailDialog({
           <h2>{message.title}</h2>
           <p className="feedback-text feedback-original">{message.body}</p>
           <dl className="feedback-meta">
-            <dt>Отправлено</dt><dd>{messageDate(message.sent_at)}{message.created_by ? ` · ${message.created_by}` : ''}</dd>
+            <dt>Отправлено</dt><dd>{messageDate(message.sent_at)}{message.created_by === 'system' ? ' · автоматически' : message.created_by ? ` · ${message.created_by}` : ''}</dd>
             {message.last_reminded_at && <><dt>Напоминание</dt><dd>{messageDate(message.last_reminded_at)}</dd></>}
           </dl>
           <ReadProgress item={message} />
