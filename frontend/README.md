@@ -34,10 +34,12 @@ WebView. Обе версии получают данные из FastAPI. Пуб�
 `android/local.properties`. Собранный пакет устанавливается на Android
 7.0+ (minSdk 24).
 
-1. Укажите в `frontend/.env.production.local` адрес FastAPI, доступный
-   с телефона по HTTPS: `VITE_API_URL=https://iit-app.ru`. Этот файл
-   игнорируется Git (`*.local`). Клиент сам добавляет `/api/v1`.
-   Vite подставляет адрес при сборке.
+1. Адрес API для APK передайте **только в команде сборки APK**:
+   `$env:VITE_API_URL='https://iit-app.ru'` (PowerShell) перед
+   `npm run build:apk…`. Клиент сам добавляет `/api/v1`. Не кладите его в
+   `.env.production*`: сайт собирается без `VITE_API_URL` и ходит на `/api`
+   своего домена — сайт открыт на двух доменах (iit-app.ru, illusoryorb.ru),
+   с жёстким адресом второй упрётся в CORS.
 2. Добавьте `https://localhost` в `CORS_ORIGINS` бэкенда, сохранив
    уже разрешённые адреса фронтенда. В Android это локальный origin
    WebView. Относительные запросы `/api/v1` без `VITE_API_URL` попадут
@@ -59,26 +61,27 @@ WebView. Обе версии получают данные из FastAPI. Пуб�
 `assembleDebug`. Результат — `android/app/build/outputs/apk/debug/app-debug.apk`
 относительно `frontend/`. APK предназначен для тестовой установки.
 Для распространения используйте release-сборку с постоянным ключом подписи.
-Один раз создайте ключ из каталога `frontend/android` (JDK должен быть в PATH):
-
-```powershell
-keytool -genkeypair -v -keystore release.jks -alias iit-app -keyalg RSA -keysize 2048 -validity 10000
-```
-
-Создайте `frontend/android/keystore.properties`:
+**Ключ подписи уже существует:** опубликованные версии (1.1.0, 1.1.1)
+подписаны ключом `csu-release-key.jks` (сертификат `CN=CSU Schedule`).
+Обновления выпускаются только им — с другим ключом Android не установит
+новую версию поверх старой. Положите файл ключа в `frontend/android/` и
+создайте `frontend/android/keystore.properties`:
 
 ```properties
-storeFile=release.jks
-storePassword=ЗАМЕНИТЕ_ПАРОЛЕМ_ХРАНИЛИЩА
-keyAlias=iit-app
-keyPassword=ЗАМЕНИТЕ_ПАРОЛЕМ_КЛЮЧА
+storeFile=csu-release-key.jks
+storePassword=ПАРОЛЬ_ХРАНИЛИЩА
+keyAlias=csu-release-key
+keyPassword=ПАРОЛЬ_КЛЮЧА
 ```
+
+Новый ключ (`keytool -genkeypair …`) создаётся только если старый утерян —
+тогда всем пользователям придётся удалить приложение и поставить заново.
 
 Относительный `storeFile` отсчитывается от `frontend/android`.
 Файл настроек, `*.jks` и `*.keystore` исключены из Git. Сохраните ключ и
 оба пароля навсегда в защищённой резервной копии: без них нельзя выпустить
 обновление установленного приложения. Для каждого обновления увеличивайте
-`versionCode` в `android/app/build.gradle` (сейчас 2, `versionName "1.1"`).
+`versionCode` в `android/app/build.gradle` (сейчас 4, `versionName "1.2"`; версия 3 уже выпущена).
 
 Из каталога `frontend`:
 

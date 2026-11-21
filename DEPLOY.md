@@ -1,114 +1,248 @@
 # Выкладка на прод (iit-app.ru)
 
-Сервер с белым IP: nginx отдаёт собранный фронт и проксирует `/api` на
-бэкенд в Docker; HTTPS на nginx; Cloudflare не используется.
+Как устроен сервер (ответы администратора, 20.11.2026):
 
-```
-браузер / APK ──HTTPS──► nginx ──► dist/ (фронт)
-                           └─/api─► backend :8000 (127.0.0.1) ──► postgres
-                                    worker ──► Web Push / FCM, SMTP
-```
-
-> Части, помеченные «⚠ уточнить», зависят от того, как сервер устроен
-> сейчас (вопросы администратору отправлены 20.11.2026).
-
-Файлы:
-
-| Файл | Что это |
+| Что | Где |
 |---|---|
-| `docker-compose.prod.yml` | боевой compose: postgres, backend, worker |
-| `deploy/.env.prod.example` | шаблон боевого `.env` (копируется в корень как `.env`) |
-| `deploy/nginx/iit-app.ru.conf.example` | пример сайта nginx |
-| `backend/secrets/firebase-service-account.json` | ключ Firebase (не в гите) |
+| ОС | Debian 13, пользователь `antigravity` (sudo без пароля). Docker и Node.js на сервере нет |
+| Бэкенд | systemd `csu-backend`: код в `~/csu_schedule/backend`, настройки в его `.env`, Python — venv релиза; uvicorn на `127.0.0.1:8000` |
+| Релизы | `~/csu_schedule/releases/<коммит>-<дата>/` — `venv/`, дамп базы |
+| База | PostgreSQL 17 на сервере, `127.0.0.1:5432`, база `csu_schedule` |
+| Фронт | `/var/www/csu_schedule` (собирается у разработчика) |
+| nginx | `/etc/nginx/sites-enabled/csu_schedule`, домены iit-app.ru и illusoryorb.ru, Let's Encrypt |
 
-Дальше `dc` = `docker compose -f docker-compose.prod.yml`.
+```
+браузер / APK ─HTTPS─► nginx ─► /var/www/csu_schedule
+                         └/api─► csu-backend 127.0.0.1:8000 ─► PostgreSQL
+                                 csu-worker ─► Web Push / FCM / SMTP
+```
 
-## Один раз перед первым запуском
+IP студентов: uvicorn по умолчанию доверяет заголовкам только от
+`127.0.0.1` (это nginx) и берёт из `X-Forwarded-For` правый недоверенный
+адрес — настоящий IP. Конфиг nginx для этого менять не нужно.
 
-1. **`.env` в корне репозитория на сервере** — из `deploy/.env.prod.example`.
-   - **`JWT_SECRET` — перенести текущий с прода, не менять** (решение Лёши
-     20.11.2026: на сервере уже свой надёжный секрет). Проверить только,
-     что это не `change-me`.
-   - **`MOODLE_ENCRYPTION_KEY` на работающем проде не задавать.** Пока он
-     пуст, ключ шифрования сохранённых паролей Moodle выводится из
-     `JWT_SECRET`; появление отдельного ключа (как и смена `JWT_SECRET`)
-     разлогинит всех студентов — сохранённые пароли не расшифруются.
-     Задавать его имеет смысл только на новой, пустой установке.
-   - `ADMIN_PASSWORD`, `POSTGRES_PASSWORD` — свои значения
-     (`openssl rand -hex 32` для новых).
-   - ⚠ `POSTGRES_PASSWORD` должен совпадать с паролем существующей базы
-     (если базу создавал репозиторный compose — это `postgres`). Сменить
-     пароль базы можно отдельно: `ALTER USER postgres PASSWORD '…';`.
-   - VAPID: `dc run --rm backend python -m app.cli generate-vapid`.
-     **Ключи VAPID после запуска не менять** — все подписки браузеров
-     станут недействительными.
-   - `FCM_CREDENTIALS_FILE=/app/secrets/firebase-service-account.json`.
-2. **Ключ Firebase** — `backend/secrets/firebase-service-account.json`
-   (Firebase → Project settings → Service accounts). Передавать только
-   напрямую на сервер, не через чаты.
-3. **Том базы.** Compose называет том `<папка проекта>_postgres_data`.
-   Если прод уже работал на репозиторном `docker-compose.yml`, запускайте
-   боевой compose из той же папки — иначе он создаст новую пустую базу.
-   Проверить: `docker volume ls | grep postgres_data`. ⚠ уточнить.
-4. **nginx** — по образцу `deploy/nginx/iit-app.ru.conf.example`.
-   `X-Forwarded-For` в нём **перезаписывается** (`$remote_addr`), не
-   дописывается — иначе посетитель подставит свой IP и обойдёт лимиты.
-   ⚠ уточнить: текущий конфиг, путь к статике, сертификат.
+Файлы в репозитории:
 
-## Выкладка новой версии
+| Файл | Куда на сервере |
+|---|---|
+| `deploy/systemd/csu-worker.service` | `/etc/systemd/system/csu-worker.service` |
+| `deploy/systemd/10-release-venv.conf` | `/etc/systemd/system/csu-backend.service.d/10-release-venv.conf` |
+| `deploy/env.additions.example` | новые строки для `~/csu_schedule/backend/.env` |
 
-1. **Бэкап базы:**
-   ```bash
-   dc exec postgres pg_dump -U postgres -Fc csu_schedule > backup-$(date +%F-%H%M).dump
-   ```
-2. **Код:** `git fetch && git checkout master && git pull` (⚠ уточнить, как
-   код попадает на сервер).
-3. **Образ и миграции:**
-   ```bash
-   dc build backend worker
-   dc up -d postgres
-   dc run --rm backend python -m alembic upgrade head
-   ```
-4. **Запуск:** `dc up -d backend worker` и `dc ps` — все сервисы `Up`.
-5. **Фронт:** `cd frontend && npm ci && npm run build`, содержимое `dist/`
-   в папку, которую отдаёт nginx (⚠ уточнить). Без `VITE_API_URL`: фронт и
-   API на одном домене.
-6. **nginx:** `nginx -t && systemctl reload nginx`.
+Ниже `$REL` — имя релиза, `<короткий коммит>-<ГГГГММДД>`, например
+`bbf3c3d-20261121`.
 
-### Проверка после выкладки
+## 1. Подготовка у разработчика
 
-- `curl -s https://iit-app.ru/api/v1/push/config` → `public_key` не `null`,
-  `"fcm": true`;
-- `dc logs --tail 50 worker` — без ошибок; после отправки сообщения строка
-  `Push: отправлено N…`;
-- с сервера доходит до Google (для FCM):
-  `curl -sS -o /dev/null -w "%{http_code} %{time_total}s\n" -X POST https://oauth2.googleapis.com/token`
-  (из России отвечает медленно, ~20 с — это учтено);
-- в админке отправить себе сообщение: приходит push в браузер и в APK,
-  в деталях сообщения «Push: доставлено N из M».
-
-### Откат
+Из корня репозитория, ветка `master` после слияния (Git Bash):
 
 ```bash
-dc stop backend worker
-git checkout <предыдущий коммит>
-dc build backend worker
-# только если новая схема мешает старому коду — вернуть базу из бэкапа:
-dc exec -T postgres pg_restore -U postgres -d csu_schedule --clean --if-exists < backup-….dump
-dc up -d backend worker
+REL=$(git rev-parse --short master)-$(date +%Y%m%d)
+git archive --format=tar.gz -o backend-$REL.tar.gz master backend deploy
 ```
 
-## Android-приложение
-
-Собирается на машине разработчика, не на сервере
+**APK** (Windows, PowerShell, из `frontend`) — ключ `csu-release-key.jks` и
+`keystore.properties` должны лежать в `frontend/android/`
 ([frontend/README.md](frontend/README.md#android-apk)):
 
-1. `frontend/.env.production.local`: `VITE_API_URL=https://iit-app.ru`.
-2. `frontend/android/app/google-services.json` — из Firebase.
-3. Ключ подписи и `frontend/android/keystore.properties` — создаются один
-   раз; **ключ и пароли хранить навсегда**, без них нельзя выпустить
-   обновление поверх установленного приложения.
-4. `npm run build:apk:release`, затем APK — в `frontend/public/downloads/raspisanie-iit.apk`
-   и выложить вместе с фронтом. Перед сборкой увеличить `versionCode`.
+```powershell
+$env:VITE_API_URL='https://iit-app.ru'; npm.cmd run build:apk:release; Remove-Item Env:VITE_API_URL
+```
 
-Тестовые debug-сборки студентам не раздавать.
+Проверить подпись — она должна совпадать с опубликованной версией
+(`CN=CSU Schedule`), а `versionCode` быть больше прежнего (3):
+
+```powershell
+& "$env:LOCALAPPDATA\Android\Sdk\build-tools\36.1.0\apksigner.bat" verify --print-certs android\app\build\outputs\apk\release\app-release.apk
+```
+
+**Сайт** — собирается **без** `VITE_API_URL` (сайт открыт на двух доменах
+и ходит на `/api` своего домена), потом в сборку кладётся новый APK:
+
+```bash
+cd frontend
+npm ci
+npm run build
+cp android/app/build/outputs/apk/release/app-release.apk dist/downloads/raspisanie-iit.apk
+tar -czf ../frontend-$REL.tar.gz -C dist .
+cd ..
+```
+
+Отправить на сервер:
+
+```bash
+scp backend-$REL.tar.gz frontend-$REL.tar.gz antigravity@iit-app.ru:~/csu_schedule/releases/
+```
+
+## 2. На сервере
+
+```bash
+REL=…                                   # то же имя, что выше
+R=~/csu_schedule/releases/$REL
+mkdir -p $R/src
+tar -xzf ~/csu_schedule/releases/backend-$REL.tar.gz -C $R/src
+```
+
+### 2.1 Бэкап базы
+
+```bash
+sudo -u postgres pg_dump -Fc csu_schedule > $R/database-before.dump
+pg_restore --list $R/database-before.dump | head      # дамп читается
+```
+
+Скопировать дамп **вне сервера** (у себя):
+`scp antigravity@iit-app.ru:~/csu_schedule/releases/$REL/database-before.dump .`
+
+### 2.2 Новый venv
+
+```bash
+python3 -m venv $R/venv
+$R/venv/bin/pip install -r $R/src/backend/requirements.txt
+```
+
+Если `python3 -m venv` ругается — `sudo apt install python3-venv`.
+
+### 2.3 Код
+
+Сохранить текущий код (для отката) и разложить новый поверх. В архиве нет
+`.env` и `secrets/` — их копирование не трогает.
+
+```bash
+tar -czf $R/backend-before.tar.gz -C ~/csu_schedule --exclude='__pycache__' backend
+cp -a $R/src/backend/. ~/csu_schedule/backend/
+```
+
+### 2.4 Настройки — только при первой выкладке push
+
+1. Ключ Firebase передать напрямую на сервер (не через чаты):
+   ```bash
+   mkdir -p ~/csu_schedule/backend/secrets && chmod 700 ~/csu_schedule/backend/secrets
+   # с машины разработчика:
+   # scp backend/secrets/firebase-service-account.json antigravity@iit-app.ru:~/csu_schedule/backend/secrets/
+   chmod 600 ~/csu_schedule/backend/secrets/firebase-service-account.json
+   ```
+2. Ключи VAPID — сгенерировать **один раз**:
+   ```bash
+   cd ~/csu_schedule/backend && $R/venv/bin/python -m app.cli generate-vapid
+   ```
+3. Дописать в `~/csu_schedule/backend/.env` строки из
+   `deploy/env.additions.example` (VAPID, `FCM_CREDENTIALS_FILE`) и
+   проверить `CORS_ORIGINS` — там нужен `https://localhost` для
+   Android-приложения. **`JWT_SECRET` не менять, `MOODLE_ENCRYPTION_KEY` не
+   добавлять** — иначе все студенты разлогинятся.
+
+### 2.5 Миграции
+
+Схема меняется только добавлением (новые таблица и колонки) — старый код с
+новой схемой работает, поэтому миграции можно накатывать до перезапуска.
+
+```bash
+cd ~/csu_schedule/backend && $R/venv/bin/python -m alembic upgrade head
+```
+
+### 2.6 Переключение и worker
+
+```bash
+PREV=$(readlink -f ~/csu_schedule/releases/current 2>/dev/null)   # для отката; при первой выкладке пусто
+ln -sfn $R ~/csu_schedule/releases/current
+```
+
+При **первой** выкладке — поставить systemd-файлы:
+
+```bash
+sudo cp /etc/systemd/system/csu-backend.service.d/10-release-venv.conf ~/csu_schedule/releases/10-release-venv.conf.before
+sudo cp $R/src/deploy/systemd/10-release-venv.conf /etc/systemd/system/csu-backend.service.d/10-release-venv.conf
+sudo cp $R/src/deploy/systemd/csu-worker.service /etc/systemd/system/csu-worker.service
+sudo systemctl daemon-reload
+sudo systemctl enable csu-worker
+```
+
+Каждый раз:
+
+```bash
+sudo systemctl restart csu-backend csu-worker
+systemctl is-active csu-backend csu-worker
+```
+
+### 2.7 Сайт
+
+Распаковать поверх без удаления: остаются `.well-known` (Let's Encrypt) и
+старые файлы `assets/` — у открытых вкладок не сломаются ссылки.
+
+```bash
+sudo tar -xzf ~/csu_schedule/releases/frontend-$REL.tar.gz -C /var/www/csu_schedule --no-same-owner
+```
+
+### 2.8 nginx — один раз
+
+В `/etc/nginx/sites-enabled/csu_schedule`, в **обоих** блоках `server`
+с сайтом (iit-app.ru и illusoryorb.ru):
+
+1. `client_max_body_size 20M;` → `client_max_body_size 60M;` — админка
+   принимает пачку Excel до 50 МБ, сейчас большие загрузки режет nginx (413).
+2. Рядом с `location = /sw.js` добавить:
+   ```nginx
+   location = /index.html {
+       add_header Cache-Control "no-cache";
+   }
+
+   location /download/ {
+       add_header Cache-Control "no-cache";
+       try_files $uri $uri/ /index.html;
+   }
+   ```
+   Иначе после выкладки браузеры какое-то время показывают старую версию
+   сайта.
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+## 3. Проверка
+
+```bash
+curl -s https://iit-app.ru/api/v1/push/config       # public_key не null, "fcm": true
+curl -s https://illusoryorb.ru/api/v1/push/config   # то же
+journalctl -u csu-worker -n 30 --no-pager          # без ошибок
+journalctl -u csu-backend -n 30 --no-pager
+```
+
+В админке отправить сообщение себе (группе с одним тестовым студентом):
+push приходит в браузер (сайт, «Сообщения» → «Включить») и в APK; в деталях
+сообщения — «Push: доставлено N из M», в журнале worker'а — строка
+`Push: отправлено …`. Скачать APK со страницы «Скачать для Android» и
+проверить, что он ставится **поверх** прежней версии.
+
+## 4. Откат
+
+```bash
+sudo systemctl stop csu-worker
+if [ -n "$PREV" ]; then
+  ln -sfn "$PREV" ~/csu_schedule/releases/current
+else
+  # откат первой выкладки: вернуть прежний drop-in с путём к старому venv
+  sudo cp ~/csu_schedule/releases/10-release-venv.conf.before /etc/systemd/system/csu-backend.service.d/10-release-venv.conf
+  sudo systemctl daemon-reload
+fi
+tar -xzf $R/backend-before.tar.gz -C ~/csu_schedule
+sudo systemctl restart csu-backend
+```
+
+Базу восстанавливать обычно не нужно (миграции только добавляют). Если всё
+же нужно:
+
+```bash
+sudo systemctl stop csu-backend csu-worker
+sudo -u postgres pg_restore --clean --if-exists -d csu_schedule $R/database-before.dump
+sudo systemctl start csu-backend
+```
+
+Сайт откатывается распаковкой предыдущего `frontend-….tar.gz`.
+
+## Заметки
+
+- `/docs`, `/redoc`, `/openapi.json` открыты на обоих доменах — решить,
+  нужны ли они публично.
+- Регулярных бэкапов базы на сервере нет — стоит завести (cron +
+  копия вне сервера).
+- Тестовые debug-сборки APK студентам не раздавать.
