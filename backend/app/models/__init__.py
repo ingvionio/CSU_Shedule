@@ -10,6 +10,7 @@ from app.models.enums import (
     PublishStatus,
     WeekParity,
 )
+from app.models.exam import ExamEvent, ExamImport, exam_event_groups
 from app.models.feedback import EmailOutbox, FeedbackMessage, FeedbackRecipient, FeedbackReply
 from app.models.lesson import Lesson, LessonOverride, ScheduleImport
 from app.models.message import Message, MessageRecipient
@@ -20,6 +21,9 @@ from app.models.note import PersonalNote
 
 __all__ = [
     "Base",
+    "ExamEvent",
+    "ExamImport",
+    "exam_event_groups",
     "EmailOutbox",
     "EmailStatus",
     "FeedbackKind",

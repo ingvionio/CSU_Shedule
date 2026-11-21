@@ -1,0 +1,163 @@
+"""Ввод и ответы API сессии и пересдач."""
+import datetime as dt
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+
+ExamKind = Literal["session", "retake"]
+
+
+class ExamWarningOut(BaseModel):
+    sheet: str
+    row: int
+    column: str
+    text: str
+    reason: str
+
+
+class ExamGroupOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    course: int
+
+
+class ExamFields(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: ExamKind
+    date: dt.date
+    start_time: dt.time | None = None
+    subject: str = Field(min_length=1, max_length=300)
+    teacher: str | None = Field(default=None, max_length=200)
+    room: str | None = Field(default=None, max_length=200)
+    note: str | None = None
+
+    @field_validator("subject", "teacher", "room", "note", mode="before")
+    @classmethod
+    def normalize_text(cls, value: object) -> object:
+        return " ".join(value.split()) if isinstance(value, str) else value
+
+    @field_validator("start_time")
+    @classmethod
+    def local_time(cls, value: dt.time | None) -> dt.time | None:
+        if value and value.tzinfo is not None:
+            raise ValueError("Время должно быть местным, без часового пояса")
+        return value
+
+
+class ExamCreate(ExamFields):
+    group_ids: list[int] = Field(min_length=1)
+
+
+class ExamPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: ExamKind | None = None
+    date: dt.date | None = None
+    start_time: dt.time | None = None
+    subject: str | None = Field(default=None, min_length=1, max_length=300)
+    teacher: str | None = Field(default=None, max_length=200)
+    room: str | None = Field(default=None, max_length=200)
+    note: str | None = None
+    group_ids: list[int] | None = Field(default=None, min_length=1)
+
+    @field_validator("kind", "date", "subject", "group_ids")
+    @classmethod
+    def required_if_present(cls, value: object) -> object:
+        if value is None:
+            raise ValueError("Поле не может быть пустым")
+        return value
+
+    normalize_text = field_validator("subject", "teacher", "room", "note", mode="before")(ExamFields.normalize_text.__func__)
+    local_time = field_validator("start_time")(ExamFields.local_time.__func__)
+
+
+class ExamEventOut(ExamFields):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    semester_id: int
+    groups: list[ExamGroupOut]
+    cancelled: bool
+    original_date: dt.date | None
+    original_start_time: dt.time | None
+    original_room: str | None
+    source: Literal["import", "manual"]
+    import_id: int | None
+    created_at: dt.datetime
+    updated_at: dt.datetime
+
+    @field_serializer("start_time", "original_start_time")
+    def format_time(self, value: dt.time | None) -> str | None:
+        return value.strftime("%H:%M") if value else None
+
+
+class ExamMappingOut(BaseModel):
+    short_name: str
+    group_id: int | None
+    group_name: str | None
+
+
+class ExamPreviewRow(ExamFields):
+    sheet: str
+    row: int
+    groups: list[ExamGroupOut]
+    original_date: dt.date | None
+    original_start_time: dt.time | None
+    original_room: str | None
+
+    @field_serializer("start_time", "original_start_time")
+    def format_time(self, value: dt.time | None) -> str | None:
+        return value.strftime("%H:%M") if value else None
+
+
+class ExamImportOut(BaseModel):
+    events_count: int
+    warnings: list[ExamWarningOut]
+    mappings: list[ExamMappingOut]
+    rows: list[ExamPreviewRow]
+    applied: bool = False
+    import_id: int | None = None
+
+
+class ExamImportHistoryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    semester_id: int
+    kind: ExamKind
+    file_name: str
+    events_count: int
+    warnings: list[ExamWarningOut]
+    uploaded_by: str | None
+    uploaded_at: dt.datetime
+
+
+class ExamKindOut(BaseModel):
+    code: ExamKind
+    name: str
+
+
+class ExamChangeOut(BaseModel):
+    date: dt.date | None
+    start_time: str | None
+    room: str | None
+
+
+class StudentExamOut(BaseModel):
+    id: int
+    kind: ExamKindOut
+    date: dt.date
+    start_time: str | None
+    subject: str
+    teacher: str | None
+    room: str | None
+    note: str | None
+    groups: list[str]
+    status: Literal["regular", "changed", "cancelled"]
+    change: ExamChangeOut | None
+    is_past: bool
+    days_left: int
+
+
+class GroupExamsOut(BaseModel):
+    group: ExamGroupOut
+    kinds: list[ExamKind]
+    events: list[StudentExamOut]

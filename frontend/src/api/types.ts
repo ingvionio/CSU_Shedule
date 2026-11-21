@@ -426,3 +426,35 @@ export type ImportHistory = {
   errors_count: number
   warnings_count: number
 }
+
+/* Сессия и пересдачи */
+export type ExamKind = 'session' | 'retake'
+export type ExamGroup = { id: number; name: string; course: number }
+export type ExamValues = {
+  kind: ExamKind; date: string; start_time: string | null; subject: string
+  teacher: string | null; room: string | null; note: string | null
+}
+export type ExamInput = ExamValues & { group_ids: number[] }
+export type ExamOriginal = { original_date: string | null; original_start_time: string | null; original_room: string | null }
+export type ExamEvent = ExamValues & ExamOriginal & {
+  id: number; semester_id: number; groups: ExamGroup[]; cancelled: boolean
+  source: 'import' | 'manual'; import_id: number | null; created_at: string; updated_at: string
+}
+export type ExamWarning = { sheet: string; row: number; column: string; text: string; reason: string }
+export type ExamMapping = { short_name: string; group_id: number | null; group_name: string | null }
+export type ExamPreview = ExamValues & ExamOriginal & { sheet: string; row: number; groups: ExamGroup[] }
+export type ExamImportReport = {
+  events_count: number; warnings: ExamWarning[]; mappings: ExamMapping[]; rows: ExamPreview[]
+  applied: boolean; import_id: number | null
+}
+export type ExamImportHistory = {
+  id: number; semester_id: number; kind: ExamKind; file_name: string; events_count: number
+  warnings: ExamWarning[]; uploaded_by: string | null; uploaded_at: string
+}
+export type StudentExam = Omit<ExamValues, 'kind'> & {
+  id: number; kind: { code: ExamKind; name: string }; groups: string[]
+  status: 'regular' | 'changed' | 'cancelled'
+  change: { date: string | null; start_time: string | null; room: string | null } | null
+  is_past: boolean; days_left: number
+}
+export type GroupExams = { group: ExamGroup; kinds: ExamKind[]; events: StudentExam[] }

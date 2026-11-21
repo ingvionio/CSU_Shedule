@@ -10,6 +10,8 @@ import { AdminLogin } from './pages/admin/AdminLogin'
 import { AdminFeedback } from './pages/admin/AdminFeedback'
 import { AdminSchedule } from './pages/admin/AdminSchedule'
 import { AdminMessages } from './pages/admin/AdminMessages'
+import { AdminExams } from './pages/admin/AdminExams'
+import { StudentExams } from './pages/exams/StudentExams'
 import { AdminImports } from './pages/admin/AdminImports'
 import { AdminHomeworkEditors } from './pages/admin/AdminHomeworkEditors'
 import { useNavigation } from './navigation'
@@ -42,6 +44,7 @@ const ADMIN_SUBTITLES = {
   feedback: 'Обращения студентов',
   homework: 'Редакторы групповой домашки',
   imports: 'Загрузка расписаний',
+  exams: 'Сессия и пересдачи',
 }
 
 /**
@@ -93,7 +96,7 @@ export function App() {
     }
   }, [menuOpen])
   const [adminSession, setAdminSession] = useState<AdminSession | null>(() => readAdminSession())
-  const [adminSection, setAdminSection] = useState<'schedule' | 'messages' | 'feedback' | 'homework' | 'imports'>('schedule')
+  const [adminSection, setAdminSection] = useState<'schedule' | 'messages' | 'feedback' | 'homework' | 'imports' | 'exams'>('schedule')
 
   // Выбор группы на экране настройки.
   const [course, setCourse] = useState(1)
@@ -523,12 +526,22 @@ export function App() {
                 <StudentMessages group={selectedGroup} onChooseGroup={() => nav('group')} requestedId={requestedMessage} onRequestHandled={clearRequestedMessage} />
               )}
 
-              {groupId === null && (view === 'day' || view === 'week') && !groups.isLoading && !groups.isError && (
+              {groupId === null && (view === 'day' || view === 'week' || view === 'exams') && !groups.isLoading && !groups.isError && (
                 <div className="state-note">Ваша группа определяется через Moodle…</div>
               )}
 
-              {groupId !== null && (view === 'day' || view === 'week') && (
+              {groupId !== null && (view === 'day' || view === 'week' || view === 'exams') && (
                 <>
+                  <div className="segmented" aria-label="Режим расписания">
+                      <button className={view === 'day' ? 'active' : ''} onClick={() => setView('day')}>
+                        На день
+                      </button>
+                      <button className={view === 'week' ? 'active' : ''} onClick={() => setView('week')}>
+                        На неделю
+                      </button>
+                      <button className={view === 'exams' ? 'active' : ''} onClick={() => setView('exams')}>Сессия</button>
+                  </div>
+                  {view === 'exams' ? <StudentExams groupId={groupId} /> : <>
                   <section className="schedule-intro">
                     <div className="week-line">
                       <div>
@@ -556,14 +569,6 @@ export function App() {
                         onClick={() => moveWeek(1)}
                       >
                         <ChevronRight size={18} />
-                      </button>
-                    </div>
-                    <div className="segmented">
-                      <button className={view === 'day' ? 'active' : ''} onClick={() => setView('day')}>
-                        На день
-                      </button>
-                      <button className={view === 'week' ? 'active' : ''} onClick={() => setView('week')}>
-                        На неделю
                       </button>
                     </div>
                   </section>
@@ -682,6 +687,7 @@ export function App() {
                       </button>
                     </div>
                   )}
+                  </>}
                 </>
               )}
 
@@ -695,6 +701,7 @@ export function App() {
                   >
                     Расписание
                   </button>
+                  <button className={adminSection === 'exams' ? 'active' : ''} onClick={() => setAdminSection('exams')}>Сессия</button>
                   <button
                     className={adminSection === 'imports' ? 'active' : ''}
                     onClick={() => setAdminSection('imports')}
@@ -720,6 +727,10 @@ export function App() {
                     Домашка
                   </button>
                 </div>
+              )}
+
+              {view === 'admin' && adminSession && adminSection === 'exams' && (
+                <AdminExams token={adminSession.token} groups={groups.data ?? []} onUnauthorized={logoutAdmin} />
               )}
 
               {view === 'admin' && adminSession && adminSection === 'imports' && (

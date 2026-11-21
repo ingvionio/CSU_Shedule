@@ -720,3 +720,37 @@ button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visibl
 .button-logout { background: #c92a2a; color: white; }
 .button-logout:hover { background: #a61e1e; }
 .content { padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px)); }
+
+/* Сессия и пересдачи */
+.exam-screen, .exam-admin { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.exam-card { padding: 18px; margin: 10px 0; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); overflow-wrap: anywhere; }
+.exam-card h3 { margin: 8px 0; }
+.exam-card p { margin: 7px 0; line-height: 1.5; }
+.exam-time { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-weight: 600; }
+.exam-card del, .exam-report del { color: var(--muted); margin-right: 6px; }
+.exam-cancelled .exam-main { text-decoration: line-through; opacity: .65; }
+.exam-cancelled .badge { display: inline-block; text-decoration: none; }
+.exam-note { padding: 10px 12px; border-left: 3px solid var(--amber); background: var(--amber-soft); border-radius: 6px; }
+.exam-date h2 { font-size: 17px; }
+.exam-date h2 small { display: inline-block; margin-left: 10px; color: var(--muted); font-size: 12px; font-weight: 400; }
+.exam-past summary, .exam-history summary { cursor: pointer; padding: 12px 0; }
+.exam-actions, .exam-filters { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+.exam-filters .admin-field { flex: 1 1 140px; }
+.exam-upload { padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+.exam-upload input[type=file] { max-width: 100%; }
+.exam-report { margin-top: 18px; }
+.exam-report ul, .exam-history ul { padding-left: 20px; overflow-wrap: anywhere; }
+.exam-report li { margin: 6px 0; }
+.exam-report small { display: block; color: var(--muted); }
+.exam-dialog { width: min(100%, 600px); max-height: calc(100dvh - 36px); overflow-y: auto; align-items: stretch; }
+.exam-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; border: 0; padding: 0; min-width: 0; }
+.exam-fields .admin-field { min-width: 0; width: 100%; }
+.exam-fields input, .exam-fields textarea, .exam-fields select { width: 100%; box-sizing: border-box; }
+.exam-fields textarea { min-height: 80px; resize: vertical; }
+.exam-group-picker { grid-column: 1 / -1; max-height: 180px; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; }
+.exam-group-picker label { display: flex; align-items: center; gap: 8px; padding: 5px; }
+.exam-group-picker input { width: auto; }
+@media (max-width: 600px) {
+  .exam-fields { grid-template-columns: 1fr; }
+  .exam-filters .admin-field { flex-basis: 100%; }
+}

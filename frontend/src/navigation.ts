@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { View } from './types'
 
-const views: View[] = ['landing', 'login', 'help', 'day', 'week', 'group', 'messages', 'feedback', 'admin', 'map']
+const views: View[] = ['landing', 'login', 'help', 'day', 'week', 'exams', 'group', 'messages', 'feedback', 'admin', 'map']
 
 export function viewFromUrl(url: string, authenticated: boolean): View {
   const location = new URL(url)

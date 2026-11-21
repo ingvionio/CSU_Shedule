@@ -1,4 +1,5 @@
 import type {
+  ExamKind, ExamInput, ExamEvent, ExamImportReport, ExamImportHistory, GroupExams,
   ImportHistory,
   SemesterImportReport,
   WeeklyImportReport,
@@ -86,6 +87,21 @@ async function request<T>(path: string, { method = 'GET', body, token, feedbackT
 }
 
 export const api = {
+  exams: (groupId: number) => request<GroupExams>('/groups/' + groupId + '/exams'),
+  adminExams: (token: string, filters: { kind: string; course: string; group_id: string }) => {
+    const params = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== ''))
+    return request<ExamEvent[]>('/admin/exams?' + params, { token })
+  },
+  examImports: (token: string) => request<ExamImportHistory[]>('/admin/exams/imports', { token }),
+  importExams: (token: string, file: File, kind: ExamKind, apply: boolean) => {
+    const body = new FormData()
+    body.append('file', file)
+    return request<ExamImportReport>('/admin/exams/import?kind=' + kind + '&apply=' + apply, { method: 'POST', body, token })
+  },
+  createExam: (token: string, body: ExamInput) => request<ExamEvent>('/admin/exams', { method: 'POST', body, token }),
+  patchExam: (token: string, id: number, body: Partial<ExamInput>) => request<ExamEvent>('/admin/exams/' + id, { method: 'PATCH', body, token }),
+  cancelExam: (token: string, id: number, cancelled: boolean) => request<ExamEvent>('/admin/exams/' + id + '/' + (cancelled ? 'cancel' : 'restore'), { method: 'POST', token }),
+  deleteExam: (token: string, id: number) => request<void>('/admin/exams/' + id, { method: 'DELETE', token }),
   imports: (token: string) => request<ImportHistory[]>('/admin/imports', { token }),
   importWeekly: (token: string, files: File[], dryRun: boolean, skipErrors: boolean) => {
     const body = new FormData()

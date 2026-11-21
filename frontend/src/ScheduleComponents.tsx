@@ -383,8 +383,8 @@ export function BottomNav({
       {items.map(({ label, icon: Icon, target, badge }) => (
         <button
           key={label}
-          className={`nav-item ${view === target || (target === 'day' && view === 'week') ? 'active' : ''}`}
-          aria-current={view === target || (target === 'day' && view === 'week') ? 'page' : undefined}
+          className={`nav-item ${view === target || (target === 'day' && (view === 'week' || view === 'exams')) ? 'active' : ''}`}
+          aria-current={view === target || (target === 'day' && (view === 'week' || view === 'exams')) ? 'page' : undefined}
           onClick={() => onNavigate(target)}
         >
           <span className="nav-icon">
