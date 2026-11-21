@@ -21,6 +21,7 @@ GET /api/v1/groups/{group_id}/schedule?week={week_number}
 | `week.start_date`, `week.end_date` | `YYYY-MM-DD` | понедельник и воскресенье |
 | `week.is_current` | bool | это текущая неделя |
 | `week.prev`, `week.next` | int \| null | соседние недели в пределах семестра (null — за пределами) |
+| `week.schedule_pending` | bool | только магистратура: текущая или будущая неделя, на которую понедельное расписание ещё не загружено. Фронт вместо дней показывает «Методист ещё не загрузил расписание, оно появится позже». У бакалавров и в прошедших неделях — всегда `false` |
 | `generated_at` | ISO datetime | время сборки ответа |
 | `days[]` | array | дни недели пн–сб, **включая дни без пар** (`lessons: []`) |
 | `days[].date` | `YYYY-MM-DD` | |
