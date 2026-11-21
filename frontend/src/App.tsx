@@ -531,14 +531,6 @@ export function App() {
 
               {groupId !== null && (view === 'day' || view === 'week') && (
                 <>
-                  <div className="segmented" aria-label="Режим расписания">
-                      <button className={view === 'day' ? 'active' : ''} onClick={() => setView('day')}>
-                        На день
-                      </button>
-                      <button className={view === 'week' ? 'active' : ''} onClick={() => setView('week')}>
-                        На неделю
-                      </button>
-                  </div>
                   <section className="schedule-intro">
                     <div className="week-line">
                       <div>
@@ -566,6 +558,14 @@ export function App() {
                         onClick={() => moveWeek(1)}
                       >
                         <ChevronRight size={18} />
+                      </button>
+                    </div>
+                    <div className="segmented">
+                      <button className={view === 'day' ? 'active' : ''} onClick={() => setView('day')}>
+                        На день
+                      </button>
+                      <button className={view === 'week' ? 'active' : ''} onClick={() => setView('week')}>
+                        На неделю
                       </button>
                     </div>
                   </section>
