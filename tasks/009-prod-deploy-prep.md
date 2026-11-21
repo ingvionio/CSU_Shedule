@@ -234,3 +234,16 @@ HTTPS на nginx, без Cloudflare (`04-current-state.md`, «Принятые �
   наружу нет, `/health` отвечает, worker работает, в образе нет `secrets/`
   и `.env`; без `JWT_SECRET` — отказ с понятной ошибкой. Тестовый проект
   удалён вместе со своим томом.
+
+### После ответов администратора (21.11.2026)
+
+Прод работает без Docker (systemd + venv релиза, PostgreSQL на сервере),
+поэтому `docker-compose.prod.yml`, `deploy/.env.prod.example` и Docker-пример
+nginx удалены. Вместо них — `deploy/systemd/` (worker и drop-in бэкенда),
+`deploy/env.additions.example` и `DEPLOY.md` под этот сервер. IP посетителя
+на проде определяется верно и без правок: uvicorn доверяет только
+`127.0.0.1` (nginx) и берёт правый недоверенный адрес из `X-Forwarded-For`.
+`versionCode` поднят до 4: опубликован 1.1.1 (versionCode 3), подписанный
+ключом `csu-release-key.jks`. Проверено: venv из `requirements.txt` на
+Python 3.13 (Debian trixie) ставится, приложение импортируется; правки nginx
+проходят `nginx -t` и дают `no-cache` для `index.html` и `/download/`.
