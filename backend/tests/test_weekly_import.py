@@ -308,3 +308,17 @@ def test_online_url_survives_overrides(weekly_db, weekly_book):
             db.commit()
         assert lessons(8)[0]["online_url"] == URL
         assert [(item["status"], item["online_url"]) for item in lessons(9)] == [("moved_in", URL), ("added", None)]
+
+
+@pytest.mark.parametrize("lines", [
+    # аудитория отдельной строкой
+    ["УПРАВЛЕНИЕ ЦИФРОВЫМ ПРОДУКТОМ*", "ВОРОБЬЕВ В.И., ГНЕДКОВА Я.Е.", "АУД. 132"],
+    # преподаватели и аудитория в одной строке
+    ["УПРАВЛЕНИЕ ЦИФРОВЫМ ПРОДУКТОМ*", "ВОРОБЬЕВ В.И., ГНЕДКОВА Я.Е. АУД. 132"],
+])
+def test_two_teachers_in_block(weekly_book, lines):
+    result = parse_weekly_workbook(weekly_book(group="МПИ 201", blocks=[("ПН", [(5, lines)])]))
+    assert not result.warnings and not result.errors
+    lesson = result.lessons[0]
+    assert (lesson.subject, lesson.teacher, lesson.room) == (
+        "УПРАВЛЕНИЕ ЦИФРОВЫМ ПРОДУКТОМ", "ВОРОБЬЕВ В.И., ГНЕДКОВА Я.Е.", "132")
