@@ -6,9 +6,11 @@ import { AdminExamCard, examDateLabel, examTypeLabels } from './AdminExamCard'
 
 const labels: Record<ExamKind, string> = { session: 'Сессия', retake: 'Пересдачи' }
 
-function ExamForm({ event, groups, busy, onSave, onClose }: {
+export function ExamForm({ event, groups, busy, onSave, onClose, onToggleCancel, onDelete }: {
   event: ExamEvent | null; groups: Group[]; busy: boolean
   onSave: (body: ExamInput) => Promise<void>; onClose: () => void
+  /** Открыто из сетки расписания: отмена и удаление прямо в окне. */
+  onToggleCancel?: () => void; onDelete?: () => void
 }) {
   const [form, setForm] = useState<ExamInput>(() => ({
     kind: event?.kind ?? 'session', date: event?.date ?? '', start_time: event?.start_time ?? null,
@@ -50,6 +52,12 @@ function ExamForm({ event, groups, busy, onSave, onClose }: {
       {error && <p className="error-note" role="alert">{error}</p>}
       <div className="exam-actions">
         <button type="submit" className="button button-primary" disabled={busy || !form.group_ids.length}>Сохранить</button>
+        {event && onToggleCancel && <button type="button" className="button button-secondary" disabled={busy} onClick={onToggleCancel}>
+          {event.cancelled ? 'Вернуть' : 'Отменить событие'}
+        </button>}
+        {event && onDelete && <button type="button" className="button button-secondary" disabled={busy} onClick={() => {
+          if (window.confirm('Удалить событие? Студенты больше не увидят его в расписании.')) onDelete()
+        }}>Удалить</button>}
         <button type="button" className="button button-secondary" disabled={busy} onClick={onClose}>Закрыть</button>
       </div>
     </form>

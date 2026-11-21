@@ -91,9 +91,21 @@ test('week grid places timed events in slots, unknown times above rows and suppo
   assert.match(timedHtml, /Вне сетки/)
   assert.doesNotMatch(timedHtml, /Без времени/)
   const card = find(tree, node => node.key?.endsWith('e-1'))
+  // У студента события не открываются (обработчика событий нет)
   assert.equal(card.props.onClick, undefined)
   assert.equal(card.props.role, undefined)
-  assert.match(html, /Правится в разделе „Сессия“/)
+  assert.doesNotMatch(html, /Нажмите, чтобы изменить/)
+
+  // В админке событие открывается своим обработчиком, а не обработчиком пар
+  const opened = []
+  const adminTree = components.WeekGrid({ days: [sunday], slots, currentMinutes: 0, groupName: 'Своя',
+    onLessonClick() { throw new Error('экзамен не должен открываться как пара') },
+    onEventClick(item) { opened.push(item.id) } })
+  const adminCard = find(adminTree, node => node.key?.endsWith('e-1'))
+  assert.equal(adminCard.props.role, 'button')
+  adminCard.props.onClick()
+  assert.deepEqual(opened, ['e-1'])
+  assert.match(renderToStaticMarkup(adminTree), /Нажмите, чтобы изменить/)
 })
 
 test('ordinary lessons retain editing and note interactions', () => {

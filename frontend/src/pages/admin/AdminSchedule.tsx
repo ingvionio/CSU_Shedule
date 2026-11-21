@@ -3,8 +3,10 @@ import { adminHelpItems } from './helpContent'
 import { useEffect, useState } from 'react'
 import { CalendarDays, ChevronLeft, ChevronRight, X } from 'lucide-react'
 
-import { ApiError } from '../../api/client'
-import { useCatalog, useLessonTypes, useOverrideMutations, useStreamSchedule } from '../../api/queries'
+import { api, ApiError } from '../../api/client'
+import { useCatalog, useExamMutations, useLessonTypes, useOverrideMutations, useStreamSchedule } from '../../api/queries'
+import type { ExamEvent } from '../../api/types'
+import { ExamForm } from './AdminExams'
 import { WeekGrid, changeDetails, dayLabel, OnlineLessonLink } from '../../ScheduleComponents'
 import type { Day, Group, Lesson, OverrideInput, OverrideKind, TimeSlot, WeekSchedule } from '../../types'
 
@@ -88,6 +90,9 @@ export function AdminSchedule({
   const catalog = useCatalog(token)
   const { create, remove } = useOverrideMutations(token)
   const busy = create.isPending || remove.isPending
+  const examMutations = useExamMutations(token)
+  const examBusy = examMutations.patch.isPending || examMutations.cancel.isPending || examMutations.remove.isPending
+  const [editingExam, setEditingExam] = useState<ExamEvent | null>(null)
 
   useEffect(() => {
     if (targetGroupIds.length === 0 && groupId !== null) setTargetGroupIds([groupId])
@@ -127,6 +132,34 @@ export function AdminSchedule({
     setRoom(lesson?.room ?? '')
     setComment(lesson?.change && 'comment' in lesson.change ? lesson.change.comment ?? '' : '')
     setError('')
+  }
+
+  /** Экзамен в сетке: берём полное событие (группы, вид, история правок) и открываем форму из «Сессии». */
+  const openEvent = async (lesson: Lesson) => {
+    const id = Number(lesson.id.replace(/^e-/, ''))
+    const owner = schedule?.group.id ?? groupId
+    if (owner === null) return
+    setNotice('')
+    try {
+      const events = await api.adminExams(token, { kind: '', course: '', group_id: String(owner) })
+      const found = events.find((item) => item.id === id)
+      if (found) setEditingExam(found)
+      else setNotice('Событие не найдено — возможно, его уже удалили.')
+    } catch (failure) {
+      if (failure instanceof ApiError && failure.status === 401) onUnauthorized()
+      else setNotice(failure instanceof Error ? failure.message : 'Не удалось открыть событие')
+    }
+  }
+
+  const examAction = async (perform: () => Promise<unknown>, done: string) => {
+    try {
+      await perform()
+      setEditingExam(null)
+      setNotice(`${done} Студенты уже видят изменение.`)
+    } catch (failure) {
+      if (failure instanceof ApiError && failure.status === 401) onUnauthorized()
+      throw failure
+    }
   }
 
   const openLesson = (lesson: Lesson, day: Day) => {
@@ -314,9 +347,24 @@ export function AdminSchedule({
             slots={slots}
             currentMinutes={currentMinutes}
             onLessonClick={openLesson}
+            onEventClick={showStream ? undefined : (lesson) => void openEvent(lesson)}
             onEmptySlotClick={openEmptySlot}
           />
         : !(showStream && streamSchedule.isError) && <div className="state-note">Загружаем расписание {showStream ? 'потока' : 'группы'}…</div>}
+
+      {editingExam && <ExamForm
+        key={editingExam.id}
+        event={editingExam}
+        groups={groups}
+        busy={examBusy}
+        onClose={() => setEditingExam(null)}
+        onSave={(body) => examAction(() => examMutations.patch.mutateAsync({ id: editingExam.id, body }), 'Событие изменено.')}
+        onToggleCancel={() => void examAction(
+          () => examMutations.cancel.mutateAsync({ id: editingExam.id, cancelled: !editingExam.cancelled }),
+          editingExam.cancelled ? 'Событие возвращено.' : 'Событие отменено.',
+        ).catch(() => undefined)}
+        onDelete={() => void examAction(() => examMutations.remove.mutateAsync(editingExam.id), 'Событие удалено.').catch(() => undefined)}
+      />}
 
       {catalog.data && <>
         <datalist id="admin-subjects">{catalog.data.subjects.map((name) => <option key={name} value={name} />)}</datalist>

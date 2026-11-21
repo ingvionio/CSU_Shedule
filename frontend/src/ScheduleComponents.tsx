@@ -276,6 +276,7 @@ export function WeekGrid({
   slots,
   currentMinutes,
   onLessonClick,
+  onEventClick,
   onEmptySlotClick,
   notedKeys,
   homeworkCounts,
@@ -288,6 +289,8 @@ export function WeekGrid({
   slots: TimeSlot[]
   currentMinutes: number
   onLessonClick?: (lesson: Lesson, day: Day) => void
+  /** Клик по событию сессии (экзамен, консультация…) — только в админке. */
+  onEventClick?: (lesson: Lesson, day: Day) => void
   onEmptySlotClick?: (day: Day, slot: TimeSlot) => void
   notedKeys?: Set<string>
   homeworkCounts?: Map<string, number>
@@ -314,22 +317,23 @@ export function WeekGrid({
   const hasUntimed = days.some(day => day.lessons.some(lesson => lesson.start_time === null))
   const rowOffset = hasUntimed ? 3 : 2
   const renderLesson = (lesson: Lesson, day: Day, untimedRow = false) => {
-    const canOpen = Boolean(onLessonClick && !lesson.event)
+    const open = lesson.event ? onEventClick : onLessonClick
+    const canOpen = Boolean(open)
     return (
       <div
         key={lesson.id}
         className={`grid-lesson ${statusClass(lesson.status)}${eventClass(lesson)} ${canOpen ? 'grid-lesson-selectable' : ''}`}
         title={`${timeLabel(lesson)} · ${lesson.subject} · ${lesson.type.name}`
           + `${lesson.teacher ? ` · ${lesson.teacher}` : ''}${lesson.online_url ? ' · Онлайн' : lesson.room ? ` · ауд. ${lesson.room}` : ''}`
-          + (lesson.event ? '\nПравится в разделе „Сессия“' : '')
+          + (lesson.event && onEventClick ? '\nНажмите, чтобы изменить' : '')
           + (lesson.stream_diff?.length ? `\nУ групп по-разному\n${lesson.stream_diff.join('\n')}` : '')}
         role={canOpen ? 'button' : undefined}
         tabIndex={canOpen ? 0 : undefined}
-        onClick={canOpen ? () => onLessonClick?.(lesson, day) : undefined}
+        onClick={canOpen ? () => open?.(lesson, day) : undefined}
         onKeyDown={canOpen ? (event) => {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault()
-            onLessonClick?.(lesson, day)
+            open?.(lesson, day)
           }
         } : undefined}
       >
