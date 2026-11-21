@@ -7,12 +7,12 @@
     python -m app.cli send-emails                  # дослать неотправленные письма
     python -m app.cli send-emails --test <email>   # проверить настройки почты
     python -m app.cli generate-vapid               # ключи для push-уведомлений
-    python -m app.cli worker                       # доставка push и почты из очереди
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
 import sys
 from datetime import date, timedelta
@@ -33,12 +33,13 @@ DEFAULT_SEMESTER = {
 }
 
 
-def init_db() -> None:
-    Base.metadata.create_all(engine)
+async def init_db() -> None:
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
     print(f"Таблицы созданы: {len(Base.metadata.tables)}")
 
 
-def seed_semester(
+async def seed_semester(
     title: str,
     start: date,
     total_weeks: int,
@@ -48,8 +49,8 @@ def seed_semester(
     first_monday = start - timedelta(days=start.weekday())
     end_date = first_monday + timedelta(weeks=total_weeks) - timedelta(days=1)
 
-    with SessionLocal() as session:
-        semester = session.scalar(select(Semester).where(Semester.title == title))
+    async with SessionLocal() as session:
+        semester = await session.scalar(select(Semester).where(Semester.title == title))
         if semester is None:
             semester = Semester(title=title)
             session.add(semester)
@@ -59,14 +60,14 @@ def seed_semester(
         semester.total_weeks = total_weeks
         semester.first_week_parity = parity
         semester.is_active = True
-        session.flush()
+        await session.flush()
 
         # Активным может быть только один семестр.
-        for other in session.scalars(select(Semester).where(Semester.id != semester.id)).all():
+        for other in (await session.scalars(select(Semester).where(Semester.id != semester.id))).all():
             other.is_active = False
 
-        ensure_reference_data(session)
-        session.commit()
+        await ensure_reference_data(session)
+        await session.commit()
 
         print(
             f"Семестр #{semester.id} «{semester.title}»: "
@@ -76,13 +77,13 @@ def seed_semester(
         return semester.id
 
 
-def import_excel(path: str) -> None:
-    with SessionLocal() as session:
-        semester = session.scalar(select(Semester).where(Semester.is_active.is_(True)))
+async def import_excel(path: str) -> None:
+    async with SessionLocal() as session:
+        semester = await session.scalar(select(Semester).where(Semester.is_active.is_(True)))
         if semester is None:
             sys.exit("Нет активного семестра. Сначала: python -m app.cli seed-semester")
 
-        report = import_workbook(session, path, semester, file_name=path.rsplit("/", 1)[-1])
+        report = await import_workbook(session, path, semester, file_name=path.rsplit("/", 1)[-1])
         print(
             f"Импорт #{report.import_id} в «{report.semester_title}»: "
             f"групп создано {report.groups_created}, пар записано {report.lessons_created}, "
@@ -92,19 +93,19 @@ def import_excel(path: str) -> None:
             print(f"домашка: перепривязано {report.homework_rebound}, отвязано {report.homework_unbound}")
 
 
-def import_weekly(paths: list[str], skip_errors: bool = False) -> int:
+async def import_weekly(paths: list[str], skip_errors: bool = False) -> int:
     from app.services.weekly_importer import import_weekly as import_batch
 
-    with SessionLocal() as session:
-        semester = session.scalar(select(Semester).where(Semester.is_active.is_(True)))
+    async with SessionLocal() as session:
+        semester = await session.scalar(select(Semester).where(Semester.is_active.is_(True)))
         if semester is None:
             print("Нет активного семестра. Сначала: python -m app.cli seed-semester")
             return 1
-        report = import_batch(session, paths, semester, skip_errors=skip_errors)
+        report = await import_batch(session, paths, semester, skip_errors=skip_errors)
         if report.errors and not skip_errors:
-            session.rollback()
+            await session.rollback()
         else:
-            session.commit()
+            await session.commit()
         for file in report.files:
             parsed = file.parsed
             if not parsed.errors:
@@ -121,29 +122,40 @@ def import_weekly(paths: list[str], skip_errors: bool = False) -> int:
         return 1 if report.errors else 0
 
 
-def stats() -> None:
-    with SessionLocal() as session:
-        semester = session.scalar(select(Semester).where(Semester.is_active.is_(True)))
+async def stats() -> None:
+    async with SessionLocal() as session:
+        semester = await session.scalar(select(Semester).where(Semester.is_active.is_(True)))
         print(f"Активный семестр: {semester.title if semester else '—'}")
         for model, label in ((Group, "групп"), (Lesson, "пар"), (Subject, "предметов"), (Teacher, "преподавателей"), (Room, "аудиторий")):
-            print(f"  {label}: {session.scalar(select(func.count()).select_from(model))}")
+            print(f"  {label}: {await session.scalar(select(func.count()).select_from(model))}")
 
-        rows = session.execute(
+        rows = (await session.execute(
             select(Group.name, Group.course, func.count(Lesson.id))
             .outerjoin(Lesson, Lesson.group_id == Group.id)
             .group_by(Group.id)
             .order_by(Group.course, Group.name)
-        ).all()
+        )).all()
         print("\n  группа            курс  пар")
         for name, course, count in rows:
             print(f"  {name:18}{course:^6}{count:4}")
 
 
-def send_emails(test_to: str | None) -> None:
+async def feedback_authors(apply: bool) -> None:
+    from app.services.feedback import fill_authors_from_devices
+
+    async with SessionLocal() as session:
+        filled = await fill_authors_from_devices(session, apply)
+    for message_id, name in filled:
+        print(f"обращение {message_id}: {name}")
+    action = "подписано" if apply else "можно подписать (запустите с --apply)"
+    print(f"{action}: {len(filled)}")
+
+
+async def send_emails(test_to: str | None) -> None:
     from app.models import EmailOutbox, EmailStatus
     from app.services.mailer import deliver, deliver_pending
 
-    with SessionLocal() as session:
+    async with SessionLocal() as session:
         if test_to:
             item = EmailOutbox(
                 to_address=test_to,
@@ -151,14 +163,14 @@ def send_emails(test_to: str | None) -> None:
                 body="Если вы читаете это письмо, отправка обращений настроена.",
             )
             session.add(item)
-            session.commit()
-            deliver(session, [item])
+            await session.commit()
+            await deliver(session, [item])
             if item.status != EmailStatus.SENT.value:
                 sys.exit(f"Не отправлено ({item.status}): {item.last_error or 'SMTP_USER не задан'}")
             print(f"Отправлено на {test_to}")
             return
 
-        print(f"Попыток отправки: {deliver_pending(session)}")
+        print(f"Попыток отправки: {await deliver_pending(session)}")
 
 
 def generate_vapid() -> None:
@@ -181,7 +193,7 @@ def generate_vapid() -> None:
     print("VAPID_SUBJECT=mailto:<почта для связи>")
 
 
-def main() -> None:
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="app.cli", description="Команды бэкенда расписания")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -206,29 +218,43 @@ def main() -> None:
     mail.add_argument("--test", metavar="EMAIL", help="отправить проверочное письмо")
 
     sub.add_parser("generate-vapid", help="сгенерировать ключи для push-уведомлений")
-    sub.add_parser("worker", help="доставлять push и почту из очереди")
 
-    args = parser.parse_args()
+    authors = sub.add_parser("feedback-authors", help="подписать старые обращения ФИО по устройству студента")
+    authors.add_argument("--apply", action="store_true", help="записать; без флага — только показать")
 
-    if args.command == "init-db":
-        init_db()
-    elif args.command == "seed-semester":
-        seed_semester(args.title, date.fromisoformat(args.start), args.weeks, args.parity)
-    elif args.command == "import-excel":
-        import_excel(args.path)
-    elif args.command == "import-weekly":
-        sys.exit(import_weekly(args.paths, args.skip_errors))
-    elif args.command == "stats":
-        stats()
-    elif args.command == "send-emails":
-        send_emails(args.test)
-    elif args.command == "generate-vapid":
-        generate_vapid()
-    elif args.command == "worker":
-        from app.services.worker import run
+    sub.add_parser("worker", help="отправлять push и письма из очереди")
+    return parser.parse_args()
 
-        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-        run()
+
+def main() -> None:
+    asyncio.run(run_command(parse_args()), loop_factory=asyncio.SelectorEventLoop)
+
+
+async def run_command(args: argparse.Namespace) -> None:
+    try:
+        if args.command == "init-db":
+            await init_db()
+        elif args.command == "seed-semester":
+            await seed_semester(args.title, date.fromisoformat(args.start), args.weeks, args.parity)
+        elif args.command == "import-excel":
+            await import_excel(args.path)
+        elif args.command == "import-weekly":
+            sys.exit(await import_weekly(args.paths, args.skip_errors))
+        elif args.command == "stats":
+            await stats()
+        elif args.command == "send-emails":
+            await send_emails(args.test)
+        elif args.command == "generate-vapid":
+            generate_vapid()
+        elif args.command == "worker":
+            from app.services.worker import run
+
+            logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+            await run()
+        elif args.command == "feedback-authors":
+            await feedback_authors(args.apply)
+    finally:
+        await engine.dispose()
 
 
 if __name__ == "__main__":

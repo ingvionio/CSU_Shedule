@@ -6,7 +6,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.models import Group, LessonType, TimeSlot
@@ -33,18 +33,18 @@ def _today():
 
 
 @router.get("/groups", response_model=list[GroupOut], summary="Список групп")
-def list_groups(db: Session = Depends(get_db)) -> list[Group]:
-    return list(db.scalars(select(Group).order_by(Group.course, Group.name)).all())
+async def list_groups(db: AsyncSession = Depends(get_db)) -> list[Group]:
+    return list((await db.scalars(select(Group).order_by(Group.course, Group.name))).all())
 
 
 @router.get("/directions", response_model=list[DirectionOut], summary="Направления подготовки (потоки)")
-def list_directions(db: Session = Depends(get_db)) -> list[DirectionOut]:
-    rows = db.execute(
+async def list_directions(db: AsyncSession = Depends(get_db)) -> list[DirectionOut]:
+    rows = (await db.execute(
         select(Group.direction, Group.course)
         .where(Group.direction.is_not(None))
         .distinct()
         .order_by(Group.direction, Group.course)
-    ).all()
+    )).all()
     courses: dict[str, list[int]] = {}
     for direction, course in rows:
         courses.setdefault(direction, []).append(course)
@@ -52,7 +52,7 @@ def list_directions(db: Session = Depends(get_db)) -> list[DirectionOut]:
 
 
 @router.get("/push/config", response_model=PushConfigOut, summary="Настройки Web Push и FCM для подписки")
-def push_config() -> PushConfigOut:
+async def push_config() -> PushConfigOut:
     return PushConfigOut(
         public_key=get_settings().vapid_public_key if push_service.web_configured() else None,
         fcm=push_service.fcm_configured(),
@@ -60,8 +60,8 @@ def push_config() -> PushConfigOut:
 
 
 @router.get("/time-slots", response_model=list[TimeSlotOut], summary="Сетка звонков")
-def list_time_slots(db: Session = Depends(get_db)) -> list[TimeSlotOut]:
-    slots = db.scalars(select(TimeSlot).order_by(TimeSlot.number)).all()
+async def list_time_slots(db: AsyncSession = Depends(get_db)) -> list[TimeSlotOut]:
+    slots = (await db.scalars(select(TimeSlot).order_by(TimeSlot.number))).all()
     return [
         TimeSlotOut(
             number=slot.number,
@@ -73,20 +73,20 @@ def list_time_slots(db: Session = Depends(get_db)) -> list[TimeSlotOut]:
 
 
 @router.get("/lesson-types", response_model=list[LessonTypeOut], summary="Форматы пар")
-def list_lesson_types(db: Session = Depends(get_db)) -> list[LessonTypeOut]:
-    types = db.scalars(select(LessonType).order_by(LessonType.name)).all()
+async def list_lesson_types(db: AsyncSession = Depends(get_db)) -> list[LessonTypeOut]:
+    types = (await db.scalars(select(LessonType).order_by(LessonType.name))).all()
     return [LessonTypeOut(code=item.code, name=item.name) for item in types]
 
 
 @router.get("/weeks/current", response_model=CurrentWeekOut, summary="Текущая учебная неделя")
-def current_week(db: Session = Depends(get_db)) -> CurrentWeekOut:
+async def current_week(db: AsyncSession = Depends(get_db)) -> CurrentWeekOut:
     try:
-        semester = schedule_service.active_semester(db)
+        semester = await schedule_service.active_semester(db)
     except schedule_service.ScheduleError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 
     today = _today()
-    last_week = weeks_service.last_available_week(db, semester)
+    last_week = await weeks_service.last_available_week(db, semester)
     number = weeks_service.current_week_number(semester, today, last_week)
     info = weeks_service.build_week_info(semester, number, today, last_week)
 
@@ -104,22 +104,22 @@ def current_week(db: Session = Depends(get_db)) -> CurrentWeekOut:
     response_model=WeekScheduleOut,
     summary="Расписание группы на неделю",
 )
-def group_schedule(
+async def group_schedule(
     group_id: int,
     week: int | None = Query(default=None, ge=1, description="Номер недели; без него -- текущая"),
     # Старые клиенты (APK 1.1.1) не умеют события без времени и падают на них —
     # экзамены получают только клиенты, которые явно об этом просят.
     events: bool = Query(default=False, description="Включить события сессии и пересдач"),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> WeekScheduleOut:
     try:
-        semester = schedule_service.active_semester(db)
-        group = schedule_service.get_group(db, group_id)
+        semester = await schedule_service.active_semester(db)
+        group = await schedule_service.get_group(db, group_id)
         today = _today()
         week_number = week or weeks_service.current_week_number(
-            semester, today, weeks_service.last_available_week(db, semester)
+            semester, today, await weeks_service.last_available_week(db, semester)
         )
-        info, days = schedule_service.build_week_schedule(
+        info, days = await schedule_service.build_week_schedule(
             db, group, semester, week_number, today, include_exams=events
         )
     except schedule_service.ScheduleError as error:

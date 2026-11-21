@@ -4,7 +4,7 @@
 1. Сессионную аутентификацию (обход CSRF logintoken, получение MoodleSession и sesskey).
 2. Извлечение ФИО и числового moodle_id со страницы профиля.
 3. Автоматическое определение академической группы студента по курсам через AJAX-шлюз.
-4. Проверку валидности (core_session_touch) и прозрачное автопродление сессии по зашифрованному паролю.
+4. Продление живой сессии через core_session_touch без сохранения пароля.
 5. Dev/Mock-режим при MOODLE_MOCK=True для локальной разработки и тестов без реального аккаунта.
 6. Заготовки методов для Фазы 2 (календарь, дедлайны, оценки).
 """
@@ -17,19 +17,27 @@ from datetime import datetime, timedelta, timezone
 import json
 import logging
 import re
+from types import TracebackType
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
-import requests
+import httpx
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.crypto import decrypt_secret, encrypt_secret
 from app.models import Group, User
+from app.services.groups import MASTER_DIRECTIONS, direction_of, level_of
 
 logger = logging.getLogger(__name__)
+
+COURSE_DIRECTIONS = {d.upper(): d for d in (*MASTER_DIRECTIONS, "ПрИ", "ПИ", "БИ", "КБ")}
+GROUP_SEPARATOR = r"\s*[-–—]?\s*"
+COURSE_GROUP_TAG = re.compile(
+    rf"\b({'|'.join(COURSE_DIRECTIONS)}){GROUP_SEPARATOR}(\d{{1,3}})\b",
+    re.IGNORECASE,
+)
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -76,6 +84,7 @@ class MoodleSessionData:
     cookies: dict[str, str]
     sesskey: str
     expires_at: datetime
+    timeout_seconds: int = 0
 
 
 def _clean_text(text: str) -> str:
@@ -92,22 +101,34 @@ class MoodleClient:
 
     def __init__(self, base_url: str | None = None, timeout: int = 12) -> None:
         self.base_url = (base_url or get_settings().moodle_base_url).rstrip("/")
-        self.timeout = timeout
-        self.session = requests.Session()
-        self.session.headers.update(
-            {
+        self.session = httpx.AsyncClient(
+            timeout=timeout,
+            follow_redirects=True,
+            headers={
                 "User-Agent": USER_AGENT,
                 "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-            }
+            },
         )
 
-    def fetch_logintoken(self) -> str:
+    async def __aenter__(self) -> MoodleClient:
+        await self.session.__aenter__()
+        return self
+
+    async def __aexit__(
+        self, exc_type: type[BaseException] | None, exc: BaseException | None, traceback: TracebackType | None,
+    ) -> None:
+        await self.session.__aexit__(exc_type, exc, traceback)
+
+    def cookies(self) -> dict[str, str]:
+        return {cookie.name: cookie.value for cookie in self.session.cookies.jar if cookie.value is not None}
+
+    async def fetch_logintoken(self) -> str:
         """Извлекает CSRF-токен logintoken со страницы входа /login/index.php."""
         url = f"{self.base_url}/login/index.php"
         try:
-            resp = self.session.get(url, timeout=self.timeout)
+            resp = await self.session.get(url)
             resp.raise_for_status()
-        except requests.RequestException as exc:
+        except httpx.HTTPError as exc:
             logger.error("Ошибка при запросе страницы входа Moodle: %s", exc)
             raise MoodleError("Не удалось связаться с сервером Moodle ЧелГУ", 502) from exc
 
@@ -122,9 +143,9 @@ class MoodleClient:
 
         raise MoodleError("Форма входа Moodle изменилась (logintoken не найден)", 502)
 
-    def execute_login(self, username: str, password: str) -> tuple[str, str]:
+    async def execute_login(self, username: str, password: str) -> tuple[str, str]:
         """Выполняет POST-запрос авторизации и возвращает (html_страницы, sesskey)."""
-        logintoken = self.fetch_logintoken()
+        logintoken = await self.fetch_logintoken()
         login_url = f"{self.base_url}/login/index.php"
         payload = {
             "anchor": "",
@@ -134,14 +155,14 @@ class MoodleClient:
         }
 
         try:
-            resp = self.session.post(login_url, data=payload, allow_redirects=True, timeout=self.timeout)
+            resp = await self.session.post(login_url, data=payload)
             resp.raise_for_status()
-        except requests.RequestException as exc:
+        except httpx.HTTPError as exc:
             logger.error("Ошибка при отправке учетных данных в Moodle: %s", exc)
             raise MoodleError("Сервер Moodle ЧелГУ временно недоступен", 502) from exc
 
         # Если нас перенаправило обратно на страницу входа — ошибка логина
-        if "/login/index.php" in resp.url and "testsession" not in resp.url:
+        if "/login/index.php" in resp.url.path and "testsession" not in resp.url.params:
             soup = BeautifulSoup(resp.text, "html.parser")
             err_el = soup.find(class_=lambda c: c and ("alert-danger" in c or "loginerrors" in c))
             err_msg = err_el.get_text(strip=True) if err_el else "Неверный логин или пароль Moodle"
@@ -159,13 +180,13 @@ class MoodleClient:
             return logout_match.group(1)
         return ""
 
-    def get_profile_info(self) -> tuple[str, str, str, str]:
+    async def get_profile_info(self) -> tuple[str, str, str, str]:
         """Извлекает ФИО, moodle_id, sesskey и HTML из /user/profile.php."""
         url = f"{self.base_url}/user/profile.php"
         try:
-            resp = self.session.get(url, timeout=self.timeout)
+            resp = await self.session.get(url)
             resp.raise_for_status()
-        except requests.RequestException as exc:
+        except httpx.HTTPError as exc:
             logger.error("Ошибка при получении профиля Moodle: %s", exc)
             raise MoodleError("Не удалось загрузить профиль Moodle", 502) from exc
 
@@ -175,7 +196,7 @@ class MoodleClient:
 
         # Извлечение moodle_id: из URL страницы после редиректа или из ссылок на странице
         moodle_id = ""
-        id_match = re.search(r'[?&]id=(\d+)', resp.url)
+        id_match = re.search(r'[?&]id=(\d+)', str(resp.url))
         if id_match:
             moodle_id = id_match.group(1)
         else:
@@ -223,12 +244,12 @@ class MoodleClient:
 
         return full_name, moodle_id, sesskey, html
 
-    def call_ajax(self, sesskey: str, method_name: str, args: dict[str, Any]) -> Any:
+    async def call_ajax(self, sesskey: str, method_name: str, args: dict[str, Any]) -> Any:
         """Вызывает внутренний AJAX-метод Moodle (/lib/ajax/service.php)."""
         url = f"{self.base_url}/lib/ajax/service.php?sesskey={sesskey}&info={method_name}"
         payload = [{"index": 0, "methodname": method_name, "args": args}]
         try:
-            resp = self.session.post(url, json=payload, timeout=self.timeout)
+            resp = await self.session.post(url, json=payload)
             resp.raise_for_status()
             data = resp.json()
             if isinstance(data, list) and len(data) > 0:
@@ -241,15 +262,15 @@ class MoodleClient:
                     raise MoodleError(f"Ошибка службы Moodle: {err}")
                 return item.get("data")
             return None
-        except (requests.RequestException, json.JSONDecodeError) as exc:
-            logger.warning("Ошибка вызова AJAX метода %s: %s", method_name, exc)
+        except (httpx.HTTPError, json.JSONDecodeError):
+            logger.warning("Ошибка вызова AJAX метода %s", method_name)
             return None
 
-    def get_enrolled_courses(self, sesskey: str) -> list[dict[str, Any]]:
+    async def get_enrolled_courses(self, sesskey: str) -> list[dict[str, Any]]:
         """Получает список зачисленных курсов пользователя через AJAX."""
         if not sesskey:
             return []
-        data = self.call_ajax(
+        data = await self.call_ajax(
             sesskey,
             "core_course_get_enrolled_courses_by_timeline_classification",
             {"offset": 0, "limit": 50, "classification": "all", "sort": "fullname"},
@@ -258,21 +279,63 @@ class MoodleClient:
             return data["courses"]
         return []
 
-    def touch_session(self, sesskey: str) -> bool:
-        """Проверяет активность сессии методом core_session_touch."""
+    async def touch_session(self, sesskey: str) -> int:
+        """Продлевает сессию и получает остаток её срока одним HTTP-запросом."""
         if not sesskey:
-            return False
+            raise MoodleAuthError("Отсутствует ключ сессии Moodle")
         try:
             url = f"{self.base_url}/lib/ajax/service.php?sesskey={sesskey}&info=core_session_touch"
-            payload = [{"index": 0, "methodname": "core_session_touch", "args": {}}]
-            resp = self.session.post(url, json=payload, timeout=6)
-            if resp.status_code == 200:
-                data = resp.json()
-                if isinstance(data, list) and len(data) > 0 and data[0].get("error") is False:
-                    return True
-        except Exception:
-            pass
-        return False
+            payload = [
+                {"index": 0, "methodname": "core_session_touch", "args": {}},
+                {"index": 1, "methodname": "core_session_time_remaining", "args": {}},
+            ]
+            resp = await self.session.post(url, json=payload, timeout=6, follow_redirects=False)
+            if resp.status_code == 401:
+                raise MoodleAuthError("Сессия Moodle завершена, войдите снова")
+            if 300 <= resp.status_code < 400:
+                destination = urlparse(urljoin(self.base_url, resp.headers.get("Location", "")))
+                if destination.netloc == urlparse(self.base_url).netloc and destination.path.endswith("/login/index.php"):
+                    raise MoodleAuthError("Сессия Moodle завершена, войдите снова")
+                raise MoodleError("Неожиданное перенаправление службы сессий Moodle", 502)
+            resp.raise_for_status()
+            data = resp.json()
+        except (httpx.HTTPError, ValueError):
+            # Исключение httpx может содержать URL с sesskey.
+            raise MoodleError("Не удалось связаться со службой сессий Moodle", 502) from None
+        auth_codes = {"servicerequireslogin", "requireloginerror", "invalidsesskey", "notloggedin",
+                      "sessionerroruser", "sessionexpired"}
+        if isinstance(data, dict) and isinstance(data.get("errorcode"), str) and data["errorcode"] in auth_codes:
+            raise MoodleAuthError("Сессия Moodle завершена, войдите снова")
+        if not isinstance(data, list):
+            raise MoodleError("Некорректный ответ службы сессий Moodle", 502)
+        for item in data:
+            if not isinstance(item, dict):
+                raise MoodleError("Некорректный ответ службы сессий Moodle", 502)
+            if item.get("error") is True:
+                error = item.get("exception") or {}
+                code = error.get("errorcode") if isinstance(error, dict) else None
+                if isinstance(code, str) and code in auth_codes:
+                    raise MoodleAuthError("Сессия Moodle завершена, войдите снова")
+                raise MoodleError("Служба сессий Moodle временно недоступна", 502)
+        if len(data) != 2 or any(item.get("error") is not False for item in data) or data[0].get("data") is not True:
+            raise MoodleError("Некорректный ответ службы сессий Moodle", 502)
+        remaining = data[1].get("data")
+        if not isinstance(remaining, dict):
+            raise MoodleError("Не удалось определить срок сессии Moodle", 502)
+        seconds, user_id = remaining.get("timeremaining"), remaining.get("userid")
+        if type(seconds) is not int or type(user_id) is not int:
+            raise MoodleError("Некорректный срок сессии Moodle", 502)
+        if seconds <= 0 or user_id <= 0:
+            raise MoodleAuthError("Сессия Moodle завершена, войдите снова")
+        return seconds
+
+    @staticmethod
+    def session_timeout(*pages: str) -> int | None:
+        for page in pages:
+            match = re.search(r'"sessiontimeout"\s*:\s*(\d+)', page)
+            if match and int(match[1]) > 0:
+                return int(match[1])
+        return None
 
 
 def extract_group_from_profile_html(profile_html: str) -> str | None:
@@ -334,19 +397,15 @@ def extract_student_group_info(
     else:
         current_courses = [t for _, t in course_items]
 
-    # Ищем теги направлений: ПрИ, ПИ, БИ, КБ с цифрой курса (1-4) или группы (101-402)
-    # Направление ПрИ проверяем раньше ПИ!
-    tag_pattern = re.compile(r"\b(ПрИ|ПИ|БИ|КБ)[-–—]?(\d{1,3})\b", re.IGNORECASE)
-
     dir_course_scores: Counter[tuple[str, int]] = Counter()
 
     for text in current_courses:
-        raw_tags = tag_pattern.findall(text)
+        raw_tags = COURSE_GROUP_TAG.findall(text)
         if not raw_tags:
             continue
         parsed_tags: list[tuple[str, int, int]] = []
         for d, num_str in raw_tags:
-            d_norm = d.upper().replace("РИ", "рИ")
+            d_norm = COURSE_DIRECTIONS[d.upper()]
             num = int(num_str)
             course_digit = num if num < 10 else num // 100
             parsed_tags.append((d_norm, course_digit, num))
@@ -363,9 +422,9 @@ def extract_student_group_info(
     if not dir_course_scores:
         # Fallback: поиск по всем курсам без учета года
         all_text = " \n ".join(t for _, t in course_items)
-        raw_tags = tag_pattern.findall(all_text)
+        raw_tags = COURSE_GROUP_TAG.findall(all_text)
         for d, num_str in raw_tags:
-            d_norm = d.upper().replace("РИ", "рИ")
+            d_norm = COURSE_DIRECTIONS[d.upper()]
             num = int(num_str)
             course_digit = num if num < 10 else num // 100
             dir_course_scores[(d, course_digit)] += 1
@@ -377,14 +436,15 @@ def extract_student_group_info(
 
     # Определяем номер подгруппы (индекс группы: 1, 2, 3...)
     all_current_text = " \n ".join(current_courses)
-    curr_sub_matches = re.findall(rf"\b{re.escape(best_dir)}[-–—]?{best_course}(\d{{2}})\b", all_current_text, re.IGNORECASE)
+    group_prefix = rf"\b{re.escape(best_dir)}{GROUP_SEPARATOR}"
+    curr_sub_matches = re.findall(rf"{group_prefix}{best_course}(\d{{2}})\b", all_current_text, re.IGNORECASE)
 
     group_idx = 1
     if curr_sub_matches:
         group_idx = Counter(int(m) for m in curr_sub_matches).most_common(1)[0][0]
     else:
         all_text = " \n ".join(t for _, t in course_items)
-        hist_sub_matches = re.findall(rf"\b{re.escape(best_dir)}[-–—]?\d(\d{{2}})\b", all_text, re.IGNORECASE)
+        hist_sub_matches = re.findall(rf"{group_prefix}\d(\d{{2}})\b", all_text, re.IGNORECASE)
         if hist_sub_matches:
             group_idx = Counter(int(m) for m in hist_sub_matches).most_common(1)[0][0]
 
@@ -415,9 +475,12 @@ def match_student_group(
     direction, course_num, group_idx = extract_student_group_info(courses, profile_html)
 
     if direction and course_num:
+        level = level_of(direction)
         canonical_short = f"{direction}-{course_num}{group_idx:02d}"
-        canonical_long = f"ИТ{course_num}-{direction}б-{course_num}{group_idx}"
-        candidates_norm = {normalize_group_key(canonical_short), normalize_group_key(canonical_long)}
+        candidates_norm = {normalize_group_key(canonical_short)}
+        if level == "bachelor":
+            canonical_long = f"ИТ{course_num}-{direction}б-{course_num}{group_idx}"
+            candidates_norm.add(normalize_group_key(canonical_long))
 
         # 1. Поиск прямого соответствия каноническому названию группы в known_groups
         for g in known_groups:
@@ -428,7 +491,7 @@ def match_student_group(
         # 2. Поиск по направлению и курсу среди known_groups
         matched_by_course_and_dir = [
             g for g in known_groups
-            if g.course == course_num and (
+            if g.course == course_num and level_of(direction_of(g.name) or g.direction) == level and (
                 (g.direction and g.direction.upper() == direction.upper())
                 or direction.lower() in g.name.lower()
             )
@@ -491,8 +554,8 @@ def match_student_group(
     return None
 
 
-def authenticate_and_detect_student(
-    db: Session,
+async def authenticate_and_detect_student(
+    db: AsyncSession,
     username: str,
     password: str,
 ) -> MoodleSessionData:
@@ -502,10 +565,10 @@ def authenticate_and_detect_student(
     """
     settings = get_settings()
     now = datetime.now(timezone.utc)
-    groups = list(db.scalars(select(Group)).all())
 
     # Dev / Mock режим для локальной разработки
     if settings.moodle_mock:
+        groups = (await db.scalars(select(Group))).all()
         logger.info("Вход студента через Moodle MOCK режим: %s", username)
         if not groups:
             raise MoodleGroupError("В базе нет ни одной группы. Загрузите расписание перед входом.")
@@ -523,28 +586,30 @@ def authenticate_and_detect_student(
             group=selected_group,
             cookies={"MoodleSession": "mock_cookie_val"},
             sesskey="mock_sesskey_123",
-            expires_at=now + timedelta(hours=settings.moodle_session_ttl_hours),
+            expires_at=now + timedelta(hours=2),
+            timeout_seconds=7200,
         )
 
-    client = MoodleClient()
-    dashboard_html, initial_sesskey = client.execute_login(username, password)
-    full_name, moodle_id, profile_sesskey, profile_html = client.get_profile_info()
-    sesskey = profile_sesskey or initial_sesskey
+    async with MoodleClient() as client:
+        dashboard_html, initial_sesskey = await client.execute_login(username, password)
+        full_name, moodle_id, profile_sesskey, profile_html = await client.get_profile_info()
+        sesskey = profile_sesskey or initial_sesskey
+        courses = await client.get_enrolled_courses(sesskey)
+        timeout_seconds = client.session_timeout(dashboard_html, profile_html) or await client.touch_session(sesskey)
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=timeout_seconds)
+        cookies = client.cookies()
 
-    # Получаем курсы через AJAX для определения группы
-    courses = client.get_enrolled_courses(sesskey)
+    groups = list(await db.scalars(select(Group)))
     detected_group = match_student_group(courses, profile_html, groups)
 
     if detected_group is None:
         # 1. Если группа была явно указана в профиле (например "ПрИ-401"), но отсутствует в known_groups
         explicit_name = extract_group_from_profile_html(profile_html)
         if explicit_name:
-            existing = db.scalar(select(Group).where(Group.name == explicit_name))
+            existing = await db.scalar(select(Group).where(Group.name == explicit_name))
             if existing is not None:
                 detected_group = existing
             else:
-                from app.services.groups import direction_of
-
                 c_match = re.search(r"(\d)", explicit_name)
                 c_num = int(c_match.group(1)) if c_match else 1
                 detected_group = Group(
@@ -553,14 +618,14 @@ def authenticate_and_detect_student(
                     direction=direction_of(explicit_name),
                 )
                 db.add(detected_group)
-                db.flush()
+                await db.flush()
 
     if detected_group is None:
         # 2. Если группы нет в профиле — определяем по учебным курсам Moodle
         direction, course_num, group_idx = extract_student_group_info(courses, profile_html)
         if direction and course_num:
             canonical_name = f"{direction}-{course_num}{group_idx:02d}"
-            existing = db.scalar(select(Group).where(Group.name == canonical_name))
+            existing = await db.scalar(select(Group).where(Group.name == canonical_name))
             if existing is not None:
                 detected_group = existing
             else:
@@ -570,58 +635,54 @@ def authenticate_and_detect_student(
                     direction=direction,
                 )
                 db.add(detected_group)
-                db.flush()
+                await db.flush()
 
     if detected_group is None:
         raise MoodleGroupError()
-
-    expires_at = now + timedelta(hours=settings.moodle_session_ttl_hours)
 
     return MoodleSessionData(
         moodle_id=moodle_id,
         moodle_username=username,
         full_name=full_name,
         group=detected_group,
-        cookies=client.session.cookies.get_dict(),
+        cookies=cookies,
         sesskey=sesskey,
         expires_at=expires_at,
+        timeout_seconds=timeout_seconds,
     )
 
 
-def save_or_update_student(
-    db: Session,
+async def save_or_update_student(
+    db: AsyncSession,
     moodle_data: MoodleSessionData,
-    plain_password: str,
     device_key: str | None,
     ip: str | None,
 ) -> tuple[User, bool]:
     """
     Создает или обновляет запись пользователя User по данным Moodle.
-    Шифрует пароль, сохраняет сессию и привязывает академическую группу.
+    Шифрует сессию и привязывает академическую группу. Пароль не принимает.
     """
     # Общий ID-заглушка не должен связывать разные учетные записи.
     if not moodle_data.moodle_id or moodle_data.moodle_id == "unknown":
         raise MoodleError("Не удалось определить идентификатор пользователя Moodle", 502)
 
     now = datetime.now(timezone.utc)
-    encrypted_pass = encrypt_secret(plain_password)
-    cookie_str = json.dumps(moodle_data.cookies)
 
     # Ищем существующего пользователя по moodle_id или moodle_username
-    user = db.scalar(
+    user = await db.scalar(
         select(User).where(
             (User.moodle_id == moodle_data.moodle_id)
             | (User.moodle_username == moodle_data.moodle_username)
-        )
+        ).with_for_update(of=User)
     )
 
     if user is None:
         # Также проверяем совпадение по ФИО, если пользователь был заведен до внедрения Moodle
-        user = db.scalar(
+        user = await db.scalar(
             select(User).where(
                 User.full_name == moodle_data.full_name,
                 User.moodle_id.is_(None),
-            )
+            ).with_for_update(of=User)
         )
 
     group_changed = False
@@ -632,12 +693,7 @@ def save_or_update_student(
             group_id=moodle_data.group.id,
             moodle_id=moodle_data.moodle_id,
             moodle_username=moodle_data.moodle_username,
-            moodle_encrypted_password=encrypted_pass,
-            moodle_session_cookie=cookie_str,
-            moodle_sesskey=moodle_data.sesskey,
-            moodle_session_expires_at=moodle_data.expires_at,
             moodle_auth_error=False,
-            device_key_hash=device_key,
             created_at=now,
             last_seen_at=now,
         )
@@ -649,80 +705,25 @@ def save_or_update_student(
         user.group_id = moodle_data.group.id
         user.moodle_id = moodle_data.moodle_id
         user.moodle_username = moodle_data.moodle_username
-        user.moodle_encrypted_password = encrypted_pass
-        user.moodle_session_cookie = cookie_str
-        user.moodle_sesskey = moodle_data.sesskey
-        user.moodle_session_expires_at = moodle_data.expires_at
         user.moodle_auth_error = False
         user.last_seen_at = now
-        if device_key:
-            user.device_key_hash = device_key
 
-    db.flush()
-    db.refresh(user, ["group"])
+    from app.services.feedback import secret_hash
+    from app.services.moodle_sessions import start_session
+
+    if device_key:
+        user.device_key_hash = secret_hash(device_key)
+    if ip and not user.ip_hash:
+        user.ip_hash = secret_hash(ip)
+
+    await db.flush()
+    start_session(user, moodle_data, now)
+    await db.refresh(user, ["group"])
 
     if group_changed:
         from app.services.messages import attach_recent_messages
 
-        attach_recent_messages(db, user, now)
+        await attach_recent_messages(db, user, now)
 
-    db.commit()
+    await db.commit()
     return user, group_changed
-
-
-def ensure_moodle_session(user: User, db: Session) -> requests.Session:
-    """
-    Возвращает авторизованную requests.Session для пользователя.
-    Если кэшированная сессия истекла или недействительна, автоматически
-    переавторизуется в Moodle с использованием зашифрованного пароля.
-    """
-    settings = get_settings()
-    now = datetime.now(timezone.utc)
-
-    # Проверяем кэшированную сессию
-    if (
-        user.moodle_session_expires_at
-        and user.moodle_session_expires_at > now
-        and user.moodle_session_cookie
-        and user.moodle_sesskey
-    ):
-        try:
-            cookies = json.loads(user.moodle_session_cookie)
-            client = MoodleClient()
-            client.session.cookies.update(cookies)
-            if client.touch_session(user.moodle_sesskey):
-                return client.session
-        except Exception:
-            pass
-
-    # Сессия истекла — пробуем переавторизоваться
-    if not user.moodle_username or not user.moodle_encrypted_password:
-        user.moodle_auth_error = True
-        db.commit()
-        raise MoodleAuthError("Отсутствуют сохраненные учетные данные Moodle")
-
-    try:
-        plain_password = decrypt_secret(user.moodle_encrypted_password)
-    except Exception as exc:
-        user.moodle_auth_error = True
-        db.commit()
-        raise MoodleAuthError("Не удалось расшифровать пароль Moodle") from exc
-
-    try:
-        client = MoodleClient()
-        _, sesskey = client.execute_login(user.moodle_username, plain_password)
-        expires_at = now + timedelta(hours=settings.moodle_session_ttl_hours)
-
-        user.moodle_session_cookie = json.dumps(client.session.cookies.get_dict())
-        user.moodle_sesskey = sesskey
-        user.moodle_session_expires_at = expires_at
-        user.moodle_auth_error = False
-        db.commit()
-        return client.session
-    except MoodleAuthError as exc:
-        user.moodle_auth_error = True
-        db.commit()
-        raise exc
-    except Exception as exc:
-        logger.error("Ошибка автопродления сессии Moodle: %s", exc)
-        raise MoodleError("Ошибка подключения к Moodle ЧелГУ", 502) from exc

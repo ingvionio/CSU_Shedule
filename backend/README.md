@@ -21,6 +21,7 @@ FastAPI + SQLAlchemy + PostgreSQL. Отдаёт готовое расписан�
 ### Вариант 1: Docker Compose (из корня репозитория)
 
 ```bash
+cp backend/.env.example backend/.env    # настройки бэкенда, compose читает их через env_file
 docker compose up -d --build
 docker compose exec backend python -m alembic upgrade head
 docker compose exec backend python -m app.cli seed-semester
@@ -88,8 +89,8 @@ DATABASE_URL="sqlite+pysqlite:///./schedule.db" python -m app.cli init-db
 | GET/POST/DELETE | `/api/v1/admin/groups/{id}/editors` | назначить или отозвать редакторов |
 
 `/admin/*` требуют заголовок `Authorization: Bearer <token>`. Логин и пароль
-админа — `ADMIN_LOGIN` / `ADMIN_PASSWORD` в `.env` (в docker-compose по
-умолчанию `admin` / `admin`), секрет подписи — `JWT_SECRET`. Пустой
+админа — `ADMIN_LOGIN` / `ADMIN_PASSWORD` в `backend/.env` (в шаблоне
+`.env.example` — `admin` / `admin`), секрет подписи — `JWT_SECRET`. Пустой
 `ADMIN_PASSWORD` выключает вход.
 
 Структура ответа — в `03-schedule-json.md`. Интерактивная документация: `/docs`.
@@ -243,3 +244,49 @@ OAuth-токен кэшируется в процессе worker и обновл
 повторном импорте с теми же предметом, временем, форматом и подгруппой.
 Если эти поля изменились при импорте, автоматического сопоставления нет.
 Заметки не включаются в публичный ответ расписания или групповые рассылки.
+
+## ЛК продукта (статистика)
+
+Страница `/statistic` — статистика для команды разработки и менеджера
+продукта, не для методиста. Ссылок на неё в приложении нет. Вход —
+`PRODUCT_LOGIN` / `PRODUCT_PASSWORD` в `backend/.env` (пустой пароль — вход
+выключен), токен роли `product` не пускает в `/admin/*` и `/me/*`, а токены
+админа и студента — в `/product/*`.
+
+Источник данных — таблица `product_events`: имя события, время сервера,
+`user_id` (только из студенческого JWT), HMAC-хеш ключа устройства, платформа
+(`web` / `pwa` / `apk`) и версия сборки. Содержимое (тексты, логины, пароли)
+не пишется.
+
+| Событие | Кто пишет | Когда |
+|---|---|---|
+| `landing_view`, `login_click`, `login_submit` | клиент | лендинг, кнопка «Войти через Moodle», отправка формы |
+| `login_success`, `login_failed_auth` / `_group` / `_other` | сервер | итог `POST /auth/moodle/login` |
+| `app_open` | клиент | запуск или возврат после 30+ минут в фоне |
+| `apk_download` | клиент | открыта страница `/download` |
+| `schedule_day_view`, `schedule_week_view`, `map_open`, `help_open` | клиент | открыт экран «На день», «На неделю», карта, справка |
+| `push_open` | клиент | приложение открыто нажатием на уведомление (`/?message=ID`) |
+| `message_received`, `message_read`, `message_ack` | сервер | студент попал в получатели, впервые открыл сообщение, нажал «Ознакомлен» (`props.message_id`) |
+| `push_sent` | сервер | уведомление доставлено хотя бы на одно устройство студента |
+| `push_subscribed`, `note_saved`, `feedback_sent` | сервер | включил уведомления, сохранил заметку, отправил вопрос (без входа — по устройству) |
+
+`POST /api/v1/events` публичный: неизвестные и серверные имена молча
+пропускаются, недействительный токен — событие без пользователя, лимит
+`PRODUCT_EVENTS_LIMIT_PER_HOUR` на устройство.
+
+Метрики — `GET /api/v1/product/summary?start=YYYY-MM-DD&end=YYYY-MM-DD`
+(любой период до 731 дня, по умолчанию последние 30 дней): всего, новые и
+активные за период; DAU / WAU / MAU на последний день периода (активный —
+студент с `app_open` или `login_success` за день); доля студентов с push;
+воронка входа по уникальным устройствам и причины неудачных входов;
+использование функций (студенты и число событий); удержание — доля новых за
+период, вернувшихся на 1-й, 2-й и 4-й неделе (только у кого неделя прошла);
+охват групп; APK; ряды по дням. Дни считаются по Челябинску (UTC+5).
+
+Пользователи — `GET /api/v1/product/users` (поиск по ФИО, группа, даты
+последнего захода и первого входа, платформа `web` / `pwa` / `apk` /
+`unknown`; сортировка `sort` = `last_seen` / `created` / `name` / `group` /
+`active_days` / `platform` и `order` = `asc` / `desc`). В охвате групп у
+каждой группы `level`: магистратура — название начинается с «М»., карточка `GET /api/v1/product/users/{id}` (сколько раз каждое
+событие) и лента `GET /api/v1/product/users/{id}/events` (по времени, курсор
+`before`, у событий сообщений — заголовок).

@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tan
 
 import { api } from './client'
 import { feedbackToken, readCache, writeCache } from './cache'
-import { asStudent, useStudentSession } from './student'
+import { asStudent, studentToken, useStudentSession } from './student'
 import type {
   ExamKind, ExamInput,
   Catalog,
@@ -185,7 +185,9 @@ export function useMyFeedback(enabled: boolean) {
 export function useSendFeedback() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (body: FeedbackInput) => api.sendFeedback(feedbackToken(), body),
+    // Свежий токен: по нему сервер подпишет обращение ФИО из Moodle. Нет входа — уйдёт без подписи.
+    mutationFn: async (body: FeedbackInput) =>
+      api.sendFeedback(feedbackToken(), body, (await studentToken().catch(() => null)) ?? undefined),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['my-feedback'] }),
   })
 }
@@ -251,13 +253,15 @@ export function useDirections(): UseQueryResult<Direction[]> {
 
 /** Инбокс студента. Сохраняется на устройстве, чтобы сообщения открывались без сети. */
 export function useInbox(enabled: boolean): UseQueryResult<Inbox> {
+  const session = useStudentSession()
+  const cacheKey = `inbox-${session?.profile.id}`
   return useQuery({
-    queryKey: ['inbox'],
-    queryFn: async () => writeCache('inbox', await asStudent(api.inbox)),
-    initialData: () => readCache<Inbox>('inbox') ?? undefined,
+    queryKey: ['inbox', session?.profile.id],
+    queryFn: async () => writeCache(cacheKey, await asStudent(api.inbox)),
+    initialData: () => session ? readCache<Inbox>(cacheKey) ?? undefined : undefined,
     // Сохранённая копия — только чтобы было что показать: при открытии всегда спрашиваем сервер.
     initialDataUpdatedAt: 0,
-    enabled,
+    enabled: enabled && session !== null,
     staleTime: 30 * 1000,
     refetchInterval: 2 * 60 * 1000,
     refetchOnWindowFocus: true,

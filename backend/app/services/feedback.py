@@ -7,13 +7,15 @@
 
 from __future__ import annotations
 
+from collections import Counter
+
 import hashlib
 import hmac
 import re
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.models import (
@@ -24,6 +26,7 @@ from app.models import (
     FeedbackReply,
     FeedbackStatus,
     Group,
+    User,
 )
 from app.schemas.feedback import FeedbackIn, FeedbackUpdateIn, RecipientUpdateIn
 
@@ -59,28 +62,28 @@ def secret_hash(value: str) -> str:
     return hmac.new(get_settings().jwt_secret.encode(), value.encode(), hashlib.sha256).hexdigest()
 
 
-def ensure_recipients(db: Session) -> None:
-    existing = set(db.scalars(select(FeedbackRecipient.kind)).all())
+async def ensure_recipients(db: AsyncSession) -> None:
+    existing = set((await db.scalars(select(FeedbackRecipient.kind))).all())
     missing = [(kind, title) for kind, title in DEFAULT_RECIPIENTS if kind not in existing]
     for order, (kind, title) in enumerate(missing):
         db.add(FeedbackRecipient(kind=kind, title=title, emails=[], is_active=True, sort_order=order))
     if missing:
-        db.commit()
+        await db.commit()
 
 
-def list_recipients(db: Session) -> list[FeedbackRecipient]:
-    ensure_recipients(db)
+async def list_recipients(db: AsyncSession) -> list[FeedbackRecipient]:
+    await ensure_recipients(db)
     return list(
-        db.scalars(select(FeedbackRecipient).order_by(FeedbackRecipient.kind, FeedbackRecipient.sort_order)).all()
+        (await db.scalars(select(FeedbackRecipient).order_by(FeedbackRecipient.kind, FeedbackRecipient.sort_order))).all()
     )
 
 
-def _route(db: Session, kind: str) -> FeedbackRecipient | None:
+async def _route(db: AsyncSession, kind: str) -> FeedbackRecipient | None:
     """Адресат для папки. Для «Не знаю, кому» адресата нет — решает админ."""
     if kind == FeedbackKind.UNKNOWN.value:
         return None
-    ensure_recipients(db)
-    return db.scalar(
+    await ensure_recipients(db)
+    return await db.scalar(
         select(FeedbackRecipient)
         .where(FeedbackRecipient.kind == kind, FeedbackRecipient.is_active.is_(True))
         .order_by(FeedbackRecipient.sort_order, FeedbackRecipient.id)
@@ -93,7 +96,7 @@ def _app_link() -> str:
     return f"\n\nОткрыть приложение: {url}" if url else ""
 
 
-def _enqueue_to_recipient(db: Session, message: FeedbackMessage) -> list[EmailOutbox]:
+def _enqueue_to_recipient(db: AsyncSession, message: FeedbackMessage) -> list[EmailOutbox]:
     recipient = message.recipient
     if recipient is None or not recipient.is_active:
         return []
@@ -127,7 +130,7 @@ def _enqueue_to_recipient(db: Session, message: FeedbackMessage) -> list[EmailOu
     return items
 
 
-def _enqueue_answer(db: Session, message: FeedbackMessage, reply: FeedbackReply) -> list[EmailOutbox]:
+def _enqueue_answer(db: AsyncSession, message: FeedbackMessage, reply: FeedbackReply) -> list[EmailOutbox]:
     if not is_email(message.contact):
         return []
     item = EmailOutbox(
@@ -147,14 +150,19 @@ def _enqueue_answer(db: Session, message: FeedbackMessage, reply: FeedbackReply)
     return [item]
 
 
-def create_message(
-    db: Session,
+async def create_message(
+    db: AsyncSession,
     data: FeedbackIn,
     token: str | None,
     ip: str | None,
     now: datetime | None = None,
+    author: User | None = None,
 ) -> tuple[FeedbackMessage, list[int]]:
-    """Сохраняет обращение и ставит письма в очередь. Возвращает обращение и id писем."""
+    """Сохраняет обращение и ставит письма в очередь. Возвращает обращение и id писем.
+
+    Если студент вошёл через Moodle, обращение подписывается его ФИО и группой из
+    профиля — имя из формы тогда не используется.
+    """
     if data.website:
         # Скрытое поле заполняют только боты.
         raise FeedbackError("обращение отклонено")
@@ -170,7 +178,7 @@ def create_message(
     for column, value, limit in limits:
         if value is None:
             continue
-        recent = db.scalar(
+        recent = await db.scalar(
             select(func.count(FeedbackMessage.id)).where(
                 column == value, FeedbackMessage.created_at >= now - timedelta(hours=1)
             )
@@ -178,15 +186,17 @@ def create_message(
         if recent >= limit:
             raise FeedbackError("слишком много обращений, попробуйте через час", 429)
 
-    if data.group_id is not None and db.get(Group, data.group_id) is None:
+    if data.group_id is not None and await db.get(Group, data.group_id) is None:
         raise FeedbackError("группа не найдена", 404)
+    author_name = author.full_name if author else (data.author_name or "").strip() or None
+    group_id = author.group_id if author and author.group_id is not None else data.group_id
 
     message = FeedbackMessage(
         kind=data.kind,
-        recipient=_route(db, data.kind),
+        recipient=await _route(db, data.kind),
         text=data.text.strip(),
-        group_id=data.group_id,
-        author_name=(data.author_name or "").strip() or None,
+        group_id=group_id,
+        author_name=author_name,
         contact=(data.contact or "").strip() or None,
         author_token_hash=token_hash,
         ip_hash=ip_hash,
@@ -194,40 +204,40 @@ def create_message(
         created_at=now,
     )
     db.add(message)
-    db.flush()
-    db.refresh(message, ["group"])
+    await db.flush()
+    await db.refresh(message, ["group"])
 
     outbox = _enqueue_to_recipient(db, message)
-    db.commit()
+    await db.commit()
     return message, [item.id for item in outbox]
 
 
-def list_for_token(db: Session, token: str) -> list[FeedbackMessage]:
+async def list_for_token(db: AsyncSession, token: str) -> list[FeedbackMessage]:
     return list(
-        db.scalars(
+        (await db.scalars(
             select(FeedbackMessage)
             .where(FeedbackMessage.author_token_hash == secret_hash(token))
             .order_by(FeedbackMessage.created_at.desc(), FeedbackMessage.id.desc())
-        ).all()
+        )).all()
     )
 
 
-def admin_list(db: Session, kind: str | None, status: str | None) -> list[FeedbackMessage]:
+async def admin_list(db: AsyncSession, kind: str | None, status: str | None) -> list[FeedbackMessage]:
     query = select(FeedbackMessage).order_by(FeedbackMessage.created_at.desc(), FeedbackMessage.id.desc())
     if kind:
         query = query.where(FeedbackMessage.kind == kind)
     if status:
         query = query.where(FeedbackMessage.status == status)
-    return list(db.scalars(query).all())
+    return list((await db.scalars(query)).all())
 
 
-def folder_summary(db: Session) -> dict[str, dict[str, int]]:
+async def folder_summary(db: AsyncSession) -> dict[str, dict[str, int]]:
     """Число обращений по папкам: всего и новых."""
-    rows = db.execute(
+    rows = (await db.execute(
         select(FeedbackMessage.kind, FeedbackMessage.status, func.count(FeedbackMessage.id)).group_by(
             FeedbackMessage.kind, FeedbackMessage.status
         )
-    ).all()
+    )).all()
     summary = {kind: {"total": 0, "new": 0} for kind in KIND_TITLES}
     for kind, status, count in rows:
         summary[kind]["total"] += count
@@ -236,46 +246,46 @@ def folder_summary(db: Session) -> dict[str, dict[str, int]]:
     return summary
 
 
-def _get(db: Session, message_id: int) -> FeedbackMessage:
-    message = db.get(FeedbackMessage, message_id)
+async def _get(db: AsyncSession, message_id: int) -> FeedbackMessage:
+    message = await db.get(FeedbackMessage, message_id)
     if message is None:
         raise FeedbackError("обращение не найдено", 404)
     return message
 
 
-def update_message(db: Session, message_id: int, data: FeedbackUpdateIn) -> tuple[FeedbackMessage, list[int]]:
+async def update_message(db: AsyncSession, message_id: int, data: FeedbackUpdateIn) -> tuple[FeedbackMessage, list[int]]:
     """Статус, заметка и перенос в другую папку. При переносе письмо уходит новому адресату."""
-    message = _get(db, message_id)
+    message = await _get(db, message_id)
     outbox: list[EmailOutbox] = []
 
     if data.kind is not None and data.kind != message.kind:
         message.kind = data.kind
-        message.recipient = _route(db, data.kind)
+        message.recipient = await _route(db, data.kind)
         outbox = _enqueue_to_recipient(db, message)
     if data.status is not None:
         message.status = data.status
     if data.admin_note is not None:
         message.admin_note = data.admin_note.strip() or None
 
-    db.commit()
+    await db.commit()
     return message, [item.id for item in outbox]
 
 
-def add_reply(db: Session, message_id: int, text: str, admin: str) -> tuple[FeedbackMessage, list[int]]:
-    message = _get(db, message_id)
+async def add_reply(db: AsyncSession, message_id: int, text: str, admin: str) -> tuple[FeedbackMessage, list[int]]:
+    message = await _get(db, message_id)
     reply = FeedbackReply(author_kind="staff", author_name=admin, text=text.strip())
     message.replies.append(reply)
     message.status = FeedbackStatus.ANSWERED.value
-    db.flush()
+    await db.flush()
 
     outbox = _enqueue_answer(db, message, reply)
-    db.commit()
-    db.refresh(message)
+    await db.commit()
+    await db.refresh(message)
     return message, [item.id for item in outbox]
 
 
-def update_recipient(db: Session, recipient_id: int, data: RecipientUpdateIn) -> FeedbackRecipient:
-    recipient = db.get(FeedbackRecipient, recipient_id)
+async def update_recipient(db: AsyncSession, recipient_id: int, data: RecipientUpdateIn) -> FeedbackRecipient:
+    recipient = await db.get(FeedbackRecipient, recipient_id)
     if recipient is None:
         raise FeedbackError("адресат не найден", 404)
 
@@ -290,5 +300,36 @@ def update_recipient(db: Session, recipient_id: int, data: RecipientUpdateIn) ->
     if data.is_active is not None:
         recipient.is_active = data.is_active
 
-    db.commit()
+    await db.commit()
     return recipient
+
+
+async def fill_authors_from_devices(db: AsyncSession, apply: bool) -> list[tuple[int, str]]:
+    """Подписывает старые безымянные обращения ФИО студента, который потом вошёл через Moodle с того же устройства.
+
+    Совпадение — по хешу ключа устройства: им подписано обращение и его же хранит профиль
+    после входа. Профиль помнит только последнее устройство, поэтому подпишутся не все.
+    Трогаются только обращения без имени. Возвращает (id обращения, ФИО).
+    """
+    rows = (
+        await db.execute(
+            select(FeedbackMessage, User)
+            .join(User, User.device_key_hash == FeedbackMessage.author_token_hash)
+            .where(FeedbackMessage.author_name.is_(None), User.role == "student")
+            .order_by(FeedbackMessage.id)
+        )
+    ).all()
+    matches = Counter(message.id for message, _ in rows)
+    filled: list[tuple[int, str]] = []
+    for message, user in rows:
+        # Один ключ устройства у нескольких профилей — непонятно, кто писал; не подписываем.
+        if matches[message.id] > 1:
+            continue
+        filled.append((message.id, user.full_name))
+        if apply:
+            message.author_name = user.full_name
+            if message.group_id is None:
+                message.group_id = user.group_id
+    if apply:
+        await db.commit()
+    return filled

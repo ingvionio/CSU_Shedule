@@ -2,8 +2,10 @@
 from dataclasses import asdict
 import re
 
+from starlette.concurrency import run_in_threadpool
+
 from sqlalchemy import delete, select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Group, Semester
 from app.models.exam import ExamEvent, ExamImport, exam_event_groups
@@ -28,22 +30,23 @@ def _match_group(name: str, groups: dict[str, Group]) -> Group | None:
     return None
 
 
-def _insert_events(db: Session, records: list[tuple[ExamRow, list[Group]]], semester_id: int,
+async def _insert_events(db: AsyncSession, records: list[tuple[ExamRow, list[Group]]], semester_id: int,
                    kind: ExamKind, import_id: int) -> None:
     for row, groups in records:
         values = {key: getattr(row, key) for key in ["date", "start_time", "subject", "teacher", "room", "note",
                                                   "original", "event_type"]}
         db.add(ExamEvent(semester_id=semester_id, kind=kind, source="import", import_id=import_id,
                          groups=groups, **values))
-    db.flush()
+    await db.flush()
 
 
-def import_workbook(db: Session, payload: bytes, semester: Semester, kind: ExamKind,
+async def import_workbook(db: AsyncSession, payload: bytes, semester: Semester, kind: ExamKind,
                     file_name: str, uploaded_by: str, *, apply: bool = False) -> ExamImportOut:
     if kind not in ("session", "retake"):
         raise ValueError("Неизвестный вид расписания")
-    parsed = parse_session_grid(payload, semester.start_date) if kind == "session" else parse_workbook(payload)
-    group_lookup = {normalize_group(group.name): group for group in db.scalars(select(Group).order_by(Group.id))}
+    parsed = (await run_in_threadpool(parse_session_grid, payload, semester.start_date)
+              if kind == "session" else await run_in_threadpool(parse_workbook, payload))
+    group_lookup = {normalize_group(group.name): group for group in await db.scalars(select(Group).order_by(Group.id))}
     mappings: dict[str, ExamMappingOut] = {}
     records: list[tuple[ExamRow, list[Group]]] = []
     for row in parsed.rows:
@@ -73,22 +76,22 @@ def import_workbook(db: Session, payload: bytes, semester: Semester, kind: ExamK
     try:
         old_ids = select(ExamEvent.id).where(ExamEvent.semester_id == semester.id, ExamEvent.kind == kind,
                                            ExamEvent.source == "import")
-        affected = set(db.scalars(select(exam_event_groups.c.group_id).where(exam_event_groups.c.event_id.in_(old_ids))))
+        affected = set(await db.scalars(select(exam_event_groups.c.group_id).where(exam_event_groups.c.event_id.in_(old_ids))))
         affected.update(group.id for _, groups in records for group in groups)
-        db.execute(delete(exam_event_groups).where(exam_event_groups.c.event_id.in_(old_ids)))
-        db.execute(delete(ExamEvent).where(ExamEvent.id.in_(old_ids)), execution_options={"synchronize_session": "fetch"})
+        await db.execute(delete(exam_event_groups).where(exam_event_groups.c.event_id.in_(old_ids)))
+        await db.execute(delete(ExamEvent).where(ExamEvent.id.in_(old_ids)), execution_options={"synchronize_session": "fetch"})
         record = ExamImport(semester_id=semester.id, kind=kind, file_name=file_name, events_count=len(records),
                             warnings=[asdict(issue) for issue in parsed.warnings], uploaded_by=uploaded_by)
         db.add(record)
-        db.flush()
-        _insert_events(db, records, semester.id, kind, record.id)
+        await db.flush()
+        await _insert_events(db, records, semester.id, kind, record.id)
         for group_id in sorted(affected):
-            schedule_changes.record(db, group_id=group_id, source="import", action="uploaded",
+            await schedule_changes.record(db, group_id=group_id, source="import", action="uploaded",
                                     text="Опубликовано расписание сессии" if kind == "session" else "Опубликовано расписание пересдач")
         report.import_id = record.id
-        db.commit()
+        await db.commit()
         report.applied = True
     except Exception:
-        db.rollback()
+        await db.rollback()
         raise
     return report

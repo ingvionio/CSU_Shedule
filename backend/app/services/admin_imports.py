@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
-from app.models import GroupHomework, Lesson, LessonOverride, ScheduleImport, Semester
+from app.models import Group, GroupHomework, Lesson, LessonOverride, ScheduleImport, Semester
 from app.schemas.imports import (
     ImportHistoryOut, ImportIssueOut, SemesterGroupOut, SemesterImportOut, WeeklyFileOut, WeeklyImportOut,
 )
@@ -61,21 +64,31 @@ def _save_uploads(files: list[UploadFile], temporary: Path, extensions: set[str]
     return sources
 
 
-def _semester(db: Session) -> Semester:
+@asynccontextmanager
+async def _uploaded_sources(
+    files: list[UploadFile], extensions: set[str],
+) -> AsyncIterator[list[tuple[str, str]]]:
+    temporary = await run_in_threadpool(TemporaryDirectory, prefix="schedule-upload-")
     try:
-        return active_semester(db)
+        yield await run_in_threadpool(_save_uploads, files, Path(temporary.name), extensions)
+    finally:
+        await run_in_threadpool(temporary.cleanup)
+
+
+async def _semester(db: AsyncSession) -> Semester:
+    try:
+        return await active_semester(db)
     except ScheduleError as error:
         raise UploadError(str(error), 409) from error
 
 
-def upload_weekly(
-    db: Session, files: list[UploadFile], dry_run: bool, skip_errors: bool, admin: str,
+async def upload_weekly(
+    db: AsyncSession, files: list[UploadFile], dry_run: bool, skip_errors: bool, admin: str,
 ) -> WeeklyImportOut:
-    semester = _semester(db)
+    semester = await _semester(db)
     try:
-        with TemporaryDirectory(prefix="schedule-upload-") as temporary:
-            sources = _save_uploads(files, Path(temporary), {".xlsx", ".zip"})
-            report = import_weekly(db, sources, semester, skip_errors=skip_errors, uploaded_by=admin)
+        async with _uploaded_sources(files, {".xlsx", ".zip"}) as sources:
+            report = await import_weekly(db, sources, semester, skip_errors=skip_errors, uploaded_by=admin)
         result = WeeklyImportOut(
             files=[WeeklyFileOut(
                 file_name=file.file_name, group_name=file.parsed.group_name, week_number=file.parsed.week_number,
@@ -94,23 +107,23 @@ def upload_weekly(
             import_id=report.import_id if not dry_run else None,
         )
         if result.applied:
-            db.commit()
+            await db.commit()
         else:
-            db.rollback()
+            await db.rollback()
         return result
     except Exception:
-        db.rollback()
+        await db.rollback()
         raise
 
 
-def upload_semester(db: Session, files: list[UploadFile], dry_run: bool, admin: str) -> SemesterImportOut:
-    semester = _semester(db)
-    with TemporaryDirectory(prefix="schedule-upload-") as temporary:
-        [(path, name)] = _save_uploads(files, Path(temporary), {".xlsx"})
+async def upload_semester(db: AsyncSession, files: list[UploadFile], dry_run: bool, admin: str) -> SemesterImportOut:
+    semester = await _semester(db)
+    async with _uploaded_sources(files, {".xlsx"}) as sources:
+        [(path, name)] = sources
         result = SemesterImportOut(file_name=name, semester_title=semester.title)
         # Повреждённая книга — результат проверки, а не ошибка сервера.
         try:
-            parsed = parse_workbook(path)
+            parsed = await run_in_threadpool(parse_workbook, path)
         except Exception:
             result.errors = [ImportIssueOut(reason="Не удалось прочитать книгу Excel")]
             return result
@@ -119,21 +132,20 @@ def upload_semester(db: Session, files: list[UploadFile], dry_run: bool, admin: 
         lesson_counts = Counter(lesson.group_name for lesson in parsed.lessons)
         result.groups = [SemesterGroupOut(name=name, lessons_count=lesson_counts[name]) for name in group_names]
         result.warnings = [ImportIssueOut(**asdict(issue)) for issue in parsed.errors]
-        # Группа могла появиться раньше под другим написанием («ПрИ-402») — считаем её своей.
-        existing = existing_group_ids(db, group_names)
-        old_ids = select(Lesson.id).where(Lesson.semester_id == semester.id,
-                                          Lesson.group_id.in_(list(existing.values())))
-        result.lessons_replaced = db.scalar(select(func.count()).select_from(old_ids.subquery()))
-        result.overrides_deleted = db.scalar(select(func.count()).select_from(LessonOverride).where(
+        existing = await existing_group_ids(db, group_names)
+        old_ids = select(Lesson.id).where(
+            Lesson.semester_id == semester.id, Lesson.group_id.in_(list(existing.values())))
+        result.lessons_replaced = await db.scalar(select(func.count()).select_from(old_ids.subquery()))
+        result.overrides_deleted = await db.scalar(select(func.count()).select_from(LessonOverride).where(
             LessonOverride.lesson_id.in_(old_ids)))
         if dry_run:
-            result.homework_affected = db.scalar(select(func.count()).select_from(GroupHomework).join(
+            result.homework_affected = await db.scalar(select(func.count()).select_from(GroupHomework).join(
                 Lesson, GroupHomework.lesson_id == Lesson.id,
             ).where(Lesson.id.in_(old_ids), GroupHomework.group_id == Lesson.group_id))
         result.groups_created = len(group_names) - len(existing)
         result.lessons_created = len(parsed.lessons)
         if not dry_run:
-            report = import_workbook(db, path, semester, file_name=name, uploaded_by=admin)
+            report = await import_workbook(db, path, semester, file_name=name, uploaded_by=admin)
             result.import_id = report.import_id
             result.groups_created = report.groups_created
             result.lessons_created = report.lessons_created
@@ -143,8 +155,8 @@ def upload_semester(db: Session, files: list[UploadFile], dry_run: bool, admin: 
         return result
 
 
-def import_history(db: Session, limit: int) -> list[ImportHistoryOut]:
-    records = db.scalars(select(ScheduleImport).order_by(
+async def import_history(db: AsyncSession, limit: int) -> list[ImportHistoryOut]:
+    records = await db.scalars(select(ScheduleImport).order_by(
         ScheduleImport.uploaded_at.desc(), ScheduleImport.id.desc()).limit(limit))
     return [ImportHistoryOut(
         id=record.id, file_name=record.file_name, uploaded_at=record.uploaded_at, uploaded_by=record.uploaded_by,

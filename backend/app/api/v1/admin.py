@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.security import require_admin
@@ -20,19 +20,19 @@ router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)])
 
 
 @router.get("/stream-schedule", response_model=WeekScheduleOut, summary="Общие пары потока на неделю")
-def stream_schedule(
+async def stream_schedule(
     group_ids: list[int] = Query(default=[]),
     week: int | None = Query(default=None, ge=1),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> WeekScheduleOut:
     try:
-        groups = stream_service.load_groups(db, group_ids)
-        semester = schedule_service.active_semester(db)
+        groups = await stream_service.load_groups(db, group_ids)
+        semester = await schedule_service.active_semester(db)
         today = datetime.now().date()
         number = week or weeks_service.current_week_number(
-            semester, today, weeks_service.last_available_week(db, semester)
+            semester, today, await weeks_service.last_available_week(db, semester)
         )
-        info, days = stream_service.build_stream_schedule(db, groups, semester, number, today)
+        info, days = await stream_service.build_stream_schedule(db, groups, semester, number, today)
     except stream_service.StreamScheduleError as error:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
     except schedule_service.ScheduleError as error:
@@ -44,8 +44,8 @@ def stream_schedule(
 
 
 @router.get("/catalog", response_model=CatalogOut, summary="Предметы, преподаватели, аудитории для подсказок")
-def catalog(db: Session = Depends(get_db)) -> CatalogOut:
-    return CatalogOut(**overrides_service.catalog(db))
+async def catalog(db: AsyncSession = Depends(get_db)) -> CatalogOut:
+    return CatalogOut(**await overrides_service.catalog(db))
 
 
 @router.post(
@@ -54,14 +54,14 @@ def catalog(db: Session = Depends(get_db)) -> CatalogOut:
     status_code=status.HTTP_201_CREATED,
     summary="Временное изменение для группы или потока",
 )
-def create_override(
+async def create_override(
     data: OverrideIn,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     admin: str = Depends(require_admin),
 ) -> OverrideCreatedOut:
     try:
-        semester = schedule_service.active_semester(db)
-        batch_id, created = overrides_service.create_overrides(db, semester, data, admin, datetime.now().date())
+        semester = await schedule_service.active_semester(db)
+        batch_id, created = await overrides_service.create_overrides(db, semester, data, admin, datetime.now().date())
     except schedule_service.ScheduleError as error:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(error)) from error
     except overrides_service.OverrideError as error:
@@ -75,13 +75,13 @@ def create_override(
 
 
 @router.delete("/overrides/{override_id}", response_model=OverrideDeletedOut, summary="Откатить изменение")
-def delete_override(
+async def delete_override(
     override_id: int,
     batch: bool = Query(default=False, description="Откатить для всех групп потока"),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> OverrideDeletedOut:
     try:
-        deleted = overrides_service.delete_override(db, override_id, batch)
+        deleted = await overrides_service.delete_override(db, override_id, batch)
     except overrides_service.OverrideError as error:
         raise HTTPException(error.status_code, str(error)) from error
     return OverrideDeletedOut(deleted=deleted)

@@ -19,6 +19,7 @@ from app.models.homework import GroupEditor, GroupHomework, HomeworkCompletion, 
 from app.models.push import PushDelivery, PushSubscription
 from app.models.user import User
 from app.models.note import PersonalNote
+from app.models.product_event import ProductEvent
 
 __all__ = [
     "Base",
@@ -57,5 +58,6 @@ __all__ = [
     "TimeSlot",
     "User",
     "PersonalNote",
+    "ProductEvent",
     "WeekParity",
 ]

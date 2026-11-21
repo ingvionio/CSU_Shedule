@@ -2,8 +2,8 @@ from datetime import date
 
 import pytest
 from openpyxl import Workbook
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.models import Base, Group, Semester, TimeSlot
 from app.services.excel_parser import parse_workbook
@@ -49,25 +49,26 @@ def test_room_variants(room_book, room, prefix, expected):
     assert all(item.teacher == "КОРЕЦКАЯ Т.П." for item in result.lessons)
 
 
-def test_import_and_schedule_choose_room_by_week(room_book, tmp_path):
+async def test_import_and_schedule_choose_room_by_week(room_book, tmp_path):
     from datetime import time
-    engine = create_engine(f"sqlite:///{tmp_path / 'rooms.db'}")
-    Base.metadata.create_all(engine)
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'rooms.db'}")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
     try:
-        with Session(engine) as db:
+        async with AsyncSession(engine, expire_on_commit=False) as db:
             semester = Semester(title="Тест", start_date=date(2026, 9, 1), end_date=date(2027, 1, 3),
                                 total_weeks=18, first_week_parity="odd", is_active=True)
             db.add(semester)
             db.add(TimeSlot(number=1, start_time=time(8), end_time=time(9, 30)))
-            db.flush()
+            await db.flush()
             path = str(room_book())
-            import_workbook(db, path, semester)
-            import_workbook(db, path, semester)
-            group = db.scalar(select(Group))
+            await import_workbook(db, path, semester)
+            await import_workbook(db, path, semester)
+            group = await db.scalar(select(Group))
             for number, expected_room in [(1, "425"), (2, "201"), (3, "425")]:
-                _, days = build_week_schedule(db, group, semester, number, date(2026, 9, 2))
+                _, days = await build_week_schedule(db, group, semester, number, date(2026, 9, 2))
                 lessons = [lesson for day in days for lesson in day["lessons"]]
                 assert len(lessons) == 1
                 assert lessons[0]["room"] == expected_room
     finally:
-        engine.dispose()
+        await engine.dispose()

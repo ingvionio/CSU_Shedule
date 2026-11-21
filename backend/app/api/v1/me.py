@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.auth import profile_out
 from app.core.db import get_db
@@ -11,22 +11,23 @@ from app.core.security import require_student
 from app.models import User
 from app.schemas.student import MeOut, PushSubscriptionIn, PushSubscriptionOut
 from app.services import messages as messages_service
+from app.services import product_events
 from app.services import push as push_service
 from app.services import students as students_service
 
 router = APIRouter(prefix="/me")
 
 
-def current_student(user_id: int = Depends(require_student), db: Session = Depends(get_db)) -> User:
+async def current_student(user_id: int = Depends(require_student), db: AsyncSession = Depends(get_db, scope="function")) -> User:
     try:
-        return students_service.get_student(db, user_id)
+        return await students_service.get_student(db, user_id)
     except students_service.StudentError as error:
         raise HTTPException(error.status_code, str(error)) from error
 
 
 @router.get("", response_model=MeOut, summary="Профиль и число непрочитанных")
-def me(user: User = Depends(current_student), db: Session = Depends(get_db)) -> MeOut:
-    return MeOut(**profile_out(user).model_dump(), unread_count=messages_service.unread_count(db, user.id))
+async def me(user: User = Depends(current_student), db: AsyncSession = Depends(get_db, scope="function")) -> MeOut:
+    return MeOut(**profile_out(user).model_dump(), unread_count=await messages_service.unread_count(db, user.id))
 
 
 @router.post(
@@ -35,20 +36,22 @@ def me(user: User = Depends(current_student), db: Session = Depends(get_db)) -> 
     status_code=status.HTTP_201_CREATED,
     summary="Подписать это устройство на push",
 )
-def subscribe_push(
+async def subscribe_push(
     data: PushSubscriptionIn,
     user_agent: str | None = Header(default=None),
     user: User = Depends(current_student),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db, scope="function"),
 ) -> PushSubscriptionOut:
     if data.platform == "fcm":
-        subscription = push_service.subscribe(db, user.id, data.token, None, None, user_agent, platform="fcm")
+        subscription = await push_service.subscribe(db, user.id, data.token, None, None, user_agent, platform="fcm")
     else:
-        subscription = push_service.subscribe(db, user.id, data.endpoint, data.keys.p256dh, data.keys.auth, user_agent)
-    return PushSubscriptionOut(id=subscription.id)
+        subscription = await push_service.subscribe(db, user.id, data.endpoint, data.keys.p256dh, data.keys.auth, user_agent)
+    response = PushSubscriptionOut(id=subscription.id)
+    await product_events.record_server_event(db, product_events.PUSH_SUBSCRIBED, user_id=user.id)
+    return response
 
 
 @router.delete("/push-subscriptions/{subscription_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Отписаться")
-def unsubscribe_push(subscription_id: int, user: User = Depends(current_student), db: Session = Depends(get_db)) -> None:
-    if not push_service.unsubscribe(db, user.id, subscription_id):
+async def unsubscribe_push(subscription_id: int, user: User = Depends(current_student), db: AsyncSession = Depends(get_db, scope="function")) -> None:
+    if not await push_service.unsubscribe(db, user.id, subscription_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "подписка не найдена")

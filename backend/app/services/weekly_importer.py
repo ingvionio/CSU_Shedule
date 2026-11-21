@@ -8,8 +8,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from zipfile import BadZipFile, ZipFile
 
+from starlette.concurrency import run_in_threadpool
+
 from sqlalchemy import delete, func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Group, Lesson, LessonOverride, Room, ScheduleImport, Semester, Subject, Teacher, TimeSlot
 from app.services import weeks, schedule_changes
@@ -129,21 +131,25 @@ def _resolve_times(parsed: WeeklyParseResult, slots: dict[int, TimeSlot]) -> lis
     return resolved
 
 
-def import_weekly(
-    session: Session,
+def _read_batch(paths: list[str | tuple[str, str]]) -> list[WeeklyFileReport]:
+    with TemporaryDirectory(prefix="schedule-weekly-") as temporary:
+        return _read_sources(paths, Path(temporary))
+
+
+async def import_weekly(
+    session: AsyncSession,
     paths: list[str | tuple[str, str]],
     semester: Semester,
     skip_errors: bool = False,
     uploaded_by: str | None = None,
 ) -> WeeklyImportReport:
     report = WeeklyImportReport()
-    with TemporaryDirectory(prefix="schedule-weekly-") as temporary:
-        report.files = _read_sources(paths, Path(temporary))
+    report.files = await run_in_threadpool(_read_batch, paths)
 
     # Проверяем все книги до первой записи, включая даты и сетку звонков.
     slots = {number: TimeSlot(number=number, start_time=_parse_time(start), end_time=_parse_time(end))
              for number, start, end in DEFAULT_TIME_SLOTS}
-    slots.update({slot.number: slot for slot in session.scalars(select(TimeSlot))})
+    slots.update({slot.number: slot for slot in await session.scalars(select(TimeSlot))})
     for file in report.files:
         parsed = file.parsed
         if parsed.week_number is not None:
@@ -165,23 +171,23 @@ def import_weekly(
     valid = [file for file in report.files if not file.parsed.errors]
     if not valid:
         return report
-    ensure_reference_data(session)
+    await ensure_reference_data(session)
     names = [source[1] if isinstance(source, tuple) else source for source in paths]
     record = ScheduleImport(semester_id=semester.id, file_name="; ".join(names)[:300], status="published",
                             uploaded_by=uploaded_by,
                             errors=report.errors + report.warnings or None)
     session.add(record)
-    session.flush()
+    await session.flush()
     report.import_id = record.id
     group_ids: set[int] = set()
     uploaded: dict[int, set[tuple[int, date]]] = {}
     for file in valid:
         parsed = file.parsed
-        group = find_group(session, parsed.group_name)
+        group = await find_group(session, parsed.group_name)
         if group is None:
             group = Group(name=parsed.group_name, course=parsed.course, direction=direction_of(parsed.group_name))
             session.add(group)
-            session.flush()
+            await session.flush()
             report.groups_created += 1
         elif group.direction is None:
             group.direction = direction_of(group.name)
@@ -190,19 +196,19 @@ def import_weekly(
         condition = (Lesson.semester_id == semester.id, Lesson.group_id == group.id,
                      Lesson.week_from == parsed.week_number, Lesson.week_to == parsed.week_number)
         old_ids = select(Lesson.id).where(*condition)
-        homework = collect_homework(session, old_ids)
-        report.overrides_deleted += session.scalar(
+        homework = await collect_homework(session, old_ids)
+        report.overrides_deleted += await session.scalar(
             select(func.count()).select_from(LessonOverride).where(LessonOverride.lesson_id.in_(old_ids)))
         # Явное удаление поддерживает и SQLite-сессии без PRAGMA foreign_keys.
-        session.execute(delete(LessonOverride).where(LessonOverride.lesson_id.in_(old_ids)))
-        session.execute(delete(Lesson).where(*condition))
+        await session.execute(delete(LessonOverride).where(LessonOverride.lesson_id.in_(old_ids)))
+        await session.execute(delete(Lesson).where(*condition))
         monday = weeks.monday_of_week(semester, parsed.week_number)
         uploaded.setdefault(group.id, set()).add((parsed.week_number, monday))
         new_lessons: list[Lesson] = []
         for lesson, (start, end, slot) in zip(parsed.lessons, file.times, strict=True):
-            subject = _get_or_create(session, Subject, Subject.name, lesson.subject)
-            teacher = _get_or_create(session, Teacher, Teacher.full_name, lesson.teacher)
-            room = _get_or_create(session, Room, Room.name, lesson.room) if lesson.room else None
+            subject = await _get_or_create(session, Subject, Subject.name, lesson.subject)
+            teacher = await _get_or_create(session, Teacher, Teacher.full_name, lesson.teacher)
+            room = await _get_or_create(session, Room, Room.name, lesson.room) if lesson.room else None
             new_lesson = Lesson(semester_id=semester.id, group_id=group.id, weekday=lesson.weekday,
                                start_time=start, end_time=end, slot=slot, week_parity="both",
                                subject_id=subject.id, lesson_type="other", teacher_id=teacher.id,
@@ -213,14 +219,14 @@ def import_weekly(
             session.add(new_lesson)
             new_lessons.append(new_lesson)
             report.lessons_created += 1
-        session.flush()
-        rebound, unbound = rebind_homework(session, semester, homework, new_lessons)
+        await session.flush()
+        rebound, unbound = await rebind_homework(session, semester, homework, new_lessons)
         report.homework_rebound += rebound
         report.homework_unbound += unbound
     for group_id, periods in sorted(uploaded.items()):
         text = "; ".join(schedule_changes.weekly_text(number, monday) for number, monday in sorted(periods))
-        schedule_changes.record(session, group_id=group_id, source="import", action="uploaded", text=text)
+        await schedule_changes.record(session, group_id=group_id, source="import", action="uploaded", text=text)
     report.groups_count = len(group_ids)
     record.lessons_count = report.lessons_created
-    session.flush()
+    await session.flush()
     return report

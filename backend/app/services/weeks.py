@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Semester, WeekParity
 from app.models.exam import ExamEvent
@@ -48,9 +48,9 @@ def parity_of_week(semester: Semester, number: int) -> str:
     return WeekParity.ODD.value if number_is_odd == first_is_odd else WeekParity.EVEN.value
 
 
-def last_available_week(session: Session, semester: Semester) -> int:
+async def last_available_week(session: AsyncSession, semester: Semester) -> int:
     """Единая граница расписания: учебные недели и события семестра."""
-    last_date = session.scalar(select(func.max(ExamEvent.date)).where(ExamEvent.semester_id == semester.id))
+    last_date = await session.scalar(select(func.max(ExamEvent.date)).where(ExamEvent.semester_id == semester.id))
     event_week = (last_date - first_monday(semester)).days // 7 + 1 if last_date else 0
     return max(semester.total_weeks, event_week)
 

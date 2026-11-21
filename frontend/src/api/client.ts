@@ -36,7 +36,14 @@ import type {
   GroupEditor,
   PersonalNote,
   NoteInput,
+  ProductSummary,
+  ProductUserDetail,
+  ProductUserEvents,
+  ProductUserFilters,
+  ProductUsers,
 } from './types'
+
+import { APP_VERSION, clientPlatform } from './analytics'
 
 const BASE_URL = (import.meta.env.VITE_API_URL ?? '') + '/api/v1'
 
@@ -56,7 +63,9 @@ type RequestOptions = {
 }
 
 async function request<T>(path: string, { method = 'GET', body, token, feedbackToken }: RequestOptions = {}): Promise<T> {
-  const headers: Record<string, string> = {}
+  // Платформа и версия нужны статистике входов (ЛК продукта).
+  const headers: Record<string, string> = { 'X-Client-Platform': clientPlatform() }
+  if (APP_VERSION) headers['X-Client-Version'] = APP_VERSION
   const isForm = body instanceof FormData
   if (body !== undefined && !isForm) headers['Content-Type'] = 'application/json'
   if (token) headers.Authorization = `Bearer ${token}`
@@ -131,6 +140,26 @@ export const api = {
     return request<WeekSchedule>(`/admin/stream-schedule?${params}`, { token })
   },
 
+  productLogin: (login: string, password: string) =>
+    request<TokenResponse>('/auth/product/login', { method: 'POST', body: { login, password } }),
+  productSummary: (token: string, start: string, end: string) =>
+    request<ProductSummary>(`/product/summary?${new URLSearchParams({ start, end })}`, { token }),
+  productUsers: (token: string, filters: ProductUserFilters) => {
+    const query = new URLSearchParams({
+      sort: filters.sort, order: filters.order, limit: String(filters.limit), offset: String(filters.offset),
+    })
+    if (filters.q?.trim()) query.set('q', filters.q.trim())
+    if (filters.group_id) query.set('group_id', String(filters.group_id))
+    if (filters.platform) query.set('platform', filters.platform)
+    for (const key of ['last_seen_from', 'last_seen_to', 'created_from', 'created_to'] as const) {
+      if (filters[key]) query.set(key, filters[key]!)
+    }
+    return request<ProductUsers>(`/product/users?${query}`, { token })
+  },
+  productUser: (token: string, userId: number) => request<ProductUserDetail>(`/product/users/${userId}`, { token }),
+  productUserEvents: (token: string, userId: number, before?: number | null) =>
+    request<ProductUserEvents>(`/product/users/${userId}/events?limit=100${before ? `&before=${before}` : ''}`, { token }),
+
   adminLogin: (login: string, password: string) =>
     request<TokenResponse>('/auth/admin/login', { method: 'POST', body: { login, password } }),
   catalog: (token: string) => request<Catalog>('/admin/catalog', { token }),
@@ -139,8 +168,9 @@ export const api = {
   deleteOverride: (token: string, id: number, batch: boolean) =>
     request<{ deleted: number }>(`/admin/overrides/${id}${batch ? '?batch=true' : ''}`, { method: 'DELETE', token }),
 
-  sendFeedback: (feedbackToken: string, body: FeedbackInput) =>
-    request<{ id: number; kind_title: string }>('/feedback', { method: 'POST', body, feedbackToken }),
+  /** Токен студента необязателен: с ним обращение подписывается ФИО и группой из Moodle. */
+  sendFeedback: (feedbackToken: string, body: FeedbackInput, token?: string) =>
+    request<{ id: number; kind_title: string }>('/feedback', { method: 'POST', body, feedbackToken, token }),
   myFeedback: (feedbackToken: string) => request<MyFeedback[]>('/feedback/mine', { feedbackToken }),
 
   feedbackFolders: (token: string) => request<FeedbackFolder[]>('/admin/feedback/folders', { token }),
@@ -167,8 +197,8 @@ export const api = {
     request<StudentTokenResponse>('/auth/moodle/login', { method: 'POST', body: { username, password, device_key } }),
   moodleForget: (token: string) =>
     request<{ status: string }>('/auth/moodle/forget', { method: 'POST', token }),
-  studentRegister: (full_name: string, group_id: number, device_key: string) =>
-    request<StudentTokenResponse>('/auth/student/register', { method: 'POST', body: { full_name, group_id, device_key } }),
+  studentRefresh: (token: string, active = false) =>
+    request<StudentTokenResponse>('/auth/student/refresh', { method: 'POST', token, body: { active } }),
   me: (token: string) => request<StudentProfile & { unread_count: number }>('/me', { token }),
   inbox: (token: string) => request<Inbox>('/me/messages', { token }),
   openMessage: (token: string, id: number) => request<InboxMessage>(`/me/messages/${id}`, { token }),

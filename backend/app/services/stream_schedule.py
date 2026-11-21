@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import date
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Group, Lesson, LessonOverride, Semester
 from app.services import schedule
@@ -18,11 +18,11 @@ class StreamScheduleError(Exception):
     """Группы нельзя объединить в поток."""
 
 
-def load_groups(session: Session, group_ids: list[int]) -> list[Group]:
+async def load_groups(session: AsyncSession, group_ids: list[int]) -> list[Group]:
     ids = list(dict.fromkeys(group_ids))
     if len(ids) < 2:
         raise StreamScheduleError("выберите не менее двух разных групп потока")
-    groups = [schedule.get_group(session, group_id) for group_id in ids]
+    groups = [await schedule.get_group(session, group_id) for group_id in ids]
     primary = groups[0]
     if any(group.course != primary.course or level_of(group.direction) != level_of(primary.direction)
            for group in groups[1:]):
@@ -30,16 +30,16 @@ def load_groups(session: Session, group_ids: list[int]) -> list[Group]:
     return groups
 
 
-def build_stream_schedule(
-    session: Session, groups: list[Group], semester: Semester, week_number: int, today: date,
+async def build_stream_schedule(
+    session: AsyncSession, groups: list[Group], semester: Semester, week_number: int, today: date,
 ) -> tuple[WeekInfo, list[dict]]:
-    schedules = [schedule.build_week_schedule(session, group, semester, week_number, today)
+    schedules = [await schedule.build_week_schedule(session, group, semester, week_number, today)
                  for group in groups]
     all_items = [item for _, days in schedules for day in days for item in day["lessons"]]
     lesson_ids = {int(item["id"][2:]) for item in all_items if item["id"].startswith("l-")}
     override_ids = {int(item["id"][2:]) for item in all_items if item["id"].startswith("o-")}
-    sources = {lesson.id: lesson for lesson in session.scalars(select(Lesson).where(Lesson.id.in_(lesson_ids)))}
-    overrides = {item.id: item for item in session.scalars(
+    sources = {lesson.id: lesson for lesson in await session.scalars(select(Lesson).where(Lesson.id.in_(lesson_ids)))}
+    overrides = {item.id: item for item in await session.scalars(
         select(LessonOverride).where(LessonOverride.id.in_(override_ids))
     )}
 

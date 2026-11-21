@@ -199,8 +199,10 @@ cp -a $R/src/backend/. ~/csu_schedule/backend/
 3. Дописать в `~/csu_schedule/backend/.env` строки из
    `deploy/env.additions.example` (VAPID, `FCM_CREDENTIALS_FILE`) и
    проверить `CORS_ORIGINS` — там нужен `https://localhost` для
-   Android-приложения. **`JWT_SECRET` не менять, `MOODLE_ENCRYPTION_KEY` не
-   добавлять** — иначе все студенты разлогинятся.
+   Android-приложения. **`JWT_SECRET` и `MOODLE_ENCRYPTION_KEY` не менять** —
+   иначе все студенты разлогинятся. `MOODLE_ENCRYPTION_KEY` обязателен (задача
+   006) и на проде уже задан с выкладки Moodle-сессий; если вдруг его нет —
+   сервис не стартует, сгенерировать по `backend/.env.example`.
 
 ### 2.5 Миграции
 

@@ -2,7 +2,7 @@
 from datetime import date, time
 
 from sqlalchemy import and_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Group, Semester
 from app.models.exam import ExamEvent, ExamImport
@@ -23,16 +23,16 @@ class ExamError(Exception):
         self.status_code = status_code
 
 
-def semester(db: Session) -> Semester:
+async def semester(db: AsyncSession) -> Semester:
     try:
-        return active_semester(db)
+        return await active_semester(db)
     except ScheduleError as error:
         raise ExamError(str(error), 409) from error
 
 
-def list_events(db: Session, kind: str | None = None, group_id: int | None = None,
+async def list_events(db: AsyncSession, kind: str | None = None, group_id: int | None = None,
                 course: int | None = None) -> list[ExamEvent]:
-    statement = select(ExamEvent).where(ExamEvent.semester_id == semester(db).id)
+    statement = select(ExamEvent).where(ExamEvent.semester_id == (await semester(db)).id)
     if kind:
         statement = statement.where(ExamEvent.kind == kind)
     if group_id is not None or course is not None:
@@ -42,41 +42,41 @@ def list_events(db: Session, kind: str | None = None, group_id: int | None = Non
         if course is not None:
             filters.append(Group.course == course)
         statement = statement.where(ExamEvent.groups.any(and_(*filters)))
-    return list(db.scalars(statement.order_by(ExamEvent.date, ExamEvent.start_time.asc().nulls_last(), ExamEvent.id)))
+    return list(await db.scalars(statement.order_by(ExamEvent.date, ExamEvent.start_time.asc().nulls_last(), ExamEvent.id)))
 
 
-def _groups(db: Session, ids: list[int]) -> list[Group]:
-    groups = list(db.scalars(select(Group).where(Group.id.in_(ids)).order_by(Group.name)))
+async def _groups(db: AsyncSession, ids: list[int]) -> list[Group]:
+    groups = list(await db.scalars(select(Group).where(Group.id.in_(ids)).order_by(Group.name)))
     if not groups or len(groups) != len(set(ids)):
         raise ExamError("Выберите существующие группы")
     return groups
 
 
-def _event(db: Session, event_id: int) -> ExamEvent:
-    event = db.scalar(select(ExamEvent).where(ExamEvent.id == event_id, ExamEvent.semester_id == semester(db).id))
+async def _event(db: AsyncSession, event_id: int) -> ExamEvent:
+    event = await db.scalar(select(ExamEvent).where(ExamEvent.id == event_id, ExamEvent.semester_id == (await semester(db)).id))
     if event is None:
         raise ExamError("Событие не найдено", 404)
     return event
 
 
-def create_event(db: Session, data: ExamCreate) -> ExamEvent:
-    event = ExamEvent(semester_id=semester(db).id, source="manual", groups=_groups(db, data.group_ids),
+async def create_event(db: AsyncSession, data: ExamCreate) -> ExamEvent:
+    event = ExamEvent(semester_id=(await semester(db)).id, source="manual", groups=await _groups(db, data.group_ids),
                       **data.model_dump(exclude={"group_ids"}))
     db.add(event)
-    db.flush()
-    schedule_changes.record_exam(db, event, "created")
-    db.commit()
-    db.refresh(event)
+    await db.flush()
+    await schedule_changes.record_exam(db, event, "created")
+    await db.commit()
+    await db.refresh(event)
     return event
 
 
-def patch_event(db: Session, event_id: int, data: ExamPatch) -> ExamEvent:
-    event = _event(db, event_id)
+async def patch_event(db: AsyncSession, event_id: int, data: ExamPatch) -> ExamEvent:
+    event = await _event(db, event_id)
     before = schedule_changes.exam_snapshot(event)
     previous_groups = {group.id for group in event.groups}
     values = data.model_dump(exclude_unset=True)
     if "group_ids" in values:
-        event.groups = _groups(db, values.pop("group_ids"))
+        event.groups = await _groups(db, values.pop("group_ids"))
     for field, value in values.items():
         if field in ("date", "start_time", "room") and getattr(event, field) != value:
             original = dict(event.original or {})
@@ -87,29 +87,29 @@ def patch_event(db: Session, event_id: int, data: ExamPatch) -> ExamEvent:
             event.original = original or None
         setattr(event, field, value)
     if before != schedule_changes.exam_snapshot(event):
-        schedule_changes.record_exam(db, event, "changed", before, previous_groups | {group.id for group in event.groups})
-    db.commit()
-    db.refresh(event)
+        await schedule_changes.record_exam(db, event, "changed", before, previous_groups | {group.id for group in event.groups})
+    await db.commit()
+    await db.refresh(event)
     return event
 
 
-def cancel_event(db: Session, event_id: int, cancelled: bool) -> ExamEvent:
-    event = _event(db, event_id)
+async def cancel_event(db: AsyncSession, event_id: int, cancelled: bool) -> ExamEvent:
+    event = await _event(db, event_id)
     before = schedule_changes.exam_snapshot(event)
     if event.cancelled != cancelled:
         event.cancelled = cancelled
-        schedule_changes.record_exam(db, event, "changed", before)
-    db.commit()
-    db.refresh(event)
+        await schedule_changes.record_exam(db, event, "changed", before)
+    await db.commit()
+    await db.refresh(event)
     return event
 
 
-def delete_event(db: Session, event_id: int) -> None:
-    event = _event(db, event_id)
-    schedule_changes.record_exam(db, event, "removed")
-    db.delete(event)
-    db.commit()
+async def delete_event(db: AsyncSession, event_id: int) -> None:
+    event = await _event(db, event_id)
+    await schedule_changes.record_exam(db, event, "removed")
+    await db.delete(event)
+    await db.commit()
 
 
-def import_history(db: Session) -> list[ExamImport]:
-    return list(db.scalars(select(ExamImport).order_by(ExamImport.uploaded_at.desc(), ExamImport.id.desc())))
+async def import_history(db: AsyncSession) -> list[ExamImport]:
+    return list(await db.scalars(select(ExamImport).order_by(ExamImport.uploaded_at.desc(), ExamImport.id.desc())))

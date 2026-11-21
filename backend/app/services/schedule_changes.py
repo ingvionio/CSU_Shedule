@@ -5,7 +5,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Literal
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Group, LessonOverride
 from app.models.exam import ExamEvent
@@ -21,13 +21,13 @@ def today() -> date:
     return date.today()
 
 
-def record(db: Session, *, group_id: int, source: Source, action: Action, text: str,
+async def record(db: AsyncSession, *, group_id: int, source: Source, action: Action, text: str,
            ref_id: int | None = None, day: date | None = None, now: datetime | None = None) -> ScheduleChange | None:
     if day is not None and day < today():
         return None
     # Сериализуем запись с другими писателями и сборщиком; NO KEY UPDATE
     # совместим с проверкой FK у уже созданного изменения.
-    db.scalar(select(Group.id).where(Group.id == group_id).with_for_update(key_share=True))
+    await db.scalar(select(Group.id).where(Group.id == group_id).with_for_update(key_share=True))
     item = ScheduleChange(group_id=group_id, source=source, ref_id=ref_id, action=action, day=day,
                           text=text if len(text) <= 300 else text[:297] + "…",
                           created_at=now or datetime.now(timezone.utc))
@@ -113,10 +113,10 @@ def exam_text(item: ExamEvent, action: Action, before: dict | None = None) -> st
     return prefix + (", ".join(changes) or "изменена")
 
 
-def record_exam(db: Session, item: ExamEvent, action: Action, before: dict | None = None,
+async def record_exam(db: AsyncSession, item: ExamEvent, action: Action, before: dict | None = None,
                 group_ids: set[int] | None = None) -> None:
     for group_id in sorted(group_ids if group_ids is not None else {group.id for group in item.groups}):
-        record(db, group_id=group_id, source="exam", ref_id=item.id, action=action, day=item.date,
+        await record(db, group_id=group_id, source="exam", ref_id=item.id, action=action, day=item.date,
                text=exam_text(item, action, before))
 
 

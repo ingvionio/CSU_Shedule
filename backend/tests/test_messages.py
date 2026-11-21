@@ -9,58 +9,58 @@ from app.core.db import SessionLocal, engine
 from app.models import Message, MessageRecipient, PushDelivery, PushSubscription
 from app.core.config import get_settings
 
+from tests.moodle_helpers import login_student
+
 API = "/api/v1"
 
 
 @pytest.fixture(autouse=True)
-def _clean_messages(db_schema):
+async def _clean_messages(db_schema):
     yield
-    with SessionLocal() as session:
-        session.execute(delete(PushDelivery))
-        session.execute(delete(PushSubscription))
-        session.execute(delete(MessageRecipient))
-        session.execute(delete(Message))
-        session.commit()
+    async with SessionLocal() as session:
+        await session.execute(delete(PushDelivery))
+        await session.execute(delete(PushSubscription))
+        await session.execute(delete(MessageRecipient))
+        await session.execute(delete(Message))
+        await session.commit()
 
 
 @pytest.fixture
-def pushed(monkeypatch, students):
+async def pushed(monkeypatch, students):
     """По одному устройству у студента; проверяем реальные строки очереди."""
     monkeypatch.setattr(get_settings(), "vapid_public_key", "public")
     monkeypatch.setattr(get_settings(), "vapid_private_key", "private")
-    with SessionLocal() as session:
+    async with SessionLocal() as session:
         session.add_all(PushSubscription(user_id=user_id, endpoint=f"https://push.example.com/{user_id}", p256dh="key", auth="auth")
                         for user_id, _ in students.values())
-        session.commit()
+        await session.commit()
 
 
-def deliveries(message_id, kind="message"):
-    with SessionLocal() as session:
-        return list(session.scalars(select(PushDelivery).where(PushDelivery.message_id == message_id, PushDelivery.kind == kind)).all())
+async def deliveries(message_id, kind="message"):
+    async with SessionLocal() as session:
+        return list((await session.scalars(select(PushDelivery).where(PushDelivery.message_id == message_id, PushDelivery.kind == kind))).all())
 
 
-def student(client, group_id, name, device):
-    response = client.post(
-        f"{API}/auth/student/register", json={"full_name": name, "group_id": group_id, "device_key": device}
-    )
+async def student(client, group_id, name, device):
+    response = await login_student(client, group_id, name, device)
     assert response.status_code == 200, response.text
     body = response.json()
     return body["profile"]["id"], {"Authorization": f"Bearer {body['access_token']}"}
 
 
 @pytest.fixture
-def students(bare_client, test_groups):
+async def students(bare_client, test_groups):
     """Аня и Борис в ПИ 1 курса, Вера в ПИ 2 курса, Глеб в БИ 1 курса."""
     return {
-        "anya": student(bare_client, test_groups["ТЕСТ ПИ 991"], "Аня Андреева", "device-anya-0000000"),
-        "boris": student(bare_client, test_groups["ТЕСТ ПИ 991"], "Борис Белов", "device-boris-000000"),
-        "vera": student(bare_client, test_groups["ТЕСТ ПИ 992"], "Вера Волкова", "device-vera-0000000"),
-        "gleb": student(bare_client, test_groups["ТЕСТ БИ 991"], "Глеб Громов", "device-gleb-0000000"),
+        "anya": await student(bare_client, test_groups["ТЕСТ ПИ 991"], "Аня Андреева", "device-anya-0000000"),
+        "boris": await student(bare_client, test_groups["ТЕСТ ПИ 991"], "Борис Белов", "device-boris-000000"),
+        "vera": await student(bare_client, test_groups["ТЕСТ ПИ 992"], "Вера Волкова", "device-vera-0000000"),
+        "gleb": await student(bare_client, test_groups["ТЕСТ БИ 991"], "Глеб Громов", "device-gleb-0000000"),
     }
 
 
-def send(client, headers, target, importance="normal", title="Перенос пары"):
-    response = client.post(
+async def send(client, headers, target, importance="normal", title="Перенос пары"):
+    response = await client.post(
         f"{API}/admin/messages",
         json={"title": title, "body": "Пара переносится на четверг.", "importance": importance, "target": target},
         headers=headers,
@@ -69,8 +69,8 @@ def send(client, headers, target, importance="normal", title="Перенос п�
     return response.json()
 
 
-def recipients(client, headers, message_id) -> set[str]:
-    detail = client.get(f"{API}/admin/messages/{message_id}", headers=headers).json()
+async def recipients(client, headers, message_id) -> set[str]:
+    detail = (await client.get(f"{API}/admin/messages/{message_id}", headers=headers)).json()
     return {item["full_name"] for item in detail["recipients"]}
 
 
@@ -83,24 +83,24 @@ def recipients(client, headers, message_id) -> set[str]:
         ({"type": "direction", "directions": ["ПИ"], "courses": [2]}, {"Вера Волкова"}),
     ],
 )
-def test_адресация(bare_client, bare_admin_headers, students, pushed, target, expected):
-    message = send(bare_client, bare_admin_headers, target)
+async def test_адресация(bare_client, bare_admin_headers, students, pushed, target, expected):
+    message = await send(bare_client, bare_admin_headers, target)
     assert message["recipients_total"] == len(expected)
-    assert recipients(bare_client, bare_admin_headers, message["id"]) == expected
+    assert await recipients(bare_client, bare_admin_headers, message["id"]) == expected
 
 
-def test_адресация_группе_и_студентам(bare_client, bare_admin_headers, students, test_groups, pushed):
-    to_group = send(bare_client, bare_admin_headers, {"type": "group", "group_ids": [test_groups["ТЕСТ БИ 991"]]})
-    assert recipients(bare_client, bare_admin_headers, to_group["id"]) == {"Глеб Громов"}
+async def test_адресация_группе_и_студентам(bare_client, bare_admin_headers, students, test_groups, pushed):
+    to_group = await send(bare_client, bare_admin_headers, {"type": "group", "group_ids": [test_groups["ТЕСТ БИ 991"]]})
+    assert await recipients(bare_client, bare_admin_headers, to_group["id"]) == {"Глеб Громов"}
     assert to_group["target_title"] == "Группа ТЕСТ БИ 991"
 
     ids = [students["anya"][0], students["vera"][0]]
-    personal = send(bare_client, bare_admin_headers, {"type": "students", "user_ids": ids})
-    assert recipients(bare_client, bare_admin_headers, personal["id"]) == {"Аня Андреева", "Вера Волкова"}
+    personal = await send(bare_client, bare_admin_headers, {"type": "students", "user_ids": ids})
+    assert await recipients(bare_client, bare_admin_headers, personal["id"]) == {"Аня Андреева", "Вера Волкова"}
 
 
-def test_пустая_адресация_отклоняется(bare_client, bare_admin_headers, students):
-    response = bare_client.post(
+async def test_пустая_адресация_отклоняется(bare_client, bare_admin_headers, students):
+    response = await bare_client.post(
         f"{API}/admin/messages",
         json={"title": "x", "body": "y", "target": {"type": "group", "group_ids": []}},
         headers=bare_admin_headers,
@@ -108,177 +108,177 @@ def test_пустая_адресация_отклоняется(bare_client, bar
     assert response.status_code == 422
 
 
-def test_push_уходит_всем_кроме_неважных(bare_client, bare_admin_headers, students, pushed):
-    normal = send(bare_client, bare_admin_headers, {"type": "course", "courses": [2]})
-    low = send(bare_client, bare_admin_headers, {"type": "course", "courses": [2]}, importance="low")
-    assert [item.user_id for item in deliveries(normal["id"])] == [students["vera"][0]]
-    assert deliveries(low["id"]) == []
+async def test_push_уходит_всем_кроме_неважных(bare_client, bare_admin_headers, students, pushed):
+    normal = await send(bare_client, bare_admin_headers, {"type": "course", "courses": [2]})
+    low = await send(bare_client, bare_admin_headers, {"type": "course", "courses": [2]}, importance="low")
+    assert [item.user_id for item in await deliveries(normal["id"])] == [students["vera"][0]]
+    assert await deliveries(low["id"]) == []
 
 
-def test_прочтение_обычного_сообщения(bare_client, bare_admin_headers, students, pushed):
-    message = send(bare_client, bare_admin_headers, {"type": "all"})
+async def test_прочтение_обычного_сообщения(bare_client, bare_admin_headers, students, pushed):
+    message = await send(bare_client, bare_admin_headers, {"type": "all"})
     _, anya = students["anya"]
 
-    inbox = bare_client.get(f"{API}/me/messages", headers=anya).json()
+    inbox = (await bare_client.get(f"{API}/me/messages", headers=anya)).json()
     assert inbox["unread_count"] == 1
     assert inbox["messages"][0]["requires_ack"] is False
 
-    opened = bare_client.get(f"{API}/me/messages/{message['id']}", headers=anya).json()
+    opened = (await bare_client.get(f"{API}/me/messages/{message['id']}", headers=anya)).json()
     assert opened["read_at"] is not None
     assert opened["is_unread"] is False
-    assert bare_client.get(f"{API}/me", headers=anya).json()["unread_count"] == 0
+    assert (await bare_client.get(f"{API}/me", headers=anya)).json()["unread_count"] == 0
 
     # «Ознакомлен» у обычных сообщений нет.
-    assert bare_client.post(f"{API}/me/messages/{message['id']}/acknowledge", headers=anya).status_code == 400
+    assert (await bare_client.post(f"{API}/me/messages/{message['id']}/acknowledge", headers=anya)).status_code == 400
 
-    listed = bare_client.get(f"{API}/admin/messages", headers=bare_admin_headers).json()[0]
+    listed = (await bare_client.get(f"{API}/admin/messages", headers=bare_admin_headers)).json()[0]
     assert (listed["recipients_total"], listed["read_count"], listed["acknowledged_count"]) == (4, 1, 0)
 
 
-def test_важное_прочитано_не_значит_ознакомлен(bare_client, bare_admin_headers, students, pushed):
-    message = send(bare_client, bare_admin_headers, {"type": "all"}, importance="high")
+async def test_важное_прочитано_не_значит_ознакомлен(bare_client, bare_admin_headers, students, pushed):
+    message = await send(bare_client, bare_admin_headers, {"type": "all"}, importance="high")
     _, anya = students["anya"]
 
-    opened = bare_client.get(f"{API}/me/messages/{message['id']}", headers=anya).json()
+    opened = (await bare_client.get(f"{API}/me/messages/{message['id']}", headers=anya)).json()
     assert opened["requires_ack"] is True
     assert opened["read_at"] is not None
     assert opened["is_unread"] is True
-    assert bare_client.get(f"{API}/me", headers=anya).json()["unread_count"] == 1
+    assert (await bare_client.get(f"{API}/me", headers=anya)).json()["unread_count"] == 1
 
-    acknowledged = bare_client.post(f"{API}/me/messages/{message['id']}/acknowledge", headers=anya).json()
+    acknowledged = (await bare_client.post(f"{API}/me/messages/{message['id']}/acknowledge", headers=anya)).json()
     assert acknowledged["acknowledged_at"] is not None
     assert acknowledged["is_unread"] is False
 
-    detail = bare_client.get(f"{API}/admin/messages/{message['id']}", headers=bare_admin_headers).json()
+    detail = (await bare_client.get(f"{API}/admin/messages/{message['id']}", headers=bare_admin_headers)).json()
     assert (detail["read_count"], detail["acknowledged_count"]) == (1, 1)
 
 
-def test_чужое_сообщение_не_открыть(bare_client, bare_admin_headers, students, pushed):
-    message = send(bare_client, bare_admin_headers, {"type": "students", "user_ids": [students["anya"][0]]})
+async def test_чужое_сообщение_не_открыть(bare_client, bare_admin_headers, students, pushed):
+    message = await send(bare_client, bare_admin_headers, {"type": "students", "user_ids": [students["anya"][0]]})
     _, boris = students["boris"]
-    assert bare_client.get(f"{API}/me/messages/{message['id']}", headers=boris).status_code == 404
+    assert (await bare_client.get(f"{API}/me/messages/{message['id']}", headers=boris)).status_code == 404
 
 
-def test_напоминание_непрочитавшим_и_пауза(bare_client, bare_admin_headers, students, pushed):
-    message = send(bare_client, bare_admin_headers, {"type": "course", "courses": [1]}, importance="high")
+async def test_напоминание_непрочитавшим_и_пауза(bare_client, bare_admin_headers, students, pushed):
+    message = await send(bare_client, bare_admin_headers, {"type": "course", "courses": [1]}, importance="high")
     anya_id, anya = students["anya"]
     boris_id, boris = students["boris"]
     gleb_id, _ = students["gleb"]
 
     # Аня подтвердила, Борис только открыл — у важного ему тоже напоминаем.
-    bare_client.post(f"{API}/me/messages/{message['id']}/acknowledge", headers=anya)
-    bare_client.get(f"{API}/me/messages/{message['id']}", headers=boris)
-    with SessionLocal() as session:
+    await bare_client.post(f"{API}/me/messages/{message['id']}/acknowledge", headers=anya)
+    await bare_client.get(f"{API}/me/messages/{message['id']}", headers=boris)
+    async with SessionLocal() as session:
         session.add(PushSubscription(user_id=boris_id, endpoint="https://push.example.com/boris-tablet", p256dh="key", auth="auth"))
-        session.commit()
+        await session.commit()
 
-    response = bare_client.post(f"{API}/admin/messages/{message['id']}/remind", headers=bare_admin_headers)
+    response = await bare_client.post(f"{API}/admin/messages/{message['id']}/remind", headers=bare_admin_headers)
     assert response.json() == {"reminded": 2, "devices": 3, "push_configured": True}
-    user_ids = [item.user_id for item in deliveries(message["id"], "reminder")]
+    user_ids = [item.user_id for item in await deliveries(message["id"], "reminder")]
     assert set(user_ids) == {boris_id, gleb_id}
     assert anya_id not in user_ids
 
-    again = bare_client.post(f"{API}/admin/messages/{message['id']}/remind", headers=bare_admin_headers)
+    again = await bare_client.post(f"{API}/admin/messages/{message['id']}/remind", headers=bare_admin_headers)
     assert again.status_code == 429
 
     # Пауза прошла.
-    with SessionLocal() as session:
-        session.execute(
+    async with SessionLocal() as session:
+        await session.execute(
             update(Message).values(last_reminded_at=datetime.now(timezone.utc) - timedelta(hours=7))
         )
-        session.commit()
-    assert bare_client.post(f"{API}/admin/messages/{message['id']}/remind", headers=bare_admin_headers).status_code == 200
+        await session.commit()
+    assert (await bare_client.post(f"{API}/admin/messages/{message['id']}/remind", headers=bare_admin_headers)).status_code == 200
 
 
-def test_у_неважных_нет_напоминаний(bare_client, bare_admin_headers, students, pushed):
-    message = send(bare_client, bare_admin_headers, {"type": "all"}, importance="low")
-    assert bare_client.post(f"{API}/admin/messages/{message['id']}/remind", headers=bare_admin_headers).status_code == 400
+async def test_у_неважных_нет_напоминаний(bare_client, bare_admin_headers, students, pushed):
+    message = await send(bare_client, bare_admin_headers, {"type": "all"}, importance="low")
+    assert (await bare_client.post(f"{API}/admin/messages/{message['id']}/remind", headers=bare_admin_headers)).status_code == 400
 
 
-def test_досылка_новичку_и_при_смене_группы(bare_client, bare_admin_headers, test_groups, students, pushed):
-    to_group = send(bare_client, bare_admin_headers, {"type": "group", "group_ids": [test_groups["ТЕСТ ПИ 992"]]})
-    send(bare_client, bare_admin_headers, {"type": "students", "user_ids": [students["anya"][0]]}, title="Личное")
-    original_deliveries = len(deliveries(to_group["id"]))
+async def test_досылка_новичку_и_при_смене_группы(bare_client, bare_admin_headers, test_groups, students, pushed):
+    to_group = await send(bare_client, bare_admin_headers, {"type": "group", "group_ids": [test_groups["ТЕСТ ПИ 992"]]})
+    await send(bare_client, bare_admin_headers, {"type": "students", "user_ids": [students["anya"][0]]}, title="Личное")
+    original_deliveries = len(await deliveries(to_group["id"]))
 
     # Новый студент группы получает групповое сообщение, но не чужое личное.
-    _, dima = student(bare_client, test_groups["ТЕСТ ПИ 992"], "Дима Добров", "device-dima-0000000")
-    titles = [item["title"] for item in bare_client.get(f"{API}/me/messages", headers=dima).json()["messages"]]
+    _, dima = await student(bare_client, test_groups["ТЕСТ ПИ 992"], "Дима Добров", "device-dima-0000000")
+    titles = [item["title"] for item in (await bare_client.get(f"{API}/me/messages", headers=dima)).json()["messages"]]
     assert titles == ["Перенос пары"]
 
     # Глеб перешёл в ПИ 992 — тоже получает.
-    _, gleb = student(bare_client, test_groups["ТЕСТ ПИ 992"], "Глеб Громов", "device-gleb-0000000")
-    ids = [item["id"] for item in bare_client.get(f"{API}/me/messages", headers=gleb).json()["messages"]]
+    _, gleb = await student(bare_client, test_groups["ТЕСТ ПИ 992"], "Глеб Громов", "device-gleb-0000000")
+    ids = [item["id"] for item in (await bare_client.get(f"{API}/me/messages", headers=gleb)).json()["messages"]]
     assert to_group["id"] in ids
-    assert len(deliveries(to_group["id"])) == original_deliveries
+    assert len(await deliveries(to_group["id"])) == original_deliveries
 
 
-def test_удаление_скрывает_сообщение(bare_client, bare_admin_headers, students, pushed):
-    message = send(bare_client, bare_admin_headers, {"type": "all"})
+async def test_удаление_скрывает_сообщение(bare_client, bare_admin_headers, students, pushed):
+    message = await send(bare_client, bare_admin_headers, {"type": "all"})
     _, anya = students["anya"]
-    assert bare_client.delete(f"{API}/admin/messages/{message['id']}", headers=bare_admin_headers).status_code == 204
-    assert bare_client.get(f"{API}/me/messages", headers=anya).json() == {"unread_count": 0, "messages": []}
-    assert bare_client.get(f"{API}/admin/messages", headers=bare_admin_headers).json() == []
+    assert (await bare_client.delete(f"{API}/admin/messages/{message['id']}", headers=bare_admin_headers)).status_code == 204
+    assert (await bare_client.get(f"{API}/me/messages", headers=anya)).json() == {"unread_count": 0, "messages": []}
+    assert (await bare_client.get(f"{API}/admin/messages", headers=bare_admin_headers)).json() == []
 
 
-def test_список_студентов_для_адресации(bare_client, bare_admin_headers, students, test_groups):
-    found = bare_client.get(f"{API}/admin/users", params={"course": 1}, headers=bare_admin_headers).json()
+async def test_список_студентов_для_адресации(bare_client, bare_admin_headers, students, test_groups):
+    found = (await bare_client.get(f"{API}/admin/users", params={"course": 1}, headers=bare_admin_headers)).json()
     assert {item["full_name"] for item in found} == {"Аня Андреева", "Борис Белов", "Глеб Громов"}
 
-    by_group = bare_client.get(
+    by_group = (await bare_client.get(
         f"{API}/admin/users", params={"group_id": test_groups["ТЕСТ ПИ 992"]}, headers=bare_admin_headers
-    ).json()
+    )).json()
     assert [item["full_name"] for item in by_group] == ["Вера Волкова"]
 
     student_token = students["anya"][1]
-    assert bare_client.get(f"{API}/admin/users", headers=student_token).status_code == 403
+    assert (await bare_client.get(f"{API}/admin/users", headers=student_token)).status_code == 403
 
 
-def test_статистика_push_в_списке_и_деталях(bare_client, bare_admin_headers, students, pushed):
-    message = send(bare_client, bare_admin_headers, {"type": "all"})
+async def test_статистика_push_в_списке_и_деталях(bare_client, bare_admin_headers, students, pushed):
+    message = await send(bare_client, bare_admin_headers, {"type": "all"})
     assert message["push"] == {"configured": True, "total": 4, "sent": 0, "pending": 4, "failed": 0}
-    bare_client.post(f"{API}/admin/messages/{message['id']}/remind", headers=bare_admin_headers)
-    with SessionLocal() as session:
-        items = session.scalars(select(PushDelivery).order_by(PushDelivery.id)).all()
+    await bare_client.post(f"{API}/admin/messages/{message['id']}/remind", headers=bare_admin_headers)
+    async with SessionLocal() as session:
+        items = (await session.scalars(select(PushDelivery).order_by(PushDelivery.id))).all()
         for item, status in zip(items, ["sent", "failed", "gone", "skipped"]):
             item.status = status
-        session.commit()
+        await session.commit()
     expected = {"configured": True, "total": 8, "sent": 1, "pending": 4, "failed": 3}
-    listed = bare_client.get(f"{API}/admin/messages", headers=bare_admin_headers).json()
-    detail = bare_client.get(f"{API}/admin/messages/{message['id']}", headers=bare_admin_headers).json()
+    listed = (await bare_client.get(f"{API}/admin/messages", headers=bare_admin_headers)).json()
+    detail = (await bare_client.get(f"{API}/admin/messages/{message['id']}", headers=bare_admin_headers)).json()
     assert listed[0]["push"] == detail["push"] == expected
 
 
-def test_напоминание_без_push_честно_возвращает_устройства(bare_client, bare_admin_headers, students, monkeypatch):
+async def test_напоминание_без_push_честно_возвращает_устройства(bare_client, bare_admin_headers, students, monkeypatch):
     monkeypatch.setattr(get_settings(), "vapid_private_key", "")
-    message = send(bare_client, bare_admin_headers, {"type": "all"})
+    message = await send(bare_client, bare_admin_headers, {"type": "all"})
     assert message["push"] == {"configured": False, "total": 0, "sent": 0, "pending": 0, "failed": 0}
-    response = bare_client.post(f"{API}/admin/messages/{message['id']}/remind", headers=bare_admin_headers)
+    response = await bare_client.post(f"{API}/admin/messages/{message['id']}/remind", headers=bare_admin_headers)
     assert response.json() == {"reminded": 4, "devices": 0, "push_configured": False}
-    assert deliveries(message["id"], "reminder") == []
+    assert await deliveries(message["id"], "reminder") == []
 
 
-def test_обычное_напоминание_только_непрочитавшим(bare_client, bare_admin_headers, students, pushed):
-    message = send(bare_client, bare_admin_headers, {"type": "all"})
-    bare_client.get(f"{API}/me/messages/{message['id']}", headers=students["anya"][1])
-    response = bare_client.post(f"{API}/admin/messages/{message['id']}/remind", headers=bare_admin_headers)
+async def test_обычное_напоминание_только_непрочитавшим(bare_client, bare_admin_headers, students, pushed):
+    message = await send(bare_client, bare_admin_headers, {"type": "all"})
+    await bare_client.get(f"{API}/me/messages/{message['id']}", headers=students["anya"][1])
+    response = await bare_client.post(f"{API}/admin/messages/{message['id']}/remind", headers=bare_admin_headers)
     assert response.json() == {"reminded": 3, "devices": 3, "push_configured": True}
-    assert students["anya"][0] not in [item.user_id for item in deliveries(message["id"], "reminder")]
+    assert students["anya"][0] not in [item.user_id for item in await deliveries(message["id"], "reminder")]
 
 
-def test_список_без_n_plus_one(bare_client, bare_admin_headers, test_groups, students, pushed):
+async def test_список_без_n_plus_one(bare_client, bare_admin_headers, test_groups, students, pushed):
     for _ in range(4):
-        send(bare_client, bare_admin_headers, {"type": "group", "group_ids": [test_groups["ТЕСТ ПИ 991"]]})
+        await send(bare_client, bare_admin_headers, {"type": "group", "group_ids": [test_groups["ТЕСТ ПИ 991"]]})
     queries = []
 
     def capture(connection, cursor, statement, parameters, context, executemany):
         if statement.lstrip().upper().startswith("SELECT"):
             queries.append(statement)
 
-    event.listen(engine, "before_cursor_execute", capture)
+    event.listen(engine.sync_engine, "before_cursor_execute", capture)
     try:
-        response = bare_client.get(f"{API}/admin/messages", headers=bare_admin_headers)
+        response = await bare_client.get(f"{API}/admin/messages", headers=bare_admin_headers)
     finally:
-        event.remove(engine, "before_cursor_execute", capture)
+        event.remove(engine.sync_engine, "before_cursor_execute", capture)
     assert response.status_code == 200 and len(response.json()) == 4
     assert len(queries) == 3
     assert sum("FROM push_deliveries" in query for query in queries) == 1

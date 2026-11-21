@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import date, time
 
 from sqlalchemy import Select, select, update
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import GroupHomework, Lesson, Semester
 from app.services.schedule import lesson_occurs_on
@@ -19,17 +19,17 @@ class HomeworkBinding:
     subgroup: int | None
 
 
-def collect_homework(session: Session, lesson_ids: Select[tuple[int]]) -> list[HomeworkBinding]:
+async def collect_homework(session: AsyncSession, lesson_ids: Select[tuple[int]]) -> list[HomeworkBinding]:
     """Сохраняет привязки до удаления пар, включая архивную домашку."""
-    rows = session.execute(select(GroupHomework, Lesson).join(
+    rows = (await session.execute(select(GroupHomework, Lesson).join(
         Lesson, GroupHomework.lesson_id == Lesson.id,
-    ).where(Lesson.id.in_(lesson_ids), GroupHomework.group_id == Lesson.group_id)).unique()
+    ).where(Lesson.id.in_(lesson_ids), GroupHomework.group_id == Lesson.group_id))).unique()
     return [HomeworkBinding(item, item.group_id, item.lesson_date, lesson.start_time, lesson.end_time,
                             lesson.subject_id, lesson.subgroup) for item, lesson in rows]
 
 
-def rebind_homework(
-    session: Session, semester: Semester, bindings: list[HomeworkBinding], lessons: list[Lesson],
+async def rebind_homework(
+    session: AsyncSession, semester: Semester, bindings: list[HomeworkBinding], lessons: list[Lesson],
 ) -> tuple[int, int]:
     """Восстанавливает только однозначные привязки к вновь вставленным парам."""
     by_subject: dict[tuple[int, int], list[Lesson]] = {}
@@ -44,7 +44,7 @@ def rebind_homework(
         matched = exact if exact else candidates
         lesson_id = matched[0].id if len(matched) == 1 else None
         # Явное updated_at подавляет onupdate: импорт не является правкой редактора.
-        session.execute(update(GroupHomework).where(GroupHomework.id == binding.homework.id).values(
+        await session.execute(update(GroupHomework).where(GroupHomework.id == binding.homework.id).values(
             lesson_id=lesson_id, updated_at=GroupHomework.updated_at,
         ))
         session.expire(binding.homework, ["lesson_id", "lesson"])

@@ -12,8 +12,7 @@ class User(Base):
 
     Студент идентифицируется по учетной записи Moodle (moodle_id и moodle_username).
     Все устройства студента (телефон, ноутбук) объединяются под одним пользователем.
-    Пароль хранится в зашифрованном виде (AES-256-GCM) для прозрачного автопродления
-    MoodleSession и синхронизации дедлайнов.
+    Cookies и sesskey шифруются AES-256-GCM. Пароль не сохраняется.
     """
 
     __tablename__ = "users"
@@ -27,9 +26,12 @@ class User(Base):
     # Moodle интеграция
     moodle_id: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True, index=True)
     moodle_username: Mapped[str | None] = mapped_column(String(100), nullable=True, unique=True, index=True)
-    moodle_encrypted_password: Mapped[str | None] = mapped_column(Text, nullable=True)
-    moodle_session_cookie: Mapped[str | None] = mapped_column(Text, nullable=True)
-    moodle_sesskey: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    moodle_encrypted_cookies: Mapped[str | None] = mapped_column(Text, nullable=True)
+    moodle_encrypted_sesskey: Mapped[str | None] = mapped_column(Text, nullable=True)
+    moodle_session_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    session_last_active_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    moodle_timeout_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    moodle_refresh_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     moodle_session_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     moodle_auth_error: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 

@@ -1,11 +1,13 @@
+import base64
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import URL, make_url
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore", hide_input_in_errors=True)
 
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/csu_schedule"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
@@ -17,6 +19,13 @@ class Settings(BaseSettings):
     admin_password: str = ""
     jwt_secret: str = "change-me"
     jwt_ttl_hours: int = 12
+
+    # ЛК продукта (/statistic): свой логин и пароль, не как у методиста.
+    # Пустой пароль — вход выключен.
+    product_login: str = "product"
+    product_password: str = ""
+    # Событий статистики с одного устройства за час; лишние молча отбрасываются.
+    product_events_limit_per_hour: int = 120
 
     # Почта для обращений (SMTP Яндекса). Пустой SMTP_USER — письма не
     # отправляются, а пишутся в лог; обращения при этом сохраняются.
@@ -34,11 +43,6 @@ class Settings(BaseSettings):
     feedback_rate_limit_per_hour: int = 5
     feedback_ip_rate_limit_per_hour: int = 40
 
-    # Студенты: профиль ФИО + группа. Токен живёт долго; истёк — фронт
-    # регистрируется заново тем же ключом устройства и получает того же пользователя.
-    student_jwt_ttl_hours: int = 24 * 60
-    # Новых профилей с одного IP за час (общий Wi-Fi вуза — лимит мягкий).
-    student_register_ip_limit_per_hour: int = 60
     # Сообщения группе/курсу/потоку за столько дней достаются и тем,
     # кто зарегистрировался или сменил группу после отправки.
     messages_late_join_days: int = 14
@@ -46,7 +50,7 @@ class Settings(BaseSettings):
     remind_cooldown_hours: int = 6
 
     # Web Push (VAPID). Ключи: python -m app.cli generate-vapid. Пустые — push
-    # Web Push выключен, сообщения всё равно видны в приложении.
+    # выключен, сообщения всё равно видны в приложении.
     vapid_public_key: str = ""
     vapid_private_key: str = ""
     # Контакт для push-сервисов: mailto:... или https://...
@@ -64,9 +68,19 @@ class Settings(BaseSettings):
 
     # Интеграция с Moodle ИИТ ЧелГУ (eu.iit.csu.ru)
     moodle_base_url: str = "https://eu.iit.csu.ru"
-    moodle_encryption_key: str = ""
+    moodle_encryption_key: SecretStr
     moodle_mock: bool = False
-    moodle_session_ttl_hours: int = 3
+
+    @field_validator("moodle_encryption_key")
+    @classmethod
+    def validate_moodle_key(cls, value: SecretStr) -> SecretStr:
+        try:
+            decoded = base64.b64decode(value.get_secret_value(), validate=True)
+        except ValueError:
+            raise ValueError("MOODLE_ENCRYPTION_KEY должен быть ключом из 32 случайных байт в base64") from None
+        if len(decoded) != 32:
+            raise ValueError("MOODLE_ENCRYPTION_KEY должен содержать ровно 32 байта")
+        return value
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -76,3 +90,12 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def database_url() -> URL:
+    url = make_url(get_settings().database_url)
+    if url.drivername in {"sqlite", "sqlite+pysqlite"}:
+        return url.set(drivername="sqlite+aiosqlite")
+    if url.drivername == "postgresql":
+        return url.set(drivername="postgresql+psycopg")
+    return url

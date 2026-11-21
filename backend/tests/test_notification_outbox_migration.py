@@ -56,7 +56,7 @@ def test_postgres_sql(monkeypatch):
     migration.upgrade()
     migration.downgrade()
     sql = output.getvalue()
-    assert migration.down_revision == "f2a4b6c8d013"
+    assert migration.down_revision == "f3b5c7d9e124"
     assert "next_attempt_at TIMESTAMP WITH TIME ZONE NOT NULL" in sql
     assert "ALTER TABLE email_outbox ADD COLUMN next_attempt_at TIMESTAMP WITH TIME ZONE" in sql
     assert "ON DELETE SET NULL" in sql and "ON DELETE CASCADE" in sql

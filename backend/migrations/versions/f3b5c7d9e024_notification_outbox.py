@@ -4,7 +4,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = "f3b5c7d9e024"
-down_revision: str = "f2a4b6c8d013"
+down_revision: str = "f3b5c7d9e124"  # после Moodle-сессий (ветка Тохи)
 branch_labels = None
 depends_on = None
 

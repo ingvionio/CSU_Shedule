@@ -1,22 +1,13 @@
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.core.config import get_settings
+from app.core.config import database_url
 
-settings = get_settings()
-
-# SQLite нужен connect_args, Postgres — нет.
-_connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
-
-engine = create_engine(settings.database_url, connect_args=_connect_args, pool_pre_ping=True)
-SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+engine = create_async_engine(database_url(), pool_pre_ping=True)
+SessionLocal = async_sessionmaker(engine, autoflush=False, expire_on_commit=False)
 
 
-def get_db() -> Iterator[Session]:
-    session = SessionLocal()
-    try:
+async def get_db() -> AsyncIterator[AsyncSession]:
+    async with SessionLocal() as session:
         yield session
-    finally:
-        session.close()

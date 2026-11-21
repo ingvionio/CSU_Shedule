@@ -5,12 +5,12 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, case, func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.models import Group, Message, MessageRecipient, PushDelivery, User
 from app.schemas.message import MessageIn, PushStatsOut
-from app.services import push
+from app.services import push, product_events
 
 IMPORTANCE_HIGH = "high"
 IMPORTANCE_LOW = "low"
@@ -48,7 +48,7 @@ def _pending_condition():
     )
 
 
-def target_title(db: Session, target: dict, group_names: dict[int, str] | None = None) -> str:
+async def target_title(db: AsyncSession, target: dict, group_names: dict[int, str] | None = None) -> str:
     """Адресация человеческими словами — для списка в админке."""
     kind = target["type"]
     if kind == "all":
@@ -61,18 +61,18 @@ def target_title(db: Session, target: dict, group_names: dict[int, str] | None =
         return title + (f" ({', '.join(str(item) for item in sorted(courses))} курс)" if courses else "")
     if kind == "group":
         if group_names is None:
-            names = db.scalars(select(Group.name).where(Group.id.in_(target["group_ids"])).order_by(Group.name)).all()
+            names = (await db.scalars(select(Group.name).where(Group.id.in_(target["group_ids"])).order_by(Group.name))).all()
         else:
             names = sorted(group_names[group_id] for group_id in set(target["group_ids"]) if group_id in group_names)
         return ("Группы " if len(names) > 1 else "Группа ") + ", ".join(names)
     return f"Студенты ({len(target['user_ids'])})"
 
 
-def target_titles(db: Session, messages: list[Message]) -> dict[int, str]:
+async def target_titles(db: AsyncSession, messages: list[Message]) -> dict[int, str]:
     group_ids = {group_id for message in messages if message.target["type"] == "group"
                  for group_id in message.target["group_ids"]}
-    names = dict(db.execute(select(Group.id, Group.name).where(Group.id.in_(group_ids))).all()) if group_ids else {}
-    return {message.id: target_title(db, message.target, names) for message in messages}
+    names = dict((await db.execute(select(Group.id, Group.name).where(Group.id.in_(group_ids)))).all()) if group_ids else {}
+    return {message.id: await target_title(db, message.target, names) for message in messages}
 
 
 def _target_condition(target: dict):
@@ -91,16 +91,16 @@ def _target_condition(target: dict):
     return User.id.in_(target["user_ids"])
 
 
-def _matching_users(db: Session, target: dict) -> list[User]:
+async def _matching_users(db: AsyncSession, target: dict) -> list[User]:
     query = select(User).outerjoin(Group, Group.id == User.group_id).where(_target_condition(target))
-    return list(db.scalars(query).unique().all())
+    return list((await db.scalars(query)).unique().all())
 
 
-def create_message(db: Session, data: MessageIn, admin: str, now: datetime | None = None, *, commit: bool = True) -> Message:
+async def create_message(db: AsyncSession, data: MessageIn, admin: str, now: datetime | None = None, *, commit: bool = True) -> Message:
     """Сохраняет сообщение, получателей и очередь push одной транзакцией."""
     now = now or datetime.now(timezone.utc)
     target = data.target.model_dump(exclude_defaults=True)
-    if target["type"] == "group" and db.scalar(
+    if target["type"] == "group" and await db.scalar(
         select(func.count(Group.id)).where(Group.id.in_(target["group_ids"]))
     ) != len(set(target["group_ids"])):
         raise MessageError("группа не найдена", 404)
@@ -114,23 +114,25 @@ def create_message(db: Session, data: MessageIn, admin: str, now: datetime | Non
         sent_at=now,
     )
     db.add(message)
-    db.flush()
+    await db.flush()
 
-    users = _matching_users(db, target)
+    users = await _matching_users(db, target)
     db.add_all(
         MessageRecipient(message_id=message.id, user_id=user.id, group_id=user.group_id, created_at=now)
         for user in users
     )
+    for user in users:
+        product_events.add_event(db, product_events.MESSAGE_RECEIVED, user_id=user.id, now=now, message_id=message.id)
     if message.importance != IMPORTANCE_LOW and push.is_configured():
-        push.enqueue(db, message.id, [user.id for user in users], "message", now)
+        await push.enqueue(db, message.id, [user.id for user in users], "message", now)
     if commit:
-        db.commit()
+        await db.commit()
     else:
-        db.flush()
+        await db.flush()
     return message
 
 
-def attach_recent_messages(db: Session, user: User, now: datetime) -> list[int]:
+async def attach_recent_messages(db: AsyncSession, user: User, now: datetime) -> list[int]:
     """Досылает студенту недавние сообщения его группе, курсу или потоку.
 
     Получатели — снимок на момент отправки, поэтому без этого студент,
@@ -139,15 +141,15 @@ def attach_recent_messages(db: Session, user: User, now: datetime) -> list[int]:
     """
     since = now - timedelta(days=get_settings().messages_late_join_days)
     already = select(MessageRecipient.message_id).where(MessageRecipient.user_id == user.id)
-    candidates = db.scalars(
+    candidates = (await db.scalars(
         select(Message).where(Message.deleted_at.is_(None), Message.sent_at >= since, Message.id.not_in(already))
-    ).all()
+    )).all()
 
     attached = []
     for message in candidates:
         if message.target["type"] == "students":
             continue
-        match = db.scalar(
+        match = await db.scalar(
             select(User.id)
             .outerjoin(Group, Group.id == User.group_id)
             .where(User.id == user.id, _target_condition(message.target))
@@ -155,8 +157,9 @@ def attach_recent_messages(db: Session, user: User, now: datetime) -> list[int]:
         if match is None:
             continue
         db.add(MessageRecipient(message_id=message.id, user_id=user.id, group_id=user.group_id, created_at=now))
+        product_events.add_event(db, product_events.MESSAGE_RECEIVED, user_id=user.id, now=now, message_id=message.id)
         attached.append(message.id)
-    db.flush()
+    await db.flush()
     return attached
 
 
@@ -171,60 +174,65 @@ def _inbox_query(user_id: int):
     )
 
 
-def inbox(db: Session, user_id: int) -> list[MessageRecipient]:
+async def inbox(db: AsyncSession, user_id: int) -> list[MessageRecipient]:
     query = _inbox_query(user_id).order_by(Message.sent_at.desc(), Message.id.desc())
-    return list(db.scalars(query).unique().all())
+    return list((await db.scalars(query)).unique().all())
 
 
-def unread_count(db: Session, user_id: int) -> int:
+async def unread_count(db: AsyncSession, user_id: int) -> int:
     query = (
         select(func.count(MessageRecipient.id))
         .join(Message, Message.id == MessageRecipient.message_id)
         .where(MessageRecipient.user_id == user_id, Message.deleted_at.is_(None), _pending_condition())
     )
-    return db.scalar(query) or 0
+    return await db.scalar(query) or 0
 
 
-def _recipient(db: Session, user_id: int, message_id: int) -> MessageRecipient:
-    recipient = db.scalar(_inbox_query(user_id).where(MessageRecipient.message_id == message_id))
+async def _recipient(db: AsyncSession, user_id: int, message_id: int) -> MessageRecipient:
+    recipient = await db.scalar(_inbox_query(user_id).where(MessageRecipient.message_id == message_id))
     if recipient is None:
         raise MessageError("сообщение не найдено", 404)
     return recipient
 
 
-def open_message(db: Session, user_id: int, message_id: int, now: datetime | None = None) -> MessageRecipient:
+async def open_message(db: AsyncSession, user_id: int, message_id: int, now: datetime | None = None) -> MessageRecipient:
     """Студент открыл сообщение — оно прочитано."""
-    recipient = _recipient(db, user_id, message_id)
+    recipient = await _recipient(db, user_id, message_id)
     if recipient.read_at is None:
         recipient.read_at = now or datetime.now(timezone.utc)
-        db.commit()
+        product_events.add_event(db, product_events.MESSAGE_READ, user_id=user_id, now=recipient.read_at, message_id=message_id)
+        await db.commit()
     return recipient
 
 
-def acknowledge(db: Session, user_id: int, message_id: int, now: datetime | None = None) -> MessageRecipient:
-    recipient = _recipient(db, user_id, message_id)
+async def acknowledge(db: AsyncSession, user_id: int, message_id: int, now: datetime | None = None) -> MessageRecipient:
+    recipient = await _recipient(db, user_id, message_id)
     if not requires_ack(recipient.message):
         raise MessageError("это сообщение не требует подтверждения")
     now = now or datetime.now(timezone.utc)
+    if recipient.read_at is None:
+        product_events.add_event(db, product_events.MESSAGE_READ, user_id=user_id, now=now, message_id=message_id)
+    if recipient.acknowledged_at is None:
+        product_events.add_event(db, product_events.MESSAGE_ACK, user_id=user_id, now=now, message_id=message_id)
     recipient.read_at = recipient.read_at or now
     recipient.acknowledged_at = recipient.acknowledged_at or now
-    db.commit()
+    await db.commit()
     return recipient
 
 
 # --- методист ---
 
 
-def _get(db: Session, message_id: int) -> Message:
-    message = db.get(Message, message_id)
+async def _get(db: AsyncSession, message_id: int) -> Message:
+    message = await db.get(Message, message_id)
     if message is None or message.deleted_at is not None:
         raise MessageError("сообщение не найдено", 404)
     return message
 
 
-def admin_list(db: Session, include_automatic: bool = False) -> list[tuple[Message, int, int, int]]:
+async def admin_list(db: AsyncSession, include_automatic: bool = False) -> list[tuple[Message, int, int, int]]:
     """Сообщения с прогрессом: всего получателей, прочитали, подтвердили."""
-    rows = db.execute(
+    rows = (await db.execute(
         select(
             Message,
             func.count(MessageRecipient.id),
@@ -236,28 +244,28 @@ def admin_list(db: Session, include_automatic: bool = False) -> list[tuple[Messa
         .where(True if include_automatic else (Message.created_by.is_(None) | (Message.created_by != "system")))
         .group_by(Message.id)
         .order_by(Message.sent_at.desc(), Message.id.desc())
-    ).all()
+    )).all()
     return [tuple(row) for row in rows]
 
 
-def counts(db: Session, message_id: int) -> tuple[int, int, int]:
-    row = db.execute(
+async def counts(db: AsyncSession, message_id: int) -> tuple[int, int, int]:
+    row = (await db.execute(
         select(
             func.count(MessageRecipient.id),
             func.count(MessageRecipient.read_at),
             func.count(MessageRecipient.acknowledged_at),
         ).where(MessageRecipient.message_id == message_id)
-    ).one()
+    )).one()
     return tuple(row)
 
 
-def push_stats(db: Session, message_ids: list[int]) -> dict[int, PushStatsOut]:
+async def push_stats(db: AsyncSession, message_ids: list[int]) -> dict[int, PushStatsOut]:
     """Одна агрегирующая выборка на список сообщений, оба вида доставок."""
     configured = push.is_configured()
     stats = {message_id: PushStatsOut(configured=configured) for message_id in message_ids}
     if not message_ids:
         return stats
-    rows = db.execute(
+    rows = (await db.execute(
         select(
             PushDelivery.message_id,
             func.count(PushDelivery.id),
@@ -265,28 +273,28 @@ def push_stats(db: Session, message_ids: list[int]) -> dict[int, PushStatsOut]:
             func.sum(case((PushDelivery.status == "pending", 1), else_=0)),
             func.sum(case((PushDelivery.status.in_(["failed", "gone", "skipped"]), 1), else_=0)),
         ).where(PushDelivery.message_id.in_(message_ids)).group_by(PushDelivery.message_id)
-    ).all()
+    )).all()
     for message_id, total, sent, pending, failed in rows:
         stats[message_id] = PushStatsOut(configured=configured, total=total, sent=sent, pending=pending, failed=failed)
     return stats
 
 
-def admin_detail(db: Session, message_id: int) -> tuple[Message, list[tuple[MessageRecipient, str | None]]]:
-    message = _get(db, message_id)
-    rows = db.execute(
+async def admin_detail(db: AsyncSession, message_id: int) -> tuple[Message, list[tuple[MessageRecipient, str | None]]]:
+    message = await _get(db, message_id)
+    rows = (await db.execute(
         select(MessageRecipient, Group.name)
         .outerjoin(Group, Group.id == MessageRecipient.group_id)
         .join(User, User.id == MessageRecipient.user_id)
         .where(MessageRecipient.message_id == message_id)
         .order_by(Group.name, User.full_name)
-    ).unique().all()
+    )).unique().all()
     return message, [(recipient, group_name) for recipient, group_name in rows]
 
 
-def remind(db: Session, message_id: int, now: datetime | None = None) -> tuple[int, int]:
+async def remind(db: AsyncSession, message_id: int, now: datetime | None = None) -> tuple[int, int]:
     """Записывает напоминание непрочитавшим и возвращает число студентов и устройств."""
     now = now or datetime.now(timezone.utc)
-    message = _get(db, message_id)
+    message = await _get(db, message_id)
     if message.importance == IMPORTANCE_LOW:
         raise MessageError("у неважных сообщений нет напоминаний")
 
@@ -297,11 +305,11 @@ def remind(db: Session, message_id: int, now: datetime | None = None) -> tuple[i
         raise MessageError(f"напоминание уже отправлялось, следующее — примерно через {hours} ч", 429)
 
     pending = list(
-        db.scalars(
+        (await db.scalars(
             select(MessageRecipient)
             .join(Message, Message.id == MessageRecipient.message_id)
             .where(MessageRecipient.message_id == message_id, _pending_condition())
-        ).unique().all()
+        )).unique().all()
     )
     if not pending:
         return 0, 0
@@ -310,20 +318,20 @@ def remind(db: Session, message_id: int, now: datetime | None = None) -> tuple[i
         recipient.reminded_at = now
     message.last_reminded_at = now
     user_ids = [recipient.user_id for recipient in pending]
-    devices = push.enqueue(db, message.id, user_ids, "reminder", now) if push.is_configured() else 0
-    db.commit()
+    devices = await push.enqueue(db, message.id, user_ids, "reminder", now) if push.is_configured() else 0
+    await db.commit()
     return len(user_ids), devices
 
 
-def delete_message(db: Session, message_id: int, now: datetime | None = None) -> None:
+async def delete_message(db: AsyncSession, message_id: int, now: datetime | None = None) -> None:
     """Скрывает сообщение у всех. Отметки прочтения остаются в базе."""
-    message = _get(db, message_id)
+    message = await _get(db, message_id)
     message.deleted_at = now or datetime.now(timezone.utc)
-    db.commit()
+    await db.commit()
 
 
-def list_students(
-    db: Session, query: str | None, course: int | None, group_id: int | None, limit: int = 50
+async def list_students(
+    db: AsyncSession, query: str | None, course: int | None, group_id: int | None, limit: int = 50
 ) -> list[User]:
     statement = select(User).outerjoin(Group, Group.id == User.group_id)
     if query:
@@ -332,4 +340,4 @@ def list_students(
         statement = statement.where(Group.course == course)
     if group_id is not None:
         statement = statement.where(User.group_id == group_id)
-    return list(db.scalars(statement.order_by(User.full_name).limit(limit)).unique().all())
+    return list((await db.scalars(statement.order_by(User.full_name).limit(limit))).unique().all())
