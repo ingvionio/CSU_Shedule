@@ -322,3 +322,41 @@ def test_two_teachers_in_block(weekly_book, lines):
     lesson = result.lessons[0]
     assert (lesson.subject, lesson.teacher, lesson.room) == (
         "УПРАВЛЕНИЕ ЦИФРОВЫМ ПРОДУКТОМ", "ВОРОБЬЕВ В.И., ГНЕДКОВА Я.Е.", "132")
+
+
+def test_import_reuses_group_spelled_differently(weekly_db, weekly_book):
+    # Студент вошёл через Moodle раньше загрузки: группа создана как «МИТ-101».
+    with weekly_db() as db:
+        early = Group(name="МИТ-101", course=1)
+        db.add(early)
+        db.commit()
+        early_id = early.id
+    report = load(weekly_db, [weekly_book(group="МИТ 101")])
+    assert report.groups_created == 0
+    with weekly_db() as db:
+        groups = db.scalars(select(Group)).all()
+        assert [(item.id, item.name) for item in groups] == [(early_id, "МИТ 101")]
+        assert db.scalar(select(func.count(Lesson.id)).where(Lesson.group_id == early_id)) > 0
+
+
+def test_find_group_exact_then_normalized(weekly_db):
+    from app.services.groups import find_group
+
+    with weekly_db() as db:
+        db.add_all([Group(name="ПрИ-402", course=4), Group(name="ПИ 301", course=3)])
+        db.flush()
+        assert find_group(db, "ПИ 301").name == "ПИ 301"
+        renamed = find_group(db, "ПрИ 402")
+        assert renamed is not None and renamed.name == "ПрИ 402"
+        assert find_group(db, "БИ 101") is None
+
+
+def test_existing_group_ids_maps_spelling_without_renaming(weekly_db):
+    from app.services.groups import existing_group_ids
+
+    with weekly_db() as db:
+        early = Group(name="ПрИ-402", course=4)
+        db.add(early)
+        db.flush()
+        assert existing_group_ids(db, ["ПрИ 402", "ПИ 101"]) == {"ПрИ 402": early.id}
+        assert early.name == "ПрИ-402"

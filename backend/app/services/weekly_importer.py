@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Group, Lesson, LessonOverride, Room, ScheduleImport, Semester, Subject, Teacher, TimeSlot
 from app.services import weeks, schedule_changes
-from app.services.groups import direction_of
+from app.services.groups import direction_of, find_group
 from app.services.homework_rebind import collect_homework, rebind_homework
 from app.services.importer import DEFAULT_TIME_SLOTS, _get_or_create, _parse_time, ensure_reference_data
 from app.services.weekly_parser import GROUP_RE, WeeklyIssue, WeeklyParseResult, parse_weekly_workbook
@@ -177,7 +177,7 @@ def import_weekly(
     uploaded: dict[int, set[tuple[int, date]]] = {}
     for file in valid:
         parsed = file.parsed
-        group = session.scalar(select(Group).where(Group.name == parsed.group_name))
+        group = find_group(session, parsed.group_name)
         if group is None:
             group = Group(name=parsed.group_name, course=parsed.course, direction=direction_of(parsed.group_name))
             session.add(group)
