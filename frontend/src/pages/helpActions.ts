@@ -4,7 +4,6 @@ type HelpAction = { label: string; target: View; guestOnly?: boolean }
 
 export const helpActions: Partial<Record<string, readonly HelpAction[]>> = {
   login: [{ label: 'Войти через Moodle', target: 'login', guestOnly: true }],
-  'login-error': [{ label: 'Создать обращение', target: 'feedback' }],
   group: [{ label: 'Открыть профиль', target: 'group' }],
   views: [{ label: 'На день', target: 'day' }, { label: 'На неделю', target: 'week' }],
   parity: [{ label: 'Открыть расписание', target: 'day' }],

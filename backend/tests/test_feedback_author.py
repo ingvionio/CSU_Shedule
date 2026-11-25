@@ -5,7 +5,7 @@ from sqlalchemy import delete, select
 
 from app.core.db import SessionLocal
 from app.models import EmailOutbox, FeedbackMessage
-from app.services.feedback import fill_authors_from_devices
+from app.services.feedback import fill_authors_from_devices, secret_hash
 from tests.moodle_helpers import login_student
 
 TEXT = {"kind": "methodist", "text": "Когда будет пересдача?"}
@@ -44,26 +44,39 @@ async def test_signed_in_student_is_signed_from_profile(bare_client, test_groups
     assert (message.author_name, message.group_id, message.contact) == ("Андреева Аня", own, "anya@example.com")
 
 
-async def test_guest_keeps_optional_name(bare_client, test_groups):
+@pytest.mark.parametrize("headers", [
+    {},
+    {"X-Feedback-Token": "guest-device-0001"},
+    {"Authorization": "Bearer invalid", "X-Feedback-Token": "guest-device-0001"},
+])
+async def test_feedback_requires_moodle_session(bare_client, headers):
     response = await bare_client.post(
-        "/api/v1/feedback", json={**TEXT, "author_name": "  Гость  "}, headers={"X-Feedback-Token": "guest-device-0001"}
+        "/api/v1/feedback", json={**TEXT, "author_name": "Гость"}, headers=headers,
     )
-    assert response.status_code == 201
-    anonymous = await bare_client.post("/api/v1/feedback", json=TEXT, headers={"X-Feedback-Token": "guest-device-0002"})
-    assert anonymous.status_code == 201
-    assert [m.author_name for m in await _stored()] == ["Гость", None]
+    assert response.status_code == 401
+    assert await _stored() == []
+
+
+async def test_revoked_moodle_session_cannot_send_feedback(bare_client, test_groups):
+    headers = await _student(bare_client, test_groups["ТЕСТ ПИ 991"], "Андреева Аня", "device-author-0001")
+    assert (await bare_client.post("/api/v1/auth/moodle/forget", headers=headers)).status_code == 200
+    response = await bare_client.post("/api/v1/feedback", json=TEXT, headers=headers)
+    assert response.status_code == 401
+    assert await _stored() == []
 
 
 async def test_old_feedback_signed_by_device(bare_client, test_groups):
     group = test_groups["ТЕСТ ПИ 991"]
     # До входа через Moodle: обращения без имени и с именем, с разных устройств.
-    for token, body in (
-        ("device-old-00001", TEXT),
-        ("device-old-00001", {**TEXT, "author_name": "Подписался сам"}),
-        ("device-old-00002", TEXT),
-        ("device-nobody-001", TEXT),
-    ):
-        assert (await bare_client.post("/api/v1/feedback", json=body, headers={"X-Feedback-Token": token})).status_code == 201
+    async with SessionLocal() as session:
+        for token, author_name in (
+            ("device-old-00001", None),
+            ("device-old-00001", "Подписался сам"),
+            ("device-old-00002", None),
+            ("device-nobody-001", None),
+        ):
+            session.add(FeedbackMessage(**TEXT, author_token_hash=secret_hash(token), author_name=author_name))
+        await session.commit()
     await _student(bare_client, group, "Борисов Борис", "device-old-00001")
     # Два профиля с одним устройством — неоднозначно, не подписываем.
     await _student(bare_client, group, "Волкова Вера", "device-old-00002")

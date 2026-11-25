@@ -14,6 +14,7 @@ from app.core.db import SessionLocal
 from app.models import EmailOutbox, EmailStatus, FeedbackMessage, FeedbackRecipient
 from app.services import mailer
 from app.services.worker import process_email
+from tests.moodle_helpers import login_student
 
 TOKEN = "device-token-0123456789"
 OTHER_TOKEN = "device-token-9876543210"
@@ -53,10 +54,20 @@ def sent(monkeypatch) -> list[mailer.EmailData]:
     return letters
 
 
-async def send(client, token=TOKEN, **body):
-    payload = {"kind": "methodist", "text": "Когда будет пересдача?", **body}
-    headers = {"X-Feedback-Token": token} if token else {}
-    return await client.post("/api/v1/feedback", json=payload, headers=headers)
+@pytest.fixture
+async def send(client, group_ids):
+    login = await login_student(client, group_ids["ПИ 201"], "Иван Петров", TOKEN)
+    assert login.status_code == 200, login.text
+    authorization = f"Bearer {login.json()['access_token']}"
+
+    async def post_feedback(token=TOKEN, **body):
+        payload = {"kind": "methodist", "text": "Когда будет пересдача?", **body}
+        headers = {"Authorization": authorization}
+        if token:
+            headers["X-Feedback-Token"] = token
+        return await client.post("/api/v1/feedback", json=payload, headers=headers)
+
+    return post_feedback
 
 
 async def recipient_id(client, headers, kind):
@@ -82,9 +93,9 @@ async def outbox():
 # --- студент ---
 
 
-async def test_обращение_сохраняется_и_видно_автору(client, group_ids):
+async def test_обращение_сохраняется_и_видно_автору(client, group_ids, send):
     group_id = group_ids["ПИ 201"]
-    response = await send(client, group_id=group_id)
+    response = await send(group_id=group_id)
     assert response.status_code == 201
     assert response.json()["kind_title"] == "Методист"
 
@@ -95,40 +106,40 @@ async def test_обращение_сохраняется_и_видно_авто�
     assert "admin_note" not in mine[0]
 
 
-async def test_чужие_обращения_не_видны(client):
-    await send(client)
+async def test_чужие_обращения_не_видны(client, send):
+    await send()
     assert (await client.get("/api/v1/feedback/mine", headers={"X-Feedback-Token": OTHER_TOKEN})).json() == []
     assert (await client.get("/api/v1/feedback/mine")).json() == []
 
 
-async def test_анонимное_обращение_без_токена(client, admin_headers):
-    assert (await send(client, token=None)).status_code == 201
+async def test_обращение_студента_без_токена_устройства(client, admin_headers, send):
+    assert (await send(token=None)).status_code == 201
     items = (await client.get("/api/v1/admin/feedback", headers=admin_headers)).json()
-    assert items[0]["author_name"] is None and items[0]["contact"] is None
+    assert items[0]["author_name"] == "Иван Петров" and items[0]["contact"] is None
 
 
-async def test_проверка_формы(client):
-    assert (await send(client, text="ой")).status_code == 422
-    assert (await send(client, kind="rector")).status_code == 422
-    assert (await send(client, group_id=999999)).status_code == 404
+async def test_проверка_формы(send):
+    assert (await send(text="ой")).status_code == 422
+    assert (await send(kind="rector")).status_code == 422
+    assert (await send(group_id=999999)).status_code == 404
     # Скрытое поле заполнил бот.
-    assert (await send(client, website="http://spam")).status_code == 400
+    assert (await send(website="http://spam")).status_code == 400
 
 
-async def test_ограничение_частоты_на_устройство(client, monkeypatch):
+async def test_ограничение_частоты_на_устройство(send, monkeypatch):
     monkeypatch.setattr(get_settings(), "feedback_rate_limit_per_hour", 2)
-    assert (await send(client)).status_code == 201
-    assert (await send(client)).status_code == 201
-    assert (await send(client)).status_code == 429
+    assert (await send()).status_code == 201
+    assert (await send()).status_code == 201
+    assert (await send()).status_code == 429
     # Другое устройство с того же IP (Wi-Fi вуза) не задето.
-    assert (await send(client, token=OTHER_TOKEN)).status_code == 201
+    assert (await send(token=OTHER_TOKEN)).status_code == 201
 
 
-async def test_ограничение_частоты_на_ip(client, monkeypatch):
+async def test_ограничение_частоты_на_ip(send, monkeypatch):
     monkeypatch.setattr(get_settings(), "feedback_ip_rate_limit_per_hour", 2)
-    assert (await send(client, token=None)).status_code == 201
-    assert (await send(client, token=OTHER_TOKEN)).status_code == 201
-    assert (await send(client)).status_code == 429
+    assert (await send(token=None)).status_code == 201
+    assert (await send(token=OTHER_TOKEN)).status_code == 201
+    assert (await send()).status_code == 429
 
 
 # --- админка ---
@@ -139,11 +150,11 @@ async def test_обращения_закрыты_без_входа(client):
     assert (await client.get("/api/v1/admin/feedback/recipients")).status_code == 401
 
 
-async def test_папки_и_счётчики(client, admin_headers):
-    await send(client, kind="methodist")
-    await send(client, kind="methodist")
-    await send(client, kind="deanery")
-    await send(client, kind="unknown", text="Кто занимается военным столом?")
+async def test_папки_и_счётчики(client, admin_headers, send):
+    await send(kind="methodist")
+    await send(kind="methodist")
+    await send(kind="deanery")
+    await send(kind="unknown", text="Кто занимается военным столом?")
 
     folders = {item["kind"]: item for item in (await client.get("/api/v1/admin/feedback/folders", headers=admin_headers)).json()}
     assert folders["methodist"] == {"kind": "methodist", "title": "Методист", "total": 2, "new": 2}
@@ -159,8 +170,8 @@ async def test_папки_и_счётчики(client, admin_headers):
     assert unknown[0]["recipient_title"] is None
 
 
-async def test_ответ_виден_студенту(client, admin_headers):
-    message_id = (await send(client, kind="deanery")).json()["id"]
+async def test_ответ_виден_студенту(client, admin_headers, send):
+    message_id = (await send(kind="deanery")).json()["id"]
 
     response = await client.post(
         f"/api/v1/admin/feedback/{message_id}/replies",
@@ -179,8 +190,8 @@ async def test_ответ_виден_студенту(client, admin_headers):
     assert "author_name" not in reply
 
 
-async def test_статус_и_заметка(client, admin_headers):
-    message_id = (await send(client)).json()["id"]
+async def test_статус_и_заметка(client, admin_headers, send):
+    message_id = (await send()).json()["id"]
     response = await client.patch(
         f"/api/v1/admin/feedback/{message_id}",
         json={"status": "in_progress", "admin_note": "уточнить у кафедры"},
@@ -195,9 +206,9 @@ async def test_статус_и_заметка(client, admin_headers):
 # --- почта ---
 
 
-async def test_письмо_адресату_с_reply_to(client, admin_headers, sent):
+async def test_письмо_адресату_с_reply_to(client, admin_headers, sent, send):
     await set_emails(client, admin_headers, "methodist", ["Method@csu.ru", "method@csu.ru", "helper@csu.ru"])
-    await send(client, author_name="Иван Петров", contact="ivan@mail.ru")
+    await send(contact="ivan@mail.ru")
 
     assert sent == []
     assert {item.status for item in await outbox()} == {EmailStatus.PENDING.value}
@@ -210,8 +221,8 @@ async def test_письмо_адресату_с_reply_to(client, admin_headers, 
     assert {item.status for item in await outbox()} == {EmailStatus.SENT.value}
 
 
-async def test_без_почты_адресата_писем_нет(client, sent):
-    await send(client, kind="deanery")
+async def test_без_почты_адресата_писем_нет(sent, send):
+    await send(kind="deanery")
     assert sent == [] and await outbox() == []
 
 
@@ -224,20 +235,20 @@ async def test_неверный_email_адресата(client, admin_headers):
     assert response.status_code == 422
 
 
-async def test_выключенный_адресат_не_получает_писем(client, admin_headers, sent):
+async def test_выключенный_адресат_не_получает_писем(client, admin_headers, sent, send):
     await set_emails(client, admin_headers, "dev", ["me@yandex.ru"])
     await client.patch(
         f"/api/v1/admin/feedback/recipients/{await recipient_id(client, admin_headers, 'dev')}",
         json={"is_active": False},
         headers=admin_headers,
     )
-    await send(client, kind="dev")
+    await send(kind="dev")
     assert sent == []
 
 
-async def test_перенос_из_нераспределённых_отправляет_письмо(client, admin_headers, sent):
+async def test_перенос_из_нераспределённых_отправляет_письмо(client, admin_headers, sent, send):
     await set_emails(client, admin_headers, "deanery", ["dekanat@csu.ru"])
-    message_id = (await send(client, kind="unknown", text="Кто занимается военным столом?")).json()["id"]
+    message_id = (await send(kind="unknown", text="Кто занимается военным столом?")).json()["id"]
     assert sent == []
 
     response = await client.patch(f"/api/v1/admin/feedback/{message_id}", json={"kind": "deanery"}, headers=admin_headers)
@@ -249,8 +260,8 @@ async def test_перенос_из_нераспределённых_отправ
     assert [item.to_address for item in sent] == ["dekanat@csu.ru"]
 
 
-async def test_ответ_уходит_студенту_на_почту(client, admin_headers, sent):
-    message_id = (await send(client, contact="student@mail.ru")).json()["id"]
+async def test_ответ_уходит_студенту_на_почту(client, admin_headers, sent, send):
+    message_id = (await send(contact="student@mail.ru")).json()["id"]
     await client.post(f"/api/v1/admin/feedback/{message_id}/replies", json={"text": "В четверг."}, headers=admin_headers)
 
     assert sent == []
@@ -260,13 +271,13 @@ async def test_ответ_уходит_студенту_на_почту(client, 
     assert "В четверг." in sent[0].body
 
 
-async def test_ответ_без_почты_студента_только_в_приложении(client, admin_headers, sent):
-    message_id = (await send(client, contact="@telegram_nick")).json()["id"]
+async def test_ответ_без_почты_студента_только_в_приложении(client, admin_headers, sent, send):
+    message_id = (await send(contact="@telegram_nick")).json()["id"]
     await client.post(f"/api/v1/admin/feedback/{message_id}/replies", json={"text": "В четверг."}, headers=admin_headers)
     assert sent == []
 
 
-async def test_сбой_smtp_не_теряет_обращение(client, admin_headers, monkeypatch):
+async def test_сбой_smtp_не_теряет_обращение(client, admin_headers, monkeypatch, send):
     def broken(item):
         raise OSError("smtp недоступен")
 
@@ -274,7 +285,7 @@ async def test_сбой_smtp_не_теряет_обращение(client, admin_
     monkeypatch.setattr(mailer, "_send", broken)
     await set_emails(client, admin_headers, "dev", ["me@yandex.ru"])
 
-    assert (await send(client, kind="dev")).status_code == 201
+    assert (await send(kind="dev")).status_code == 201
     now = datetime.now(timezone.utc)
     assert (await outbox())[0].attempts == 0
     async with SessionLocal() as session:
@@ -293,17 +304,17 @@ async def test_сбой_smtp_не_теряет_обращение(client, admin_
     assert (await outbox())[0].status == EmailStatus.SENT.value
 
 
-async def test_без_настроек_почты_письмо_пропускается(client, admin_headers, monkeypatch):
+async def test_без_настроек_почты_письмо_пропускается(client, admin_headers, monkeypatch, send):
     monkeypatch.setattr(get_settings(), "smtp_user", "")
     await set_emails(client, admin_headers, "dev", ["me@yandex.ru"])
-    await send(client, kind="dev")
+    await send(kind="dev")
     assert (await outbox())[0].status == EmailStatus.PENDING.value
     async with SessionLocal() as session:
         await process_email(session, datetime.now(timezone.utc))
     assert (await outbox())[0].status == EmailStatus.SKIPPED.value
 
 
-async def test_smtp_wait_leaves_database_connection_available(client, admin_headers, monkeypatch):
+async def test_smtp_wait_leaves_database_connection_available(client, admin_headers, monkeypatch, send):
     import asyncio
     from app.core.db import engine
 
@@ -319,7 +330,7 @@ async def test_smtp_wait_leaves_database_connection_available(client, admin_head
     smtp = AsyncMock(side_effect=deliver)
     monkeypatch.setattr(mailer, "send", smtp)
     await set_emails(client, admin_headers, "methodist", ["methodist@example.com"])
-    assert (await send(client)).status_code == 201
+    assert (await send()).status_code == 201
 
     async def process():
         async with SessionLocal() as session:

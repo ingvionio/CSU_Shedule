@@ -168,8 +168,7 @@ export const api = {
   deleteOverride: (token: string, id: number, batch: boolean) =>
     request<{ deleted: number }>(`/admin/overrides/${id}${batch ? '?batch=true' : ''}`, { method: 'DELETE', token }),
 
-  /** Токен студента необязателен: с ним обращение подписывается ФИО и группой из Moodle. */
-  sendFeedback: (feedbackToken: string, body: FeedbackInput, token?: string) =>
+  sendFeedback: (feedbackToken: string, body: FeedbackInput, token: string) =>
     request<{ id: number; kind_title: string }>('/feedback', { method: 'POST', body, feedbackToken, token }),
   myFeedback: (feedbackToken: string) => request<MyFeedback[]>('/feedback/mine', { feedbackToken }),
 

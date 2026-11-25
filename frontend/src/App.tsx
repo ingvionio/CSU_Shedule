@@ -369,7 +369,7 @@ export function App() {
     setMenuOpen(false)
   }
 
-  const publicView = view === 'landing' || view === 'help' || view === 'feedback'
+  const publicView = view === 'landing' || view === 'help'
   const needsLogin = !studentSession && view !== 'admin' && !publicView
 
   return (
@@ -384,7 +384,7 @@ export function App() {
                 : 'Выберите группу'
               : view === 'admin'
                 ? 'Администрирование'
-                : view === 'feedback'
+                : view === 'feedback' && studentSession
                   ? 'Обращения'
                   : view === 'messages'
                     ? 'Сообщения'
@@ -537,7 +537,7 @@ export function App() {
                 )
               )}
 
-              {view === 'feedback' && <StudentFeedback groupId={groupId} />}
+              {view === 'feedback' && studentSession && <StudentFeedback profile={studentSession.profile} />}
 
               {view === 'messages' && (
                 <StudentMessages requestedId={requestedMessage} onRequestHandled={clearRequestedMessage} />

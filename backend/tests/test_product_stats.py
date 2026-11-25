@@ -305,9 +305,10 @@ async def test_feedback_event(product, test_groups):
     payload = {"kind": "methodist", "text": "Когда будет пересдача?"}
     with_user = await product.post("/api/v1/feedback", json=payload, headers={**headers, "X-Feedback-Token": "device-anya-events-04"})
     anonymous = await product.post("/api/v1/feedback", json=payload, headers={"X-Feedback-Token": "guest-device-000001"})
-    assert with_user.status_code == anonymous.status_code == 201
+    assert with_user.status_code == 201
+    assert anonymous.status_code == 401
     events = [(e.user_id, e.device_hash) for e in await _stored() if e.name == "feedback_sent"]
-    assert events == [(anya, secret_hash("device-anya-events-04")), (None, secret_hash("guest-device-000001"))]
+    assert events == [(anya, secret_hash("device-anya-events-04"))]
 
 
 async def test_note_event(product, notes_demo, monkeypatch):  # noqa: F811

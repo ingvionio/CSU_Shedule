@@ -55,13 +55,22 @@ test('existing logo is a keyboard-accessible home button', () => {
   assert.equal(opened, true)
 })
 
-test('help actions navigate directly and hide the login action after sign-in', () => {
+test('help actions expose feedback only after Moodle sign-in', () => {
   let destination
   for (const authenticated of [false, true]) {
     const elements = nodes(Help({ authenticated, onNavigate: view => { destination = view } }))
     const action = target => elements.find(node => node.type === 'button' && node.key === target)
     assert.equal(Boolean(action('login')), !authenticated)
-    for (const target of ['messages', 'feedback', 'map', 'group', 'week']) {
+    assert.equal(Boolean(action('feedback')), authenticated)
+    const contact = elements.find(node => node.props?.className === 'help-contact')
+    assert.equal(Boolean(contact), authenticated)
+    if (authenticated) {
+      nodes(contact).find(node => node.type === 'button').props.onClick()
+      assert.equal(destination, 'feedback')
+      action('feedback').props.onClick()
+      assert.equal(destination, 'feedback')
+    }
+    for (const target of ['messages', 'map', 'group', 'week']) {
       action(target).props.onClick()
       assert.equal(destination, target)
     }

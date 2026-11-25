@@ -3,7 +3,7 @@ import { useState, type FormEvent } from 'react'
 import { CheckCircle2, RefreshCw, Send } from 'lucide-react'
 
 import { useMyFeedback, useSendFeedback } from '../../api/queries'
-import { useStudentSession } from '../../api/student'
+import type { StudentProfile } from '../../api/types'
 import type { FeedbackKind, MyFeedback } from '../../types'
 import { KIND_OPTIONS, STATUS_TITLES, feedbackDate, isEmail } from './labels'
 
@@ -12,7 +12,7 @@ type Tab = 'write' | 'mine'
 /** Как на бэкенде: FeedbackIn.text min_length. */
 const MIN_TEXT_LENGTH = 5
 
-export function StudentFeedback({ groupId }: { groupId: number | null }) {
+export function StudentFeedback({ profile }: { profile: StudentProfile }) {
   const [tab, setTab] = useState<Tab>('write')
   const mine = useMyFeedback(tab === 'mine')
   const answered = (mine.data ?? []).filter((item) => item.status === 'answered').length
@@ -28,35 +28,29 @@ export function StudentFeedback({ groupId }: { groupId: number | null }) {
       </div>
 
       {tab === 'write'
-        ? <FeedbackForm groupId={groupId} onShowMine={() => setTab('mine')} />
+        ? <FeedbackForm profile={profile} onShowMine={() => setTab('mine')} />
         : <MyFeedbackList items={mine.data} loading={mine.isLoading} error={mine.error as Error | null} onRetry={() => mine.refetch()} />}
     </section>
   )
 }
 
-function FeedbackForm({ groupId, onShowMine }: { groupId: number | null; onShowMine: () => void }) {
+function FeedbackForm({ profile, onShowMine }: { profile: StudentProfile; onShowMine: () => void }) {
   const [kind, setKind] = useState<FeedbackKind>('methodist')
   const [text, setText] = useState('')
-  const [authorName, setAuthorName] = useState('')
   const [contact, setContact] = useState('')
   const [consent, setConsent] = useState(false)
   const [website, setWebsite] = useState('')
   const [sent, setSent] = useState<{ id: number; kind_title: string } | null>(null)
   const [formError, setFormError] = useState('')
   const send = useSendFeedback()
-  // Вошедшего через Moodle подписываем ФИО из профиля — поле «Имя» ему не нужно.
-  const profile = useStudentSession()?.profile ?? null
-
-  const hasPersonalData = Boolean((!profile && authorName.trim()) || contact.trim())
+  const hasContact = Boolean(contact.trim())
   const hint = KIND_OPTIONS.find((option) => option.kind === kind)?.hint
 
   /** Почему форму нельзя отправить; пустая строка — можно. */
   const problem = text.trim().length < MIN_TEXT_LENGTH
     ? `Сообщение слишком короткое — напишите хотя бы ${MIN_TEXT_LENGTH} символов.`
-    : hasPersonalData && !consent
-      ? (profile
-        ? 'Отметьте согласие на обработку данных или очистите поле «Куда ответить».'
-        : 'Отметьте согласие на обработку данных или очистите поля «Имя» и «Куда ответить».')
+    : hasContact && !consent
+      ? 'Отметьте согласие на обработку данных или очистите поле «Куда ответить».'
       : ''
 
   const submit = async (event: FormEvent) => {
@@ -67,8 +61,7 @@ function FeedbackForm({ groupId, onShowMine }: { groupId: number | null; onShowM
       const result = await send.mutateAsync({
         kind,
         text: text.trim(),
-        group_id: groupId,
-        author_name: profile ? null : authorName.trim() || null,
+        group_id: profile.group_id,
         contact: contact.trim() || null,
         website,
       })
@@ -124,25 +117,11 @@ function FeedbackForm({ groupId, onShowMine }: { groupId: number | null; onShowM
         onChange={(event) => setText(event.target.value)}
       />
 
-      {profile ? (
-        <p className="feedback-author">
-          <span className="field-label">Отправитель</span>
-          <strong>{profile.full_name}</strong>{profile.group_name ? `, ${profile.group_name}` : ''}
-          <span className="optional"> — из профиля Moodle</span>
-        </p>
-      ) : (
-        <>
-          <label className="field-label" htmlFor="feedback-name">Имя <span className="optional">— необязательно</span></label>
-          <input
-            id="feedback-name"
-            className="text-field"
-            maxLength={200}
-            autoComplete="name"
-            value={authorName}
-            onChange={(event) => setAuthorName(event.target.value)}
-          />
-        </>
-      )}
+      <p className="feedback-author">
+        <span className="field-label">Отправитель</span>
+        <strong>{profile.full_name}</strong>{profile.group_name ? `, ${profile.group_name}` : ''}
+        <span className="optional"> — из профиля Moodle</span>
+      </p>
 
       <label className="field-label" htmlFor="feedback-contact">Куда ответить <span className="optional">— необязательно</span></label>
       <input
@@ -158,7 +137,7 @@ function FeedbackForm({ groupId, onShowMine }: { groupId: number | null; onShowM
         Ответ появится в «Мои обращения» на этом устройстве. Оставьте email — он придёт и на почту.
       </p>
 
-      {hasPersonalData && (
+      {hasContact && (
         <label className="feedback-consent">
           <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} />
           <span>Согласен(на) на обработку указанных данных, чтобы мне ответили на обращение</span>
@@ -226,7 +205,7 @@ function MyFeedbackList({
           ))}
         </article>
       ))}
-      <p className="feedback-hint centered-text">Обращения хранятся на этом устройстве. После входа через Moodle они будут видны везде.</p>
+      <p className="feedback-hint centered-text">Здесь видны обращения, отправленные с этого устройства.</p>
     </div>
   )
 }

@@ -1,4 +1,4 @@
-"""Обращения студентов: публичная часть и папки в админке."""
+"""Обращения студентов и папки в админке."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, s
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
-from app.core.security import optional_student, require_admin
+from app.core.security import require_admin, require_student_profile
 from app.models import FeedbackMessage, FeedbackRecipient, FeedbackReply, User
 from app.schemas.feedback import (
     AdminFeedbackOut,
@@ -30,7 +30,7 @@ from app.services.feedback import KIND_TITLES
 router = APIRouter()
 admin_router = APIRouter(prefix="/admin/feedback", dependencies=[Depends(require_admin)])
 
-# Случайный токен устройства, по нему студент без входа видит свои обращения.
+# Случайный токен устройства для просмотра обращений и ответов.
 TokenHeader = Header(default=None, alias="X-Feedback-Token", min_length=16, max_length=128)
 
 
@@ -115,10 +115,9 @@ async def create_feedback(
     data: FeedbackIn,
     request: Request,
     token: str | None = TokenHeader,
-    student_id: int | None = Depends(optional_student),
+    author: User = Depends(require_student_profile),
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> FeedbackCreatedOut:
-    author = await db.get(User, student_id) if student_id is not None else None
     try:
         message, _ = await feedback_service.create_message(
             db, data, token, request.client.host if request.client else None, author=author
@@ -127,11 +126,10 @@ async def create_feedback(
         raise _raise(error) from error
 
     response = FeedbackCreatedOut(id=message.id, kind_title=KIND_TITLES[message.kind])
-    # Токен устройства обращений — тот же ключ, что у статистики: без входа считаем по устройству.
     await product_events.record_server_event(
         db,
         product_events.FEEDBACK_SENT,
-        user_id=student_id,
+        user_id=author.id,
         device_key=token,
         platform=request.headers.get("X-Client-Platform"),
         app_version=request.headers.get("X-Client-Version"),

@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tan
 
 import { api } from './client'
 import { feedbackToken, readCache, writeCache } from './cache'
-import { asStudent, studentToken, useStudentSession } from './student'
+import { asStudent, useStudentSession } from './student'
 import type {
   ExamKind, ExamInput,
   Catalog,
@@ -185,9 +185,7 @@ export function useMyFeedback(enabled: boolean) {
 export function useSendFeedback() {
   const queryClient = useQueryClient()
   return useMutation({
-    // Свежий токен: по нему сервер подпишет обращение ФИО из Moodle. Нет входа — уйдёт без подписи.
-    mutationFn: async (body: FeedbackInput) =>
-      api.sendFeedback(feedbackToken(), body, (await studentToken().catch(() => null)) ?? undefined),
+    mutationFn: (body: FeedbackInput) => asStudent((token) => api.sendFeedback(feedbackToken(), body, token)),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['my-feedback'] }),
   })
 }

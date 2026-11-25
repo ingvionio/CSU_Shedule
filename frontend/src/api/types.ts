@@ -162,7 +162,6 @@ export type FeedbackInput = {
   kind: FeedbackKind
   text: string
   group_id?: number | null
-  author_name?: string | null
   contact?: string | null
   /** Ловушка для ботов, человек оставляет пустым. */
   website?: string

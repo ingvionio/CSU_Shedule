@@ -155,13 +155,13 @@ async def create_message(
     data: FeedbackIn,
     token: str | None,
     ip: str | None,
+    *,
+    author: User,
     now: datetime | None = None,
-    author: User | None = None,
 ) -> tuple[FeedbackMessage, list[int]]:
     """Сохраняет обращение и ставит письма в очередь. Возвращает обращение и id писем.
 
-    Если студент вошёл через Moodle, обращение подписывается его ФИО и группой из
-    профиля — имя из формы тогда не используется.
+    Обращение подписывается ФИО студента из профиля Moodle.
     """
     if data.website:
         # Скрытое поле заполняют только боты.
@@ -188,15 +188,14 @@ async def create_message(
 
     if data.group_id is not None and await db.get(Group, data.group_id) is None:
         raise FeedbackError("группа не найдена", 404)
-    author_name = author.full_name if author else (data.author_name or "").strip() or None
-    group_id = author.group_id if author and author.group_id is not None else data.group_id
+    group_id = author.group_id if author.group_id is not None else data.group_id
 
     message = FeedbackMessage(
         kind=data.kind,
         recipient=await _route(db, data.kind),
         text=data.text.strip(),
         group_id=group_id,
-        author_name=author_name,
+        author_name=author.full_name,
         contact=(data.contact or "").strip() or None,
         author_token_hash=token_hash,
         ip_hash=ip_hash,

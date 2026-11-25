@@ -94,11 +94,17 @@ async def _student_session(credentials: HTTPAuthorizationCredentials | None, db:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "сессия завершена, войдите через Moodle") from None
 
 
-async def require_student(
+async def require_student_profile(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
     db: AsyncSession = Depends(get_db, scope="function"),
+) -> User:
+    return await _student_session(credentials, db)
+
+
+async def require_student(
+    student: User = Depends(require_student_profile),
 ) -> int:
-    return (await _student_session(credentials, db)).id
+    return student.id
 
 
 async def refreshable_student(
