@@ -1,9 +1,12 @@
 import { Download } from 'lucide-react'
+import { Capacitor } from '@capacitor/core'
 import { useEffect, useRef } from 'react'
 
 import { track } from '../api/analytics'
 
-export const ANDROID_APK_URL = '/downloads/raspisanie-iit.apk'
+// APK публикуется на сервере после сборки и отсутствует в ресурсах WebView.
+const apkDownloadOrigin = import.meta.env.VITE_APK_DOWNLOAD_ORIGIN ?? (Capacitor.isNativePlatform() ? 'https://iit-app.ru' : '')
+export const ANDROID_APK_URL = `${apkDownloadOrigin}/downloads/raspisanie-iit.apk`
 
 export function AndroidDownload() {
   const downloadLink = useRef<HTMLAnchorElement>(null)

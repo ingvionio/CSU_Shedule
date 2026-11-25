@@ -57,6 +57,7 @@ test-results/
 Thumbs.db
 
 # Android build outputs
+*.apk
 android/.gradle/
 android/build/
 android/app/build/

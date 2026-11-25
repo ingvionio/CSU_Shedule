@@ -101,7 +101,8 @@ IP студентов: uvicorn по умолчанию доверяет заго
    ```
    Если DN другой — APK подписан не тем ключом, раздавать нельзя.
 6. **Готовый файл** — `android/app/build/outputs/apk/release/app-release.apk`;
-   он кладётся в сборку сайта в разделе 1 (не секрет, его скачивают студенты).
+   сохраните подписанный APK как артефакт релиза с номером версии. При выкладке
+   он добавляется в архив сайта по инструкции ниже.
 
 > Пароль ключа раньше был записан значением по умолчанию в `build.gradle`
 > ветки `feature/apk-build`. Если репозиторий публичный, пароли стоит сменить —
@@ -120,14 +121,17 @@ git archive --format=tar.gz -o backend-$REL.tar.gz master backend deploy
 
 **Сайт** — собирается **после** APK из раздела 0 и **без** `VITE_API_URL`
 (сайт открыт на двух доменах и ходит на `/api` своего домена). `npm run build`
-пересобирает `dist`, поэтому APK копируется в него уже после сборки:
+пересобирает `dist`. Подписанный APK добавляется после сборки по прежнему
+адресу `/downloads/raspisanie-iit.apk`. Оставляйте `frontend/public` без APK,
+иначе Capacitor упакует его внутрь Android-приложения.
 
 ```bash
 cd frontend
 npm ci
-npm run build
-cp android/app/build/outputs/apk/release/app-release.apk dist/downloads/raspisanie-iit.apk
-tar -czf ../frontend-$REL.tar.gz -C dist .
+npm run build &&
+  mkdir -p dist/downloads &&
+  cp android/app/build/outputs/apk/release/app-release.apk dist/downloads/raspisanie-iit.apk &&
+  tar -czf ../frontend-$REL.tar.gz -C dist .
 cd ..
 ```
 

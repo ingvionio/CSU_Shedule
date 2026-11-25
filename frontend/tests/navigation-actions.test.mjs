@@ -82,7 +82,6 @@ test('the landing and download page link to the public APK, with one automatic a
 
   assert.equal(landingLink.props.href, '/downloads/raspisanie-iit.apk')
   assert.equal(pageLink.props.href, landingLink.props.href)
-  assert.ok(existsSync(new URL(`../public${pageLink.props.href}`, import.meta.url)))
 
   let attempts = 0
   pageLink.ref.current = { click: () => { attempts += 1 } }
@@ -90,4 +89,12 @@ test('the landing and download page link to the public APK, with one automatic a
   effects[0]()
   effects[0]()
   assert.equal(attempts, 1)
+})
+
+test('the native app links to the APK hosted on the website', (t) => {
+  const { Capacitor } = require('@capacitor/core')
+  t.mock.method(Capacitor, 'isNativePlatform', () => true)
+
+  const { ANDROID_APK_URL } = load('../src/pages/AndroidDownload.tsx')
+  assert.equal(ANDROID_APK_URL, 'https://iit-app.ru/downloads/raspisanie-iit.apk')
 })
