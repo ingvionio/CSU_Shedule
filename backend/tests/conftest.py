@@ -11,7 +11,11 @@ TEST_DB = Path(TEST_DB_DIR.name) / "test_api.db"
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{TEST_DB.as_posix()}"
 os.environ["ADMIN_LOGIN"] = "admin"
 os.environ["ADMIN_PASSWORD"] = "secret"
-os.environ["JWT_SECRET"] = "test-secret"
+os.environ["JWT_SECRET"] = "only-for-synthetic-tests-0123456789"
+os.environ["WEB_PUSH_HOSTS"] = "fcm.googleapis.com,updates.push.services.mozilla.com,web.push.apple.com,push.example.com"
+os.environ["LOGIN_IP_LIMIT"] = "10000"
+os.environ["LOGIN_PAIR_LIMIT"] = "10000"
+os.environ["PRODUCT_EVENTS_IP_LIMIT"] = "10000"
 os.environ["MOODLE_ENCRYPTION_KEY"] = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
 
 # backend/.env разработчика (настоящий SMTP, ключи push, Moodle) в тестах не

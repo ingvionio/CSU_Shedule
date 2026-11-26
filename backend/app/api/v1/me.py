@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.auth import profile_out
@@ -37,7 +37,7 @@ async def me(user: User = Depends(current_student), db: AsyncSession = Depends(g
     summary="Подписать это устройство на push",
 )
 async def subscribe_push(
-    data: PushSubscriptionIn,
+    data: PushSubscriptionIn = Body(),
     user_agent: str | None = Header(default=None),
     user: User = Depends(current_student),
     db: AsyncSession = Depends(get_db, scope="function"),
@@ -45,6 +45,8 @@ async def subscribe_push(
     if data.platform == "fcm":
         subscription = await push_service.subscribe(db, user.id, data.token, None, None, user_agent, platform="fcm")
     else:
+        if not push_service.allowed_endpoint(data.endpoint):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Недопустимый адрес push-сервиса")
         subscription = await push_service.subscribe(db, user.id, data.endpoint, data.keys.p256dh, data.keys.auth, user_agent)
     response = PushSubscriptionOut(id=subscription.id)
     await product_events.record_server_event(db, product_events.PUSH_SUBSCRIBED, user_id=user.id)

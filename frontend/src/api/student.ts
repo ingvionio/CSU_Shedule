@@ -3,7 +3,7 @@
 import { useEffect, useSyncExternalStore } from 'react'
 
 import { ApiError, api } from './client'
-import { clearStudentSession, feedbackToken, readStudentSession, writeStudentSession } from './cache'
+import { clearStudentSession, feedbackToken, readStudentSession, removeCache, writeStudentSession } from './cache'
 import type { StudentSession } from './types'
 
 const listeners = new Set<() => void>()
@@ -13,6 +13,10 @@ let lastActivityAttempt = 0
 let pending: { active: boolean; promise: Promise<StudentSession | null> } | null = null
 
 function publish(session: StudentSession | null, persist = true) {
+  const previousStudentId = current?.profile.id
+  if (previousStudentId !== undefined && previousStudentId !== session?.profile.id) {
+    removeCache(`inbox-${previousStudentId}`)
+  }
   current = session
   if (persist) {
     if (session) writeStudentSession(session)

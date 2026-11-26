@@ -32,12 +32,7 @@ class FeedbackRecipient(Base):
 
 
 class FeedbackMessage(Base, TimestampMixin):
-    """Обращение студента.
-
-    Пока у студента нет входа, автора узнаём по случайному токену устройства:
-    храним только его хеш. После входа через Moodle обращения с токеном
-    устройства привяжутся к пользователю.
-    """
+    """Обращение студента. У старых обращений идентификатор автора отсутствует."""
 
     __tablename__ = "feedback_messages"
 
@@ -47,10 +42,13 @@ class FeedbackMessage(Base, TimestampMixin):
         ForeignKey("feedback_recipients.id", ondelete="SET NULL"), nullable=True
     )
     text: Mapped[str] = mapped_column(Text)
+    certificate_purpose: Mapped[str | None] = mapped_column(Text)
+    certificate_copies: Mapped[int | None] = mapped_column(Integer)
 
     group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id", ondelete="SET NULL"), nullable=True)
-    # Необязательные: без них обращение анонимное.
+    # В исторических обращениях имя и идентификатор автора могут отсутствовать.
     author_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    author_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", name="fk_feedback_author", ondelete="SET NULL"))
     contact: Mapped[str | None] = mapped_column(String(200), nullable=True)
     author_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     # Хеш IP — только для ограничения частоты.
@@ -67,11 +65,14 @@ class FeedbackMessage(Base, TimestampMixin):
     )
 
     __table_args__ = (
-        CheckConstraint("kind IN ('dev','methodist','deanery','unknown')", name="ck_feedback_messages_kind"),
+        CheckConstraint("kind IN ('dev','methodist','deanery','unknown','certificate')", name="ck_feedback_messages_kind"),
         CheckConstraint(
             "status IN ('new','in_progress','answered','archived')", name="ck_feedback_messages_status"
         ),
         Index("ix_feedback_messages_folder", "kind", "status"),
+        Index("ix_feedback_messages_created_id", "created_at", "id"),
+        Index("ix_feedback_messages_author_created", "author_id", "created_at"),
+        Index("ix_feedback_messages_ip_created", "ip_hash", "created_at"),
     )
 
 

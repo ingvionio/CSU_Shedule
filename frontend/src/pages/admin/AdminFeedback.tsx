@@ -5,10 +5,12 @@ import { Mail, RefreshCw, Send, X } from 'lucide-react'
 
 import { ApiError } from '../../api/client'
 import { useAdminFeedback, useFeedbackFolders, useFeedbackMutations, useFeedbackRecipients } from '../../api/queries'
-import type { AdminFeedback as Feedback, FeedbackKind, FeedbackRecipient, FeedbackStatus } from '../../types'
+import type { AdminFeedback as Feedback, FeedbackKind, FeedbackRecipient, FeedbackStatus, QuestionKind } from '../../types'
 import { KIND_TITLES, STATUS_TITLES, feedbackDate } from '../feedback/labels'
 
-const FOLDERS: FeedbackKind[] = ['unknown', 'methodist', 'deanery', 'dev']
+const QUESTION_FOLDERS: QuestionKind[] = ['unknown', 'methodist', 'deanery', 'dev']
+const FOLDERS: FeedbackKind[] = [...QUESTION_FOLDERS, 'certificate']
+const PAGE_SIZE = 50
 const STATUS_FILTERS: { value: FeedbackStatus | ''; label: string }[] = [
   { value: '', label: 'Все' },
   { value: 'new', label: 'Новые' },
@@ -28,10 +30,13 @@ export function AdminFeedback({ token, onUnauthorized }: AdminFeedbackProps) {
   const [status, setStatus] = useState<FeedbackStatus | ''>('')
   const [openId, setOpenId] = useState<number | null>(null)
   const [showRecipients, setShowRecipients] = useState(false)
+  const [pageCursors, setPageCursors] = useState<number[]>([])
 
   const folders = useFeedbackFolders(token)
-  const list = useAdminFeedback(token, kind, status)
-  const opened = list.data?.find((item) => item.id === openId) ?? null
+  const list = useAdminFeedback(token, kind, status, PAGE_SIZE + 1, pageCursors[pageCursors.length - 1])
+  const items = list.data?.slice(0, PAGE_SIZE)
+  const nextCursor = list.data && list.data.length > PAGE_SIZE ? items?.[PAGE_SIZE - 1]?.id : undefined
+  const opened = items?.find((item) => item.id === openId) ?? null
 
   useEffect(() => {
     if ([folders.error, list.error].some((error) => error instanceof ApiError && error.status === 401)) onUnauthorized()
@@ -44,10 +49,10 @@ export function AdminFeedback({ token, onUnauthorized }: AdminFeedbackProps) {
       <div className="admin-schedule-heading">
         <span className="eyebrow">АДМИНИСТРИРОВАНИЕ</span>
         <h1>Обращения</h1>
-        <p className="muted">Вопросы и предложения студентов. Ответ студент увидит в приложении.</p>
+        <p className="muted">Вопросы, предложения и заказы справок. Ответ студент увидит в приложении.</p>
       </div>
 
-      <ContextHelp ids={['feedback-reply', 'feedback-organize']} items={adminHelpItems} label="Как работать с обращениями" />
+      <ContextHelp ids={['feedback-reply', 'feedback-organize', 'feedback-certificates']} items={adminHelpItems} label="Как работать с обращениями" />
 
       <div className="feedback-folders" aria-label="Папки">
         {FOLDERS.map((folder) => {
@@ -56,7 +61,8 @@ export function AdminFeedback({ token, onUnauthorized }: AdminFeedbackProps) {
             <button
               key={folder}
               className={kind === folder ? 'active' : ''}
-              onClick={() => { setKind(folder); setOpenId(null) }}
+              aria-pressed={kind === folder}
+              onClick={() => { setKind(folder); setOpenId(null); setPageCursors([]) }}
             >
               <span>{KIND_TITLES[folder]}</span>
               {count?.new ? <b className="feedback-count">{count.new}</b> : <small>{count?.total ?? ''}</small>}
@@ -70,7 +76,7 @@ export function AdminFeedback({ token, onUnauthorized }: AdminFeedbackProps) {
           <button
             key={filter.value}
             className={`choice ${status === filter.value ? 'selected' : ''}`}
-            onClick={() => setStatus(filter.value)}
+          onClick={() => { setStatus(filter.value); setOpenId(null); setPageCursors([]) }}
           >{filter.label}</button>
         ))}
       </div>
@@ -85,13 +91,15 @@ export function AdminFeedback({ token, onUnauthorized }: AdminFeedbackProps) {
       {list.data && !list.data.length && <div className="empty-day">В этой папке пока пусто.</div>}
 
       <div className="feedback-list">
-        {list.data?.map((item) => (
+        {items?.map((item) => (
           <button key={item.id} className={`feedback-card feedback-card-button ${item.status === 'new' ? 'unread' : ''}`} onClick={() => setOpenId(item.id)}>
             <div className="feedback-card-head">
               <span>№{item.id} · {item.group_name ?? 'без группы'} · {feedbackDate(item.created_at)}</span>
               <span className={`badge feedback-status-${item.status}`}>{STATUS_TITLES[item.status]}</span>
             </div>
-            <p className="feedback-text clamp">{item.text}</p>
+            {(item.purpose || item.text || item.kind === 'certificate') && (
+              <p className="feedback-text clamp">{item.purpose || item.text || 'Без дополнительной информации'}</p>
+            )}
             {(item.author_name || item.replies.length > 0) && (
               <small className="feedback-card-meta">
                 {item.author_name ?? 'Аноним'}{item.replies.length ? ` · ответов: ${item.replies.length}` : ''}
@@ -100,6 +108,15 @@ export function AdminFeedback({ token, onUnauthorized }: AdminFeedbackProps) {
           </button>
         ))}
       </div>
+
+      {(pageCursors.length > 0 || nextCursor !== undefined) && (
+        <div className="feedback-filters" aria-label="Страницы обращений">
+          <button className="choice" disabled={pageCursors.length === 0}
+            onClick={() => { setOpenId(null); setPageCursors((previous) => previous.slice(0, -1)) }}>Назад</button>
+          <button className="choice" disabled={nextCursor === undefined}
+            onClick={() => { if (nextCursor !== undefined) setPageCursors((previous) => [...previous, nextCursor]); setOpenId(null) }}>Далее</button>
+        </div>
+      )}
 
       <button className="quiet-link" onClick={() => setShowRecipients((value) => !value)}>
         <Mail size={14} />{showRecipients ? 'Скрыть адресатов' : 'Адресаты и почта'}
@@ -128,6 +145,7 @@ function FeedbackDialog({
   const [notice, setNotice] = useState('')
   const { update, reply } = useFeedbackMutations(token)
   const busy = update.isPending || reply.isPending
+  const isCertificate = item.kind === 'certificate'
 
   useEffect(() => {
     setNote(item.admin_note ?? '')
@@ -150,25 +168,29 @@ function FeedbackDialog({
     setAnswer('')
   }, item.contact_is_email ? 'Ответ отправлен: в приложение и на почту студента.' : 'Ответ отправлен в приложение.')
 
-  const move = (kind: FeedbackKind) => run(
+  const move = (kind: QuestionKind) => run(
     () => update.mutateAsync({ id: item.id, body: { kind } }),
     `Перенесено в папку «${KIND_TITLES[kind]}». Адресату ушло письмо, если у него указана почта.`,
   )
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="confirm-modal feedback-dialog" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+      <div className="confirm-modal feedback-dialog" role="dialog" aria-modal="true" aria-labelledby="feedback-dialog-title" onClick={(event) => event.stopPropagation()}>
         <button className="modal-close" aria-label="Закрыть" onClick={onClose}><X size={17} /></button>
-        <span className="eyebrow">ОБРАЩЕНИЕ №{item.id}</span>
+        <span className="eyebrow" id="feedback-dialog-title">{isCertificate ? 'ЗАКАЗ СПРАВКИ' : 'ОБРАЩЕНИЕ'} №{item.id}</span>
 
         <dl className="feedback-meta">
           <dt>Группа</dt><dd>{item.group_name ?? '—'}</dd>
-          <dt>Автор</dt><dd>{item.author_name ?? 'Аноним'}</dd>
-          <dt>Контакт</dt><dd>{item.contact ?? '—'}</dd>
+          <dt>{isCertificate ? 'ФИО' : 'Автор'}</dt><dd>{item.author_name ?? 'Аноним'}</dd>
+          {!isCertificate && <><dt>Контакт</dt><dd>{item.contact ?? '—'}</dd></>}
           <dt>Получено</dt><dd>{feedbackDate(item.created_at)}{item.recipient_title ? ` · ${item.recipient_title}` : ''}</dd>
+          {isCertificate && <>
+            <dt>Для чего нужна справка</dt><dd>{item.purpose ?? '—'}</dd>
+            <dt>Количество экземпляров</dt><dd>{item.copies ?? '—'}</dd>
+          </>}
         </dl>
 
-        <p className="feedback-text feedback-original">{item.text}</p>
+        <p className="feedback-text feedback-original">{item.text || 'Без дополнительной информации'}</p>
 
         {item.replies.map((entry) => (
           <div key={entry.id} className={`feedback-reply ${entry.author_kind}`}>
@@ -184,14 +206,14 @@ function FeedbackDialog({
         <p className="admin-dialog-hint">
           {item.contact_is_email
             ? 'Студент увидит ответ в приложении и получит его на почту.'
-            : 'Студент увидит ответ в приложении на своём устройстве.'}
+            : 'Студент увидит ответ во вкладке «Мои обращения».'}
         </p>
         <button className="button button-primary full" disabled={busy || !answer.trim()} onClick={sendAnswer}>
           <Send size={16} />Ответить
         </button>
 
         <div className="admin-time-row">
-          <label className="admin-field">
+          <label className={isCertificate ? 'admin-field feedback-status-field' : 'admin-field'}>
             <span>Статус</span>
             <select
               className="select-field"
@@ -207,17 +229,19 @@ function FeedbackDialog({
               ))}
             </select>
           </label>
-          <label className="admin-field">
-            <span>Папка</span>
-            <select
-              className="select-field"
-              value={item.kind}
-              disabled={busy}
-              onChange={(event) => move(event.target.value as FeedbackKind)}
-            >
-              {FOLDERS.map((folder) => <option key={folder} value={folder}>{KIND_TITLES[folder]}</option>)}
-            </select>
-          </label>
+          {!isCertificate && (
+            <label className="admin-field">
+              <span>Папка</span>
+              <select
+                className="select-field"
+                value={item.kind}
+                disabled={busy}
+                onChange={(event) => move(event.target.value as QuestionKind)}
+              >
+                {QUESTION_FOLDERS.map((folder) => <option key={folder} value={folder}>{KIND_TITLES[folder]}</option>)}
+              </select>
+            </label>
+          )}
         </div>
 
         <label className="admin-field">
@@ -247,7 +271,7 @@ function RecipientsEditor({ token }: { token: string }) {
 
   return (
     <div className="feedback-recipients">
-      <p className="muted">Обращения из папки дублируются на эти адреса. Несколько адресов — через запятую.</p>
+      <p className="muted">Обычные обращения дублируются на эти адреса. Несколько адресов — через запятую.</p>
       {recipients.data?.map((recipient) => <RecipientRow key={recipient.id} recipient={recipient} token={token} />)}
     </div>
   )

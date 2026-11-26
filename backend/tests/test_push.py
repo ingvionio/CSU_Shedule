@@ -69,7 +69,7 @@ async def test_конфиг_с_ключами(bare_client, vapid):
 async def test_подписка_и_отписка(bare_client, test_groups):
     _, headers = await student(bare_client, test_groups["ТЕСТ ПИ 991"], "device-push-00000001")
     created = await bare_client.post(f"{API}/me/push-subscriptions", json=subscription_body(), headers=headers)
-    assert created.status_code == 201
+    assert created.status_code == 201, created.text
 
     # Повторная подписка того же браузера не плодит записи.
     again = await bare_client.post(f"{API}/me/push-subscriptions", json=subscription_body(), headers=headers)
@@ -85,6 +85,15 @@ async def test_подписка_только_по_https(bare_client, test_groups
     _, headers = await student(bare_client, test_groups["ТЕСТ ПИ 991"], "device-push-00000003")
     body = subscription_body() | {"endpoint": "http://evil.example.com/x"}
     assert (await bare_client.post(f"{API}/me/push-subscriptions", json=body, headers=headers)).status_code == 422
+
+
+async def test_web_push_rejects_unlisted_provider_at_api_and_delivery(bare_client, test_groups, sent):
+    _, headers = await student(bare_client, test_groups["ТЕСТ ПИ 991"], "device-push-audit")
+    endpoint = "https://unlisted.example.net/subscription"
+    body = subscription_body() | {"endpoint": endpoint}
+    assert (await bare_client.post(f"{API}/me/push-subscriptions", json=body, headers=headers)).status_code == 422
+    assert (await push_service.send_one(push_service.SubscriptionData(endpoint, "key", "auth"), {})).status == "failed"
+    assert sent == []
 
 
 async def test_доставка_и_удаление_отозванной_подписки(bare_client, bare_admin_headers, test_groups, vapid, sent):

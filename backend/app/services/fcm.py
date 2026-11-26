@@ -14,6 +14,10 @@ if TYPE_CHECKING:
     from google.oauth2.service_account import Credentials
 
 SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
+FCM_ERROR_CODES = {
+    "INVALID_ARGUMENT", "UNREGISTERED", "SENDER_ID_MISMATCH", "QUOTA_EXCEEDED", "UNAVAILABLE", "INTERNAL",
+    "THIRD_PARTY_AUTH_ERROR", "THIRD_PARTY_PERMISSION_DENIED",
+}
 # OAuth из России отвечает медленно; часовой токен кэшируется.
 OAUTH_TIMEOUT = 45
 _credentials: Credentials | None = None
@@ -72,16 +76,18 @@ async def _invalidate_token(token: str) -> None:
 
 def _error(response: httpx.Response) -> tuple[str | None, str]:
     code = None
-    message = "Ошибка доставки"
     try:
         error = response.json().get("error", {})
-        message = error.get("message", message)
         for detail in error.get("details", []):
             if detail.get("@type") == "type.googleapis.com/google.firebase.fcm.v1.FcmError":
-                code = detail.get("errorCode")
+                value = detail.get("errorCode")
+                if isinstance(value, str) and value in FCM_ERROR_CODES:
+                    code = value
+                break
     except (ValueError, AttributeError, TypeError):
         pass
-    return code, f"FCM HTTP {response.status_code} {code or ''}: {message}"[:500]
+    label = f"FCM HTTP {response.status_code}" + (f" ({code})" if code else "")
+    return code, f"Ошибка доставки: {label}"
 
 
 async def send_one(subscription: SubscriptionData, data: dict) -> SendResult:
@@ -119,10 +125,10 @@ async def send_one(subscription: SubscriptionData, data: dict) -> SendResult:
                 return SendResult("retry", error)
             return SendResult("failed", error)
     except (OSError, httpx.HTTPError) as error:
-        return SendResult("retry", str(error)[:500])
+        return SendResult("retry", f"Ошибка соединения с FCM ({type(error).__name__})")
     except (ValueError, TypeError, ImportError) as error:
-        return SendResult("failed", str(error)[:500])
+        return SendResult("failed", f"Ошибка настройки FCM ({type(error).__name__})")
     except Exception as error:
         # Ошибки OAuth, включая недоступность сервиса токенов, повторяет worker.
-        return SendResult("retry", str(error)[:500])
+        return SendResult("retry", f"Ошибка отправки FCM ({type(error).__name__})")
     return SendResult("retry", "Не удалось отправить FCM")

@@ -223,6 +223,8 @@ def parse_args() -> argparse.Namespace:
     authors.add_argument("--apply", action="store_true", help="записать; без флага — только показать")
 
     sub.add_parser("worker", help="отправлять push и письма из очереди")
+    revoke = sub.add_parser("revoke-admin-sessions", help="отозвать все ранее выданные административные JWT")
+    revoke.add_argument("--apply", action="store_true", required=True, help="подтвердить отзыв")
     return parser.parse_args()
 
 
@@ -253,6 +255,12 @@ async def run_command(args: argparse.Namespace) -> None:
             await run()
         elif args.command == "feedback-authors":
             await feedback_authors(args.apply)
+        elif args.command == "revoke-admin-sessions":
+            from app.core.security import revoke_admin_sessions
+
+            async with SessionLocal() as session:
+                await revoke_admin_sessions(session)
+            print("Административные сессии отозваны. Войдите заново.")
     finally:
         await engine.dispose()
 

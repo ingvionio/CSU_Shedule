@@ -6,7 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
-from app.core.security import AuthError, authenticate_admin, authenticate_product, issue_student_token, refreshable_student
+from app.core.rate_limit import limit_login
+from app.core.security import (
+    AdminSession, AuthError, admin_session, authenticate_admin, authenticate_product, issue_student_token,
+    refreshable_student, revoke_admin_sessions,
+)
 from app.models import User
 from app.schemas.admin import LoginIn, TokenOut
 from app.schemas.student import (
@@ -39,6 +43,7 @@ async def moodle_login(
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> StudentTokenOut:
     """Аутентификация студента через eu.iit.csu.ru и определение группы."""
+    await limit_login(db, request, "moodle", data.username)
     client = {
         "device_key": data.device_key,
         "platform": request.headers.get("X-Client-Platform"),
@@ -105,7 +110,8 @@ async def student_refresh(
 
 
 @router.post("/auth/admin/login", response_model=TokenOut, summary="Вход администратора, выдача JWT")
-async def admin_login(data: LoginIn) -> TokenOut:
+async def admin_login(data: LoginIn, request: Request, db: AsyncSession = Depends(get_db, scope="function")) -> TokenOut:
+    await limit_login(db, request, "admin", data.login)
     try:
         token, expires_at = authenticate_admin(data.login, data.password)
     except AuthError as error:
@@ -113,8 +119,17 @@ async def admin_login(data: LoginIn) -> TokenOut:
     return TokenOut(access_token=token, expires_at=expires_at)
 
 
+@router.post("/auth/admin/logout", status_code=204, summary="Отозвать текущую сессию администратора")
+async def admin_logout(
+    session: AdminSession = Depends(admin_session, scope="function"),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> None:
+    await revoke_admin_sessions(db, session)
+
+
 @router.post("/auth/product/login", response_model=TokenOut, summary="Вход в ЛК продукта (/statistic), выдача JWT")
-async def product_login(data: LoginIn) -> TokenOut:
+async def product_login(data: LoginIn, request: Request, db: AsyncSession = Depends(get_db, scope="function")) -> TokenOut:
+    await limit_login(db, request, "product", data.login)
     try:
         token, expires_at = authenticate_product(data.login, data.password)
     except AuthError as error:

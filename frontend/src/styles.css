@@ -395,6 +395,8 @@ h1 { margin-top: 7px; font-size: 24px; line-height: 1.16; letter-spacing: -.045e
 .feedback-consent input { margin-top: 2px; accent-color: var(--purple); }
 .feedback-trap { position: absolute; left: -10000px; width: 1px; height: 1px; opacity: 0; }
 .feedback-form { position: relative; }
+.certificate-action { min-height: 44px; }
+.certificate-profile { padding: 12px; border-radius: 11px; background: var(--purple-soft); }
 .feedback-sent { align-items: flex-start; }
 .feedback-sent .button { margin-top: 4px; }
 .feedback-sent-icon { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 13px; background: var(--green-soft); color: var(--green); }
@@ -403,8 +405,12 @@ h1 { margin-top: 7px; font-size: 24px; line-height: 1.16; letter-spacing: -.045e
 .feedback-card { display: flex; width: 100%; flex-direction: column; gap: 8px; padding: 13px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); text-align: left; }
 .feedback-card-button:hover { border-color: #cab9e4; }
 .feedback-card.unread { border-color: #d7c5ee; box-shadow: inset 3px 0 0 var(--purple); }
+.feedback-update-badge { background: var(--purple); color: #fff; }
+.feedback-mark-seen { align-self: flex-start; min-height: 44px; }
 .feedback-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 10px; line-height: 1.4; }
-.feedback-card-meta { color: var(--muted); font-size: 10px; }
+.feedback-card-meta-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 6px; }
+.feedback-certificate-badge { background: var(--purple-soft); color: var(--purple); }
+.feedback-card-meta { color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
 .feedback-text { color: var(--text); font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .feedback-text.clamp { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .feedback-reply { display: flex; flex-direction: column; gap: 4px; padding: 10px 11px; border-radius: 11px; background: var(--purple-soft); }
@@ -432,6 +438,7 @@ h1 { margin-top: 7px; font-size: 24px; line-height: 1.16; letter-spacing: -.045e
 .feedback-meta dd { margin: 0; overflow-wrap: anywhere; }
 .feedback-original { padding: 11px; border: 1px solid var(--line); border-radius: 11px; background: #faf9fc; }
 .feedback-dialog .admin-field { width: 100%; }
+.feedback-status-field { grid-column: 1 / -1; }
 .feedback-dialog .success-note { font-size: 11px; line-height: 1.45; }
 
 .feedback-recipients { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
@@ -445,7 +452,7 @@ h1 { margin-top: 7px; font-size: 24px; line-height: 1.16; letter-spacing: -.045e
 .recipient-error { color: var(--red-dark); font-size: 10px; }
 
 @media (min-width: 600px) {
-  .feedback-folders { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .feedback-folders { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 }
 /* Сообщения: инбокс студента, бейдж в навигации, рассылка в админке */
 .student-nav { grid-template-columns: repeat(5, 1fr); }
@@ -735,6 +742,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visibl
 .week-line > div { min-width: 145px; }
 .profile-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 24px; }
 .profile-actions .button { width: 100%; min-height: 48px; height: auto; margin: 0; padding: 10px 8px; }
+.profile-certificate-action { grid-column: 1 / -1; }
 .button-logout { background: #c92a2a; color: white; }
 .button-logout:hover { background: #a61e1e; }
 .content { padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px)); }

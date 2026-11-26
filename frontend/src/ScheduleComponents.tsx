@@ -426,18 +426,20 @@ export function BottomNav({
   view,
   onNavigate,
   unread = 0,
+  feedbackUnread = 0,
   hasSession = false,
 }: {
   view: View
   onNavigate: (view: View) => void
   unread?: number
+  feedbackUnread?: number
   hasSession?: boolean
 }) {
   const items = [
     { label: 'Расписание', icon: CalendarDays, target: 'day' as View },
     { label: 'Сообщения', icon: Bell, target: 'messages' as View, badge: unread },
     { label: 'Карта', icon: MapIcon, target: 'map' as View },
-    { label: 'Обращения', icon: MessageCircleQuestion, target: 'feedback' as View },
+    { label: 'Обращения', icon: MessageCircleQuestion, target: 'feedback' as View, badge: feedbackUnread },
     { label: hasSession ? 'Профиль' : 'Группа', icon: UserRound, target: 'group' as View },
   ]
 

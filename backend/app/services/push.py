@@ -6,8 +6,9 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
+from urllib.parse import urlsplit
 
-from aiohttp import ClientError, ClientSession, DummyCookieJar
+from aiohttp import ClientError, ClientSession, DummyCookieJar, TraceConfig, TraceRequestRedirectParams
 from pywebpush import WebPushException, webpush_async
 
 from sqlalchemy import delete, select
@@ -18,6 +19,28 @@ from app.models import Message, PushDelivery, PushSubscription
 
 # Подписка больше не существует: браузер отписался или удалил данные сайта.
 GONE_STATUSES = {404, 410}
+
+
+def allowed_endpoint(endpoint: str) -> bool:
+    if any(char.isspace() or ord(char) < 32 for char in endpoint) or "\\" in endpoint:
+        return False
+    try:
+        parts = urlsplit(endpoint)
+        allowed = get_settings().web_push_hosts.lower().split(",")
+        return (
+            parts.scheme == "https" and parts.netloc.lower() == parts.hostname
+            and parts.hostname in {host.strip() for host in allowed} and bool(parts.path) and not parts.fragment
+        )
+    except ValueError:
+        return False
+
+
+class PushDestinationError(Exception):
+    """Запрещённый адрес или перенаправление push-сервиса."""
+
+
+async def _reject_redirect(_: ClientSession, __: object, ___: TraceRequestRedirectParams) -> None:
+    raise PushDestinationError
 
 
 def web_configured() -> bool:
@@ -106,7 +129,9 @@ async def enqueue(db: AsyncSession, message_id: int, user_ids: list[int], kind: 
 
 async def _send(subscription: SubscriptionData, data: dict) -> None:
     settings = get_settings()
-    async with ClientSession(cookie_jar=DummyCookieJar(), trust_env=True) as client:
+    trace = TraceConfig()
+    trace.on_request_redirect.append(_reject_redirect)
+    async with ClientSession(cookie_jar=DummyCookieJar(), trace_configs=[trace]) as client:
         await webpush_async(
             subscription_info={"endpoint": subscription.endpoint, "keys": {"p256dh": subscription.p256dh, "auth": subscription.auth}},
             data=json.dumps(data, ensure_ascii=False),
@@ -120,18 +145,22 @@ async def _send(subscription: SubscriptionData, data: dict) -> None:
 
 async def send_one(subscription: SubscriptionData, data: dict) -> SendResult:
     """Возвращает исход отправки; работа с БД остаётся у worker'а."""
+    if not allowed_endpoint(subscription.endpoint):
+        return SendResult("failed", "Недопустимый адрес push-сервиса")
     try:
         await _send(subscription, data)
+    except PushDestinationError:
+        return SendResult("failed", "Перенаправление push-сервиса запрещено")
     except WebPushException as error:
         status = error.response.status if error.response is not None else None
-        text = str(error)[:500]
+        text = f"Ошибка push-сервиса (HTTP {status})" if status is not None else "Ошибка push-сервиса"
         if status in GONE_STATUSES:
             return SendResult("gone", text)
         if status is None or status == 429 or status >= 500:
             return SendResult("retry", text)
         return SendResult("failed", text)
     except (ClientError, OSError) as error:
-        return SendResult("retry", str(error)[:500])
+        return SendResult("retry", f"Ошибка соединения с push-сервисом ({type(error).__name__})")
     except Exception as error:
-        return SendResult("failed", str(error)[:500])
+        return SendResult("failed", f"Ошибка отправки push ({type(error).__name__})")
     return SendResult("sent")

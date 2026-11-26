@@ -1,6 +1,7 @@
 import asyncio
 
 import httpx
+import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,6 +10,25 @@ from app.core.db import get_db
 from app.main import app
 from app.models import Group
 from tests import asgi_client
+
+
+async def test_moodle_requests_stay_on_configured_origin(monkeypatch):
+    from app.services import moodle
+
+    seen = []
+
+    async def handle(request):
+        seen.append(request.url.host)
+        return httpx.Response(302, headers={"Location": "https://outside.example/reference"})
+
+    async_client = httpx.AsyncClient
+    monkeypatch.setattr(moodle.httpx, "AsyncClient", lambda **kwargs: async_client(
+        **kwargs, transport=httpx.MockTransport(handle),
+    ))
+    async with moodle.MoodleClient("https://moodle.example") as client:
+        with pytest.raises(moodle.MoodleError, match="сторонний адрес"):
+            await client.fetch_logintoken()
+    assert seen == ["moodle.example"]
 
 
 async def test_requests_have_independent_async_sessions(db_schema):

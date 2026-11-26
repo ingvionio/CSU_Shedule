@@ -12,13 +12,17 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/csu_schedule"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     api_prefix: str = "/api/v1"
+    api_docs_enabled: bool = False
 
     # Вход администратора: один логин и пароль из окружения, выдаётся JWT.
     # Пустой пароль — вход в админку выключен.
     admin_login: str = "admin"
     admin_password: str = ""
-    jwt_secret: str = "change-me"
+    jwt_secret: str
     jwt_ttl_hours: int = 12
+    login_ip_limit: int = Field(default=80, ge=1)
+    login_pair_limit: int = Field(default=8, ge=1)
+    product_events_ip_limit: int = Field(default=240, ge=1)
 
     # ЛК продукта (/statistic): свой логин и пароль, не как у методиста.
     # Пустой пароль — вход выключен.
@@ -27,8 +31,7 @@ class Settings(BaseSettings):
     # Событий статистики с одного устройства за час; лишние молча отбрасываются.
     product_events_limit_per_hour: int = 120
 
-    # Почта для обращений (SMTP Яндекса). Пустой SMTP_USER — письма не
-    # отправляются, а пишутся в лог; обращения при этом сохраняются.
+    # Без SMTP_USER обращения сохраняются, письма пропускаются.
     smtp_host: str = "smtp.yandex.ru"
     smtp_port: int = 465
     smtp_user: str = ""
@@ -38,10 +41,10 @@ class Settings(BaseSettings):
     # Ссылка на приложение в письмах; пустая — без ссылки.
     public_app_url: str = ""
 
-    # Лимиты обращений за час: с одного устройства и с одного IP. Лимит на IP
+    # Лимиты обращений за час: с одного аккаунта и с одного IP. Лимит на IP
     # мягче — студенты в Wi-Fi вуза выходят в сеть с общего адреса.
-    feedback_rate_limit_per_hour: int = 5
-    feedback_ip_rate_limit_per_hour: int = 40
+    feedback_rate_limit_per_hour: int = Field(default=5, ge=1)
+    feedback_ip_rate_limit_per_hour: int = Field(default=40, ge=1)
 
     # Сообщения группе/курсу/потоку за столько дней достаются и тем,
     # кто зарегистрировался или сменил группу после отправки.
@@ -55,6 +58,7 @@ class Settings(BaseSettings):
     vapid_private_key: str = ""
     # Контакт для push-сервисов: mailto:... или https://...
     vapid_subject: str = "mailto:admin@example.com"
+    web_push_hosts: str = "fcm.googleapis.com,updates.push.services.mozilla.com,web.push.apple.com"
 
     # Путь к JSON сервисного аккаунта Firebase; пусто — FCM выключен.
     fcm_credentials_file: str = ""
@@ -70,6 +74,13 @@ class Settings(BaseSettings):
     moodle_base_url: str = "https://eu.iit.csu.ru"
     moodle_encryption_key: SecretStr
     moodle_mock: bool = False
+
+    @field_validator("jwt_secret")
+    @classmethod
+    def validate_jwt_secret(cls, value: str) -> str:
+        if len(value.encode()) < 32 or len(set(value)) < 12 or value != value.strip():
+            raise ValueError("JWT_SECRET должен содержать не менее 32 случайных байт без пробелов по краям")
+        return value
 
     @field_validator("moodle_encryption_key")
     @classmethod

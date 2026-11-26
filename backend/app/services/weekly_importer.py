@@ -18,6 +18,7 @@ from app.services import weeks, schedule_changes
 from app.services.groups import direction_of, find_group
 from app.services.homework_rebind import collect_homework, rebind_homework
 from app.services.importer import DEFAULT_TIME_SLOTS, _get_or_create, _parse_time, ensure_reference_data
+from app.services.spreadsheet_archive import MAX_WORKBOOK_BYTES, MIB, SpreadsheetArchiveError, check_archive
 from app.services.weekly_parser import GROUP_RE, WeeklyIssue, WeeklyParseResult, parse_weekly_workbook
 
 
@@ -44,6 +45,8 @@ class WeeklyImportReport:
 
 def _read_sources(paths: list[str | tuple[str, str]], temporary: Path) -> list[WeeklyFileReport]:
     files: list[WeeklyFileReport] = []
+    remaining_archive_size = 100 * MIB
+    remaining_archive_entries = 512
 
     def read(path: Path, name: str | None = None, fallback_name: str | None = None) -> None:
         try:
@@ -68,7 +71,11 @@ def _read_sources(paths: list[str | tuple[str, str]], temporary: Path) -> list[W
                     read(child)
             elif path.suffix.lower() == ".zip":
                 with ZipFile(path) as archive:
-                    members = [item for item in archive.infolist() if not item.is_dir() and item.filename.lower().endswith(".xlsx")]
+                    entries = check_archive(archive, max_members=remaining_archive_entries,
+                                            max_total=remaining_archive_size, max_entry=MAX_WORKBOOK_BYTES)
+                    remaining_archive_entries -= len(entries)
+                    remaining_archive_size -= sum(item.file_size for item in entries)
+                    members = [item for item in entries if not item.is_dir() and item.filename.lower().endswith(".xlsx")]
                     if not members:
                         failed(display_name, "В архиве не найдены файлы .xlsx")
                     for member in members:
@@ -89,14 +96,18 @@ def _read_sources(paths: list[str | tuple[str, str]], temporary: Path) -> list[W
                         try:
                             extracted.write_bytes(archive.read(member))
                             read(extracted, name, fallback_name)
-                        except (OSError, ValueError, BadZipFile, RuntimeError, NotImplementedError) as error:
-                            failed(name, f"Не удалось извлечь файл: {error}")
+                        except (OSError, ValueError, BadZipFile, RuntimeError, NotImplementedError):
+                            failed(name, "Не удалось извлечь книгу из архива")
+                        finally:
+                            extracted.unlink(missing_ok=True)
             elif path.suffix.lower() == ".xlsx":
                 read(path, display_name, display_name if isinstance(source, tuple) else None)
             else:
                 failed(display_name, "Ожидался файл .xlsx, папка или архив .zip")
-        except (OSError, ValueError, BadZipFile) as error:
-            failed(display_name, f"Не удалось прочитать путь: {error}")
+        except SpreadsheetArchiveError as error:
+            failed(display_name, str(error))
+        except (OSError, ValueError, BadZipFile):
+            failed(display_name, "Не удалось прочитать файл расписания")
     return files
 
 

@@ -133,9 +133,9 @@ async def send():
     return await fcm.send_one(push.SubscriptionData(TOKEN, None, None, "fcm"), data())
 
 
-def response(status, code=None):
+def response(status, code=None, message="Ошибка доставки"):
     return SimpleNamespace(status_code=status, json=lambda: {"error": {
-        "status": "INVALID_ARGUMENT", "message": "Ошибка доставки",
+        "status": "INVALID_ARGUMENT", "message": message,
         "details": [{"@type": "type.googleapis.com/google.firebase.fcm.v1.FcmError", "errorCode": code}] if code else [],
     }})
 
@@ -169,6 +169,12 @@ async def test_fcm_http_results(transport, status, code, expected):
     assert "Ошибка доставки" in result.error
     if code:
         assert code in result.error
+
+
+async def test_fcm_error_does_not_store_response_payload(transport):
+    transport[1].return_value = response(400, "UNEXPECTEDVALUE", message=TOKEN)
+    result = await send()
+    assert result.error == "Ошибка доставки: FCM HTTP 400"
 
 
 @pytest.mark.parametrize("error", [httpx.TimeoutException("таймаут"), httpx.ConnectError("сеть")])

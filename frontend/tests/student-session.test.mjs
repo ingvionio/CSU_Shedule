@@ -15,6 +15,7 @@ function harness({ hidden = false, expired = false } = {}) {
   let now = Date.now()
   let saved = { token: 'old-token', expires_at: new Date(now + (expired ? -1000 : 86400000)).toISOString(), profile: { id: 1, group_id: 1 } }
   const calls = []
+  const removed = []
   const effects = []
   const events = new Map()
   const timers = []
@@ -41,11 +42,12 @@ function harness({ hidden = false, expired = false } = {}) {
       if (name === './cache') return {
         readStudentSession: () => saved, writeStudentSession: value => { saved = value },
         clearStudentSession: () => { saved = null }, feedbackToken: () => 'device-key',
+        removeCache: key => removed.push(key),
       }
       throw new Error(name)
     },
   })
-  return { exports, api, calls, effects, events, timers, document, saved: () => saved, advance: ms => { now += ms } }
+  return { exports, api, calls, removed, effects, events, timers, document, saved: () => saved, advance: ms => { now += ms } }
 }
 
 test('background API reads and token refresh never record activity', async () => {
@@ -92,6 +94,7 @@ test('logout calls server and clears local session only after acknowledgement', 
   complete()
   await logout
   assert.equal(h.saved(), null)
+  assert.deepEqual(h.removed, ['inbox-1'])
 })
 
 test('failed global logout keeps session for retry', async () => {
@@ -99,6 +102,7 @@ test('failed global logout keeps session for retry', async () => {
   h.api.moodleForget = async () => { throw new ApiError('offline', 0) }
   await assert.rejects(h.exports.logoutStudent(), { status: 0 })
   assert.equal(h.saved().token, 'old-token')
+  assert.deepEqual(h.removed, [])
 })
 
 test('late refresh cannot resurrect logged out session', async () => {

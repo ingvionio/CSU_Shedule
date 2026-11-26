@@ -48,6 +48,7 @@ class FeedbackKind(StrEnum):
     DEANERY = "deanery"
     # Студент не знает, к кому идти; админ потом переносит в нужную папку.
     UNKNOWN = "unknown"
+    CERTIFICATE = "certificate"
 
 
 class FeedbackStatus(StrEnum):

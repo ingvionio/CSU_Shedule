@@ -42,7 +42,7 @@ test('fresh launch: browser, PWA and Capacitor root skip landing with a session'
 })
 test('direct links survive refresh, unknown hashes have a safe default', () => {
   const h = harness('https://localhost/')
-  for (const route of ['landing', 'login', 'help', 'day', 'week', 'group', 'messages', 'feedback', 'admin', 'map']) {
+  for (const route of ['landing', 'login', 'help', 'day', 'week', 'group', 'messages', 'feedback', 'feedback/certificate', 'admin', 'map']) {
     assert.equal(h.resolve(`https://localhost/#/${route}`, false), route)
     assert.equal(h.resolve(`https://localhost/#/${route}`, true), route)
   }

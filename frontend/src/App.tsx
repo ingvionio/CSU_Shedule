@@ -3,7 +3,8 @@ import { ChevronDown, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 
 import { clearAdminSession, readAdminSession, readSelectedGroup, writeAdminSession, writeSelectedGroup } from './api/cache'
-import { useCurrentWeek, useGroups, useHomework, useInbox, usePersonalNotes, useSchedule, useTimeSlots } from './api/queries'
+import { ApiError, api } from './api/client'
+import { useCurrentWeek, useGroups, useHomework, useInbox, useMyFeedback, usePersonalNotes, useSchedule, useTimeSlots } from './api/queries'
 import { logoutStudent, useStudentActivity, useStudentSession } from './api/student'
 import { BottomNav, DaySchedule, Header, PersonalNotePreview, WeekGrid, dayNumber, weekRangeLabel } from './ScheduleComponents'
 import { AdminLogin } from './pages/admin/AdminLogin'
@@ -23,6 +24,7 @@ import { CampusMap } from './pages/CampusMap'
 import { MoodleLogin } from './pages/MoodleLogin'
 import { track, watchAppOpens, type ClientEvent } from './api/analytics'
 import { StudentFeedback } from './pages/feedback/StudentFeedback'
+import { useFeedbackUpdates } from './pages/feedback/updates'
 import { StudentMessages } from './pages/messages/StudentMessages'
 import { GroupHomeworkPanel } from './pages/homework/GroupHomeworkPanel'
 import { PersonalNoteDialog } from './pages/homework/PersonalNoteDialog'
@@ -159,6 +161,9 @@ export function App() {
   }
 
   const inbox = useInbox(studentSession !== null)
+  const studentId = studentSession?.profile.id ?? null
+  const myFeedback = useMyFeedback(studentId)
+  const { updates: feedbackUpdates, markSeen: markFeedbackSeen } = useFeedbackUpdates(studentId, myFeedback.data)
   const queryClient = useQueryClient()
 
   useEffect(() => {
@@ -237,6 +242,23 @@ export function App() {
     setMenuOpen(false)
   }
 
+  const [adminLogoutError, setAdminLogoutError] = useState('')
+  const [adminLogoutPending, setAdminLogoutPending] = useState(false)
+  const endAdminSession = async () => {
+    if (!adminSession || adminLogoutPending) return
+    setAdminLogoutPending(true)
+    setAdminLogoutError('')
+    try {
+      await api.adminLogout(adminSession.token)
+      logoutAdmin()
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) logoutAdmin()
+      else setAdminLogoutError('Не удалось завершить сессию на сервере. Повторите выход.')
+    } finally {
+      setAdminLogoutPending(false)
+    }
+  }
+
   const handleMoodleLogin = (session: StudentSession) => {
     setSessionError('')
     setGroupId(session.profile.group_id)
@@ -265,6 +287,7 @@ export function App() {
     queryClient.removeQueries({ queryKey: ['inbox'] })
     queryClient.removeQueries({ queryKey: ['homework'] })
     queryClient.removeQueries({ queryKey: ['personal-notes'] })
+    queryClient.removeQueries({ queryKey: ['my-feedback'] })
     setGroupId(null)
     setRequestedMessage(null)
     setView('landing', true)
@@ -371,6 +394,8 @@ export function App() {
 
   const publicView = view === 'landing' || view === 'help'
   const needsLogin = !studentSession && view !== 'admin' && !publicView
+  const certificateMode = view === 'feedback/certificate'
+  const feedbackView = view === 'feedback' || certificateMode
 
   return (
     <>
@@ -384,7 +409,7 @@ export function App() {
                 : 'Выберите группу'
               : view === 'admin'
                 ? 'Администрирование'
-                : view === 'feedback' && studentSession
+                : feedbackView && studentSession
                   ? 'Обращения'
                   : view === 'messages'
                     ? 'Сообщения'
@@ -421,7 +446,8 @@ export function App() {
             <button onClick={() => nav('help')}>Помощь</button>
             <button onClick={() => nav('admin')}>Администрирование расписания</button>
             {studentSession && <button onClick={handleStudentLogout}>Выйти на всех устройствах</button>}
-            {adminSession && <button onClick={logoutAdmin}>Выйти из админки</button>}
+            {adminSession && <button onClick={endAdminSession} disabled={adminLogoutPending}>Выйти из админки</button>}
+            {adminSession && adminLogoutError && <p className="form-error" role="alert">{adminLogoutError}</p>}
           </div>
         )}
 
@@ -472,6 +498,9 @@ export function App() {
                     </div>
 
                     <div className="profile-actions">
+                      <button className="button button-secondary profile-certificate-action" onClick={() => nav('feedback/certificate')}>
+                        Заказать справку
+                      </button>
                       <button className="button button-primary" onClick={() => nav('day')}>
                         К расписанию
                       </button>
@@ -537,7 +566,17 @@ export function App() {
                 )
               )}
 
-              {view === 'feedback' && studentSession && <StudentFeedback profile={studentSession.profile} />}
+              {feedbackView && studentSession && (
+                <StudentFeedback
+                  profile={studentSession.profile}
+                  certificateMode={certificateMode}
+                  mine={myFeedback}
+                  updates={feedbackUpdates}
+                  onMarkSeen={markFeedbackSeen}
+                  onOrderCertificate={() => nav('feedback/certificate')}
+                  onOpenFeedback={() => nav('feedback')}
+                />
+              )}
 
               {view === 'messages' && (
                 <StudentMessages requestedId={requestedMessage} onRequestHandled={clearRequestedMessage} />
@@ -803,7 +842,13 @@ export function App() {
         </main>
 
         {studentSession && view !== 'admin' && view !== 'landing' && (
-          <BottomNav view={view} onNavigate={nav} unread={inbox.data?.unread_count ?? 0} hasSession={Boolean(studentSession)} />
+          <BottomNav
+            view={feedbackView ? 'feedback' : view}
+            onNavigate={nav}
+            unread={inbox.data?.unread_count ?? 0}
+            feedbackUnread={feedbackUpdates.size}
+            hasSession={Boolean(studentSession)}
+          />
         )}
         {noteSelection && studentSession && (
           <PersonalNoteDialog

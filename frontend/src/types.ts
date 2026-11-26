@@ -1,5 +1,5 @@
 /** Основные экраны приложения. */
-export type View = 'group' | 'day' | 'week' | 'messages' | 'feedback' | 'admin' | 'map' | 'landing' | 'login' | 'help'
+export type View = 'group' | 'day' | 'week' | 'messages' | 'feedback' | 'feedback/certificate' | 'admin' | 'map' | 'landing' | 'login' | 'help'
 
 export type {
   AdminFeedback,
@@ -19,6 +19,7 @@ export type {
   FeedbackKind,
   FeedbackRecipient,
   FeedbackStatus,
+  QuestionKind,
   Group,
   Lesson,
   LessonStatus,

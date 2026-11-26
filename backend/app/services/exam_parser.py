@@ -7,6 +7,7 @@ from datetime import date, datetime, time
 from io import BytesIO
 
 from openpyxl import load_workbook
+from app.services.spreadsheet_archive import check_workbook
 from openpyxl.cell.cell import Cell
 from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.utils import get_column_letter
@@ -138,6 +139,7 @@ _HEADERS = {"дата": "date", "время": "start_time", "группа": "gro
 
 def parse_workbook(payload: bytes) -> ParsedExams:
     result = ParsedExams()
+    check_workbook(payload)
     book = load_workbook(BytesIO(payload), rich_text=True, data_only=True)
     try:
         for sheet in book:

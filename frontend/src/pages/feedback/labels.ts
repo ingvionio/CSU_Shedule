@@ -1,10 +1,10 @@
-import type { FeedbackKind, FeedbackStatus } from '../../types'
+import type { FeedbackKind, FeedbackStatus, QuestionKind } from '../../types'
 
 /**
  * Кому можно написать. Подсказка помогает выбрать адресата; если студент
  * не уверен, есть «Не знаю, кому» — такое обращение распределит админ.
  */
-export const KIND_OPTIONS: { kind: FeedbackKind; label: string; hint: string }[] = [
+export const KIND_OPTIONS: { kind: QuestionKind; label: string; hint: string }[] = [
   { kind: 'methodist', label: 'Методисту', hint: 'Учебный процесс: расписание, занятия, практика, задолженности.' },
   { kind: 'deanery', label: 'В деканат', hint: 'Документы и справки, стипендия, приказы, военный учёт.' },
   { kind: 'dev', label: 'Разработчикам', hint: 'Ошибки в приложении и идеи, как сделать его удобнее.' },
@@ -16,6 +16,7 @@ export const KIND_TITLES: Record<FeedbackKind, string> = {
   methodist: 'Методист',
   deanery: 'Деканат',
   unknown: 'Не распределено',
+  certificate: 'Справки',
 }
 
 export const STATUS_TITLES: Record<FeedbackStatus, string> = {

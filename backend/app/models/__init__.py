@@ -1,5 +1,6 @@
 from app.models.schedule_change import ScheduleChange
 from app.models.base import Base
+from app.models.admin_revocation import AdminRevocation
 from app.models.catalog import Group, LessonType, Room, Semester, Subject, Teacher, TimeSlot
 from app.models.enums import (
     EmailStatus,
@@ -20,9 +21,11 @@ from app.models.push import PushDelivery, PushSubscription
 from app.models.user import User
 from app.models.note import PersonalNote
 from app.models.product_event import ProductEvent
+from app.models.request_quota import RequestQuota
 
 __all__ = [
     "Base",
+    "AdminRevocation",
     "ScheduleChange",
     "ExamEvent",
     "ExamImport",
@@ -59,5 +62,6 @@ __all__ = [
     "User",
     "PersonalNote",
     "ProductEvent",
+    "RequestQuota",
     "WeekParity",
 ]

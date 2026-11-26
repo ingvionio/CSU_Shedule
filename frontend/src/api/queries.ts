@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 
 import { api } from './client'
-import { feedbackToken, readCache, writeCache } from './cache'
+import { feedbackToken, readCache, readStudentSession, writeCache } from './cache'
 import { asStudent, useStudentSession } from './student'
 import type {
   ExamKind, ExamInput,
@@ -172,13 +172,13 @@ export function useOverrideMutations(token: string) {
 
 /* --- Обращения --- */
 
-/** Обращения студента с этого устройства. Ответы подтягиваются при каждом открытии раздела. */
-export function useMyFeedback(enabled: boolean) {
+export function useMyFeedback(studentId: number | null) {
   return useQuery({
-    queryKey: ['my-feedback'],
-    queryFn: () => api.myFeedback(feedbackToken()),
-    enabled,
-    staleTime: 30 * 1000,
+    queryKey: ['my-feedback', studentId],
+    queryFn: () => asStudent(api.myFeedback),
+    enabled: studentId !== null,
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
   })
 }
 
@@ -198,10 +198,10 @@ export function useFeedbackFolders(token: string) {
   })
 }
 
-export function useAdminFeedback(token: string, kind: string, status: string) {
+export function useAdminFeedback(token: string, kind: string, status: string, limit: number, beforeId?: number) {
   return useQuery({
-    queryKey: ['admin-feedback', kind, status],
-    queryFn: () => api.adminFeedback(token, kind, status),
+    queryKey: ['admin-feedback', token, kind, status, limit, beforeId],
+    queryFn: () => api.adminFeedback(token, kind, status, limit, beforeId),
   })
 }
 
@@ -255,7 +255,13 @@ export function useInbox(enabled: boolean): UseQueryResult<Inbox> {
   const cacheKey = `inbox-${session?.profile.id}`
   return useQuery({
     queryKey: ['inbox', session?.profile.id],
-    queryFn: async () => writeCache(cacheKey, await asStudent(api.inbox)),
+    queryFn: async ({ signal }) => {
+      const inbox = await asStudent(api.inbox)
+      if (!signal.aborted && session && readStudentSession()?.profile.id === session.profile.id) {
+        writeCache(cacheKey, inbox)
+      }
+      return inbox
+    },
     initialData: () => session ? readCache<Inbox>(cacheKey) ?? undefined : undefined,
     // Сохранённая копия — только чтобы было что показать: при открытии всегда спрашиваем сервер.
     initialDataUpdatedAt: 0,

@@ -3,16 +3,22 @@
 from __future__ import annotations
 
 import secrets
+from hashlib import sha256
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 import jwt
+from jwt.utils import base64url_decode
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as postgres_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.db import get_db
-from app.models import User
+from app.models import AdminRevocation, User
 
 ALGORITHM = "HS256"
 ROLE_ADMIN = "admin"
@@ -27,8 +33,12 @@ class AuthError(Exception):
 
 
 def issue_token(subject: str, role: str, ttl_hours: int) -> tuple[str, datetime]:
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=ttl_hours)
-    token = jwt.encode({"sub": subject, "role": role, "exp": expires_at}, get_settings().jwt_secret, algorithm=ALGORITHM)
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(hours=ttl_hours)
+    claims = {"sub": subject, "role": role, "exp": expires_at}
+    if role == ROLE_ADMIN:
+        claims.update(iat=int(now.timestamp()), jti=secrets.token_hex(16))
+    token = jwt.encode(claims, get_settings().jwt_secret, algorithm=ALGORITHM)
     return token, expires_at
 
 
@@ -69,12 +79,52 @@ def _payload(credentials: HTTPAuthorizationCredentials | None, missing: str, *, 
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "недействительный токен") from error
 
 
-async def require_admin(credentials: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> str:
-    """Зависимость для админских эндпоинтов. Возвращает логин админа."""
+@dataclass(frozen=True)
+class AdminSession:
+    login: str
+    key: str
+    expires_at: int
+
+
+async def admin_session(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> AdminSession:
     payload = _payload(credentials, "нужен вход администратора")
     if payload.get("role") != ROLE_ADMIN:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "нет прав администратора")
-    return payload["sub"]
+    assert credentials is not None
+    signature = credentials.credentials.rsplit(".", 1)[-1]
+    key = sha256(base64url_decode(signature.encode("ascii"))).hexdigest()
+    revocations = dict((await db.execute(select(AdminRevocation.key, AdminRevocation.revoked_at).where(
+        AdminRevocation.key.in_((key, "all")),
+    ))).tuples().all())
+    issued_at = int(payload.get("iat", 0))
+    if key in revocations or issued_at <= revocations.get("all", -1):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "сессия администратора завершена")
+    return AdminSession(payload["sub"], key, int(payload["exp"]))
+
+
+async def require_admin(session: AdminSession = Depends(admin_session, scope="function")) -> str:
+    return session.login
+
+
+async def revoke_admin_sessions(db: AsyncSession, session: AdminSession | None = None) -> None:
+    insert = postgres_insert if db.get_bind().dialect.name == "postgresql" else sqlite_insert
+    statement = insert(AdminRevocation).values(
+        key=session.key if session else "all",
+        revoked_at=int(datetime.now(timezone.utc).timestamp()),
+        expires_at=session.expires_at if session else None,
+    )
+    if session:
+        statement = statement.on_conflict_do_nothing(index_elements=[AdminRevocation.key])
+    else:
+        statement = statement.on_conflict_do_update(
+            index_elements=[AdminRevocation.key], set_={"revoked_at": statement.excluded.revoked_at},
+            where=AdminRevocation.revoked_at < statement.excluded.revoked_at,
+        )
+    await db.execute(statement)
+    await db.commit()
 
 
 async def _student_session(credentials: HTTPAuthorizationCredentials | None, db: AsyncSession, *, verify_exp: bool = True) -> User:

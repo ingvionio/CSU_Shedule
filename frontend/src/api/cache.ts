@@ -85,8 +85,8 @@ const FEEDBACK_TOKEN_KEY = 'feedback-token'
 let memoryFeedbackToken: string | null = null
 
 /**
- * Случайный токен устройства: по нему студент без входа видит свои обращения
- * и ответы. Если хранилище недоступно, токен живёт до перезагрузки страницы.
+ * Ключ устройства для Moodle и статистики. Если хранилище недоступно,
+ * ключ живёт до перезагрузки страницы.
  */
 export function feedbackToken(): string {
   const saved = readCache<string>(FEEDBACK_TOKEN_KEY)

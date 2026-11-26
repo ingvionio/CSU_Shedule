@@ -51,12 +51,12 @@ async def _send(item: EmailData) -> None:
 async def send_one(item: EmailData) -> SendResult:
     """Отправляет одно письмо без обращения к БД."""
     if not get_settings().smtp_user:
-        logger.info("Почта не настроена, письмо не отправлено: %s → %s\n%s", item.subject, item.to_address, item.body)
+        logger.info("Почта не настроена, письмо не отправлено")
         return SendResult("skipped", "SMTP не настроен")
     try:
         await _send(item)
     except (OSError, SMTPException) as error:
-        return SendResult("retry", str(error)[:500])
+        return SendResult("retry", f"Ошибка SMTP ({type(error).__name__})")
     return SendResult("sent")
 
 

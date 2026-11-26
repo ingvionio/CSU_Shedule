@@ -7,12 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.security import require_admin, require_student_profile
-from app.models import FeedbackMessage, FeedbackRecipient, FeedbackReply, User
+from app.models import FeedbackKind, FeedbackMessage, FeedbackRecipient, FeedbackReply, User
 from app.schemas.feedback import (
     AdminFeedbackOut,
     AdminReplyOut,
     FeedbackCreatedOut,
-    FeedbackIn,
+    FeedbackSubmission,
     FeedbackStatusLiteral,
     FeedbackKindLiteral,
     FeedbackUpdateIn,
@@ -30,12 +30,12 @@ from app.services.feedback import KIND_TITLES
 router = APIRouter()
 admin_router = APIRouter(prefix="/admin/feedback", dependencies=[Depends(require_admin)])
 
-# Случайный токен устройства для просмотра обращений и ответов.
+# Ключ устройства для статистики.
 TokenHeader = Header(default=None, alias="X-Feedback-Token", min_length=16, max_length=128)
 
 
 def _reply_title(message: FeedbackMessage, reply: FeedbackReply) -> str:
-    return KIND_TITLES[message.kind] if reply.author_kind == "staff" else "Вы"
+    return KIND_TITLES[feedback_service.recipient_kind(message.kind)] if reply.author_kind == "staff" else "Вы"
 
 
 def _my_out(message: FeedbackMessage) -> MyFeedbackOut:
@@ -44,6 +44,8 @@ def _my_out(message: FeedbackMessage) -> MyFeedbackOut:
         kind=message.kind,
         kind_title=KIND_TITLES[message.kind],
         text=message.text,
+        purpose=message.certificate_purpose,
+        copies=message.certificate_copies,
         status=message.status,
         created_at=message.created_at,
         replies=[
@@ -66,6 +68,8 @@ def _admin_out(message: FeedbackMessage) -> AdminFeedbackOut:
         kind_title=KIND_TITLES[message.kind],
         recipient_title=message.recipient.title if message.recipient else None,
         text=message.text,
+        purpose=message.certificate_purpose,
+        copies=message.certificate_copies,
         status=message.status,
         group_id=message.group_id,
         group_name=message.group.name if message.group else None,
@@ -99,7 +103,8 @@ def _recipient_out(recipient: FeedbackRecipient) -> RecipientOut:
 
 
 def _raise(error: feedback_service.FeedbackError) -> HTTPException:
-    return HTTPException(error.status_code, str(error))
+    headers = {"Retry-After": str(error.retry_after)} if error.retry_after is not None else None
+    return HTTPException(error.status_code, str(error), headers=headers)
 
 
 # --- студент ---
@@ -112,7 +117,7 @@ def _raise(error: feedback_service.FeedbackError) -> HTTPException:
     summary="Отправить обращение",
 )
 async def create_feedback(
-    data: FeedbackIn,
+    data: FeedbackSubmission,
     request: Request,
     token: str | None = TokenHeader,
     author: User = Depends(require_student_profile),
@@ -120,7 +125,7 @@ async def create_feedback(
 ) -> FeedbackCreatedOut:
     try:
         message, _ = await feedback_service.create_message(
-            db, data, token, request.client.host if request.client else None, author=author
+            db, data, request.client.host if request.client else None, author=author
         )
     except feedback_service.FeedbackError as error:
         raise _raise(error) from error
@@ -139,10 +144,11 @@ async def create_feedback(
 
 
 @router.get("/feedback/mine", response_model=list[MyFeedbackOut], summary="Мои обращения и ответы на них")
-async def my_feedback(token: str | None = TokenHeader, db: AsyncSession = Depends(get_db, scope="function")) -> list[MyFeedbackOut]:
-    if not token:
-        return []
-    return [_my_out(message) for message in await feedback_service.list_for_token(db, token)]
+async def my_feedback(
+    author: User = Depends(require_student_profile),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> list[MyFeedbackOut]:
+    return [_my_out(message) for message in await feedback_service.list_for_student(db, author.id)]
 
 
 # --- админка ---
@@ -152,16 +158,23 @@ async def my_feedback(token: str | None = TokenHeader, db: AsyncSession = Depend
 async def admin_feedback(
     kind: FeedbackKindLiteral | None = Query(default=None, description="Папка"),
     status_: FeedbackStatusLiteral | None = Query(default=None, alias="status"),
+    limit: int = Query(default=100, ge=1, le=200),
+    before_id: int | None = Query(default=None, ge=1),
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[AdminFeedbackOut]:
-    return [_admin_out(message) for message in await feedback_service.admin_list(db, kind, status_)]
+    return [_admin_out(message) for message in await feedback_service.admin_list(db, kind, status_, limit, before_id)]
 
 
 @admin_router.get("/folders", response_model=list[FolderCountOut], summary="Папки и число новых обращений")
 async def feedback_folders(db: AsyncSession = Depends(get_db, scope="function")) -> list[FolderCountOut]:
     summary = await feedback_service.folder_summary(db)
     return [
-        FolderCountOut(kind=kind, title=title, total=summary[kind]["total"], new=summary[kind]["new"])
+        FolderCountOut(
+            kind=kind,
+            title="Справки" if kind == FeedbackKind.CERTIFICATE.value else title,
+            total=summary[kind]["total"],
+            new=summary[kind]["new"],
+        )
         for kind, title in KIND_TITLES.items()
     ]
 

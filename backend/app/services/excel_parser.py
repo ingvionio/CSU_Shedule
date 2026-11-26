@@ -19,10 +19,13 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field, replace
+from io import BytesIO
 
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
+
+from app.services.spreadsheet_archive import check_workbook
 
 WEEKDAYS: dict[str, int] = {
     "ПОНЕДЕЛЬНИК": 1,
@@ -402,7 +405,8 @@ def _parse_group_block(
 
 def parse_workbook(path: str | bytes) -> ParseResult:
     """Разбирает весь файл расписания."""
-    workbook = load_workbook(path, data_only=True, read_only=False)
+    check_workbook(path)
+    workbook = load_workbook(BytesIO(path) if isinstance(path, bytes) else path, data_only=True, read_only=False)
     result = ParseResult()
 
     for sheet in workbook.worksheets:

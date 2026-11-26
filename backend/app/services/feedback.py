@@ -1,9 +1,4 @@
-"""Обращения студентов: создание, папки админки, ответы, письма адресатам.
-
-Студенты пока входят без аккаунта, поэтому автора узнаём по токену
-устройства (храним хеш). Ответы студент видит в приложении по тому же
-токену, а если оставил email — получает их и на почту.
-"""
+"""Обращения студентов: создание, папки админки, ответы и почта."""
 
 from __future__ import annotations
 
@@ -13,8 +8,10 @@ import hashlib
 import hmac
 import re
 from datetime import datetime, timedelta, timezone
+from email.errors import HeaderParseError
+from email.headerregistry import Address
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -28,13 +25,14 @@ from app.models import (
     Group,
     User,
 )
-from app.schemas.feedback import FeedbackIn, FeedbackUpdateIn, RecipientUpdateIn
+from app.schemas.feedback import CertificateRequestIn, FeedbackIn, FeedbackSubmission, FeedbackUpdateIn, RecipientUpdateIn
 
 KIND_TITLES: dict[str, str] = {
     FeedbackKind.DEV.value: "Разработчики",
     FeedbackKind.METHODIST.value: "Методист",
     FeedbackKind.DEANERY.value: "Деканат",
     FeedbackKind.UNKNOWN.value: "Не распределено",
+    FeedbackKind.CERTIFICATE.value: "Справка",
 }
 
 # Адресаты, которые заводятся сами при первом обращении к разделу.
@@ -45,16 +43,28 @@ DEFAULT_RECIPIENTS = [
 ]
 
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+DUPLICATE_SECONDS = 60
+
+
+def recipient_kind(kind: str) -> str:
+    return FeedbackKind.METHODIST.value if kind == FeedbackKind.CERTIFICATE.value else kind
 
 
 class FeedbackError(Exception):
-    def __init__(self, message: str, status_code: int = 400) -> None:
+    def __init__(self, message: str, status_code: int = 400, retry_after: int | None = None) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.retry_after = retry_after
 
 
 def is_email(value: str | None) -> bool:
-    return bool(value and EMAIL_PATTERN.match(value.strip()))
+    if not value or not EMAIL_PATTERN.fullmatch(value.strip()):
+        return False
+    try:
+        address = Address(addr_spec=value.strip())
+    except (ValueError, HeaderParseError):
+        return False
+    return address.addr_spec == value.strip()
 
 
 def secret_hash(value: str) -> str:
@@ -64,15 +74,20 @@ def secret_hash(value: str) -> str:
 
 async def ensure_recipients(db: AsyncSession) -> None:
     existing = set((await db.scalars(select(FeedbackRecipient.kind))).all())
+    if all(kind in existing for kind, _ in DEFAULT_RECIPIENTS):
+        return
+    if db.get_bind().dialect.name == "postgresql":
+        await _lock(db, "recipients")
+        existing = set((await db.scalars(select(FeedbackRecipient.kind))).all())
     missing = [(kind, title) for kind, title in DEFAULT_RECIPIENTS if kind not in existing]
     for order, (kind, title) in enumerate(missing):
         db.add(FeedbackRecipient(kind=kind, title=title, emails=[], is_active=True, sort_order=order))
-    if missing:
-        await db.commit()
+    await db.flush()
 
 
 async def list_recipients(db: AsyncSession) -> list[FeedbackRecipient]:
     await ensure_recipients(db)
+    await db.commit()
     return list(
         (await db.scalars(select(FeedbackRecipient).order_by(FeedbackRecipient.kind, FeedbackRecipient.sort_order))).all()
     )
@@ -83,10 +98,11 @@ async def _route(db: AsyncSession, kind: str) -> FeedbackRecipient | None:
     if kind == FeedbackKind.UNKNOWN.value:
         return None
     await ensure_recipients(db)
+    recipients = select(FeedbackRecipient).where(FeedbackRecipient.kind == recipient_kind(kind))
+    if kind != FeedbackKind.CERTIFICATE.value:
+        recipients = recipients.where(FeedbackRecipient.is_active.is_(True))
     return await db.scalar(
-        select(FeedbackRecipient)
-        .where(FeedbackRecipient.kind == kind, FeedbackRecipient.is_active.is_(True))
-        .order_by(FeedbackRecipient.sort_order, FeedbackRecipient.id)
+        recipients.order_by(FeedbackRecipient.is_active.desc(), FeedbackRecipient.sort_order, FeedbackRecipient.id)
         .limit(1)
     )
 
@@ -152,8 +168,7 @@ def _enqueue_answer(db: AsyncSession, message: FeedbackMessage, reply: FeedbackR
 
 async def create_message(
     db: AsyncSession,
-    data: FeedbackIn,
-    token: str | None,
+    data: FeedbackSubmission,
     ip: str | None,
     *,
     author: User,
@@ -167,12 +182,24 @@ async def create_message(
         # Скрытое поле заполняют только боты.
         raise FeedbackError("обращение отклонено")
 
-    now = now or datetime.now(timezone.utc)
+    is_certificate = isinstance(data, CertificateRequestIn)
+    if is_certificate and author.group_id is None:
+        raise FeedbackError("В профиле Moodle не указана учебная группа", 409)
+    purpose = data.purpose if is_certificate else None
+    copies = data.copies if is_certificate else None
+
     settings = get_settings()
-    token_hash = secret_hash(token) if token else None
     ip_hash = secret_hash(ip) if ip else None
+    if db.get_bind().dialect.name == "postgresql":
+        if ip_hash is not None:
+            await _lock(db, f"ip:{ip_hash}")
+        await _lock(db, f"author:{author.id}")
+    else:
+        # SQLite сериализует запись до проверки лимита.
+        await db.execute(update(User).where(User.id == author.id).values(id=User.id))
+    now = now or datetime.now(timezone.utc)
     limits = (
-        (FeedbackMessage.author_token_hash, token_hash, settings.feedback_rate_limit_per_hour),
+        (FeedbackMessage.author_id, author.id, settings.feedback_rate_limit_per_hour),
         (FeedbackMessage.ip_hash, ip_hash, settings.feedback_ip_rate_limit_per_hour),
     )
     for column, value, limit in limits:
@@ -184,20 +211,33 @@ async def create_message(
             )
         )
         if recent >= limit:
-            raise FeedbackError("слишком много обращений, попробуйте через час", 429)
+            raise FeedbackError("слишком много обращений, попробуйте через час", 429, 3600)
 
-    if data.group_id is not None and await db.get(Group, data.group_id) is None:
+    duplicate = await db.scalar(select(FeedbackMessage.id).where(
+        FeedbackMessage.author_id == author.id,
+        FeedbackMessage.kind == data.kind,
+        FeedbackMessage.text == data.text,
+        FeedbackMessage.certificate_purpose == purpose,
+        FeedbackMessage.certificate_copies == copies,
+        FeedbackMessage.created_at >= now - timedelta(seconds=DUPLICATE_SECONDS),
+    ).limit(1))
+    if duplicate is not None:
+        raise FeedbackError("такое обращение уже отправлено", 429, DUPLICATE_SECONDS)
+
+    if isinstance(data, FeedbackIn) and data.group_id is not None and await db.get(Group, data.group_id) is None:
         raise FeedbackError("группа не найдена", 404)
-    group_id = author.group_id if author.group_id is not None else data.group_id
 
+    contact = data.contact.strip() if isinstance(data, FeedbackIn) and data.contact else None
     message = FeedbackMessage(
         kind=data.kind,
         recipient=await _route(db, data.kind),
-        text=data.text.strip(),
-        group_id=group_id,
+        text=data.text,
+        certificate_purpose=purpose,
+        certificate_copies=copies,
+        group_id=author.group_id,
         author_name=author.full_name,
-        contact=(data.contact or "").strip() or None,
-        author_token_hash=token_hash,
+        author_id=author.id,
+        contact=contact or None,
         ip_hash=ip_hash,
         status=FeedbackStatus.NEW.value,
         created_at=now,
@@ -206,27 +246,36 @@ async def create_message(
     await db.flush()
     await db.refresh(message, ["group"])
 
-    outbox = _enqueue_to_recipient(db, message)
+    # Заказы справок доступны методисту в админке с проверкой полномочий.
+    outbox = [] if is_certificate else _enqueue_to_recipient(db, message)
     await db.commit()
     return message, [item.id for item in outbox]
 
 
-async def list_for_token(db: AsyncSession, token: str) -> list[FeedbackMessage]:
+async def _lock(db: AsyncSession, scope: str) -> None:
+    key = int.from_bytes(hashlib.sha256(f"feedback:{scope}".encode()).digest()[:8], "big", signed=True)
+    await db.execute(select(func.pg_advisory_xact_lock(key)))
+
+
+async def list_for_student(db: AsyncSession, author_id: int) -> list[FeedbackMessage]:
     return list(
         (await db.scalars(
             select(FeedbackMessage)
-            .where(FeedbackMessage.author_token_hash == secret_hash(token))
+            .where(FeedbackMessage.author_id == author_id)
             .order_by(FeedbackMessage.created_at.desc(), FeedbackMessage.id.desc())
         )).all()
     )
 
 
-async def admin_list(db: AsyncSession, kind: str | None, status: str | None) -> list[FeedbackMessage]:
-    query = select(FeedbackMessage).order_by(FeedbackMessage.created_at.desc(), FeedbackMessage.id.desc())
+async def admin_list(db: AsyncSession, kind: str | None, status: str | None, limit: int, before_id: int | None) -> list[FeedbackMessage]:
+    query = select(FeedbackMessage).order_by(FeedbackMessage.created_at.desc(), FeedbackMessage.id.desc()).limit(limit)
     if kind:
         query = query.where(FeedbackMessage.kind == kind)
     if status:
         query = query.where(FeedbackMessage.status == status)
+    if before_id is not None:
+        cursor = select(FeedbackMessage.created_at, FeedbackMessage.id).where(FeedbackMessage.id == before_id)
+        query = query.where(tuple_(FeedbackMessage.created_at, FeedbackMessage.id) < cursor.scalar_subquery())
     return list((await db.scalars(query)).all())
 
 
@@ -258,6 +307,8 @@ async def update_message(db: AsyncSession, message_id: int, data: FeedbackUpdate
     outbox: list[EmailOutbox] = []
 
     if data.kind is not None and data.kind != message.kind:
+        if message.kind == FeedbackKind.CERTIFICATE.value:
+            raise FeedbackError("Заказ справки нельзя перенести в другую папку", 422)
         message.kind = data.kind
         message.recipient = await _route(db, data.kind)
         outbox = _enqueue_to_recipient(db, message)

@@ -11,6 +11,7 @@ from zipfile import BadZipFile
 from xml.etree.ElementTree import ParseError
 
 from openpyxl import load_workbook
+from app.services.spreadsheet_archive import check_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 
 WEEKDAYS = {"ПН": 1, "ВТ": 2, "СР": 3, "ЧТ": 4, "ПТ": 5, "СБ": 6}
@@ -75,6 +76,7 @@ def parse_weekly_workbook(path: str | Path | bytes, file_name: str | None = None
     result = WeeklyParseResult()
     name = file_name or (Path(path).name if not isinstance(path, bytes) else "")
     try:
+        check_workbook(path)
         book = load_workbook(BytesIO(path) if isinstance(path, bytes) else path, data_only=True)
     except (OSError, ValueError, KeyError, BadZipFile, InvalidFileException, ParseError) as error:
         result.errors.append(WeeklyIssue("", "", name, f"Не удалось прочитать книгу: {error}"))

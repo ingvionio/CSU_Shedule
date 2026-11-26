@@ -155,15 +155,22 @@ export type Catalog = {
 /* --- Обращения --- */
 
 /** Кому адресовано обращение. `unknown` — студент не знает, админ распределит. */
-export type FeedbackKind = 'dev' | 'methodist' | 'deanery' | 'unknown'
+export type QuestionKind = 'dev' | 'methodist' | 'deanery' | 'unknown'
+export type FeedbackKind = QuestionKind | 'certificate'
 export type FeedbackStatus = 'new' | 'in_progress' | 'answered' | 'archived'
 
 export type FeedbackInput = {
-  kind: FeedbackKind
+  kind: QuestionKind
   text: string
   group_id?: number | null
   contact?: string | null
   /** Ловушка для ботов, человек оставляет пустым. */
+  website?: string
+} | {
+  kind: 'certificate'
+  purpose: string
+  copies: number
+  text?: string
   website?: string
 }
 
@@ -181,6 +188,8 @@ export type MyFeedback = {
   kind: FeedbackKind
   kind_title: string
   text: string
+  purpose: string | null
+  copies: number | null
   status: FeedbackStatus
   created_at: string
   replies: FeedbackReply[]
@@ -206,13 +215,13 @@ export type FeedbackFolder = {
 
 export type FeedbackUpdate = {
   status?: FeedbackStatus
-  kind?: FeedbackKind
+  kind?: QuestionKind
   admin_note?: string
 }
 
 export type FeedbackRecipient = {
   id: number
-  kind: Exclude<FeedbackKind, 'unknown'>
+  kind: Exclude<QuestionKind, 'unknown'>
   title: string
   emails: string[]
   is_active: boolean

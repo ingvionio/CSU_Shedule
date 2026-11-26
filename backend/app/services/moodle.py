@@ -1,7 +1,7 @@
 """Интеграция с платформой Moodle Института информационных технологий ЧелГУ (eu.iit.csu.ru).
 
 Реализует:
-1. Сессионную аутентификацию (обход CSRF logintoken, получение MoodleSession и sesskey).
+1. Сессионную аутентификацию (получение CSRF-токена Moodle, MoodleSession и sesskey).
 2. Извлечение ФИО и числового moodle_id со страницы профиля.
 3. Автоматическое определение академической группы студента по курсам через AJAX-шлюз.
 4. Продление живой сессии через core_session_touch без сохранения пароля.
@@ -31,6 +31,14 @@ from app.models import Group, User
 from app.services.groups import MASTER_DIRECTIONS, direction_of, level_of
 
 logger = logging.getLogger(__name__)
+
+
+class _ExcludeMoodleSessionURLs(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "sesskey=" not in record.getMessage()
+
+
+logging.getLogger("httpx").addFilter(_ExcludeMoodleSessionURLs())
 
 COURSE_DIRECTIONS = {d.upper(): d for d in (*MASTER_DIRECTIONS, "ПрИ", "ПИ", "БИ", "КБ")}
 GROUP_SEPARATOR = r"\s*[-–—]?\s*"
@@ -101,14 +109,23 @@ class MoodleClient:
 
     def __init__(self, base_url: str | None = None, timeout: int = 12) -> None:
         self.base_url = (base_url or get_settings().moodle_base_url).rstrip("/")
+        origin = httpx.URL(self.base_url)
+        if origin.scheme != "https" or not origin.host or origin.userinfo:
+            raise MoodleError("Для Moodle нужен настроенный HTTPS-адрес", 502)
+        self.origin = (origin.scheme, origin.host, origin.port)
         self.session = httpx.AsyncClient(
             timeout=timeout,
             follow_redirects=True,
+            event_hooks={"request": [self._check_origin]},
             headers={
                 "User-Agent": USER_AGENT,
                 "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
             },
         )
+
+    async def _check_origin(self, request: httpx.Request) -> None:
+        if (request.url.scheme, request.url.host, request.url.port) != self.origin or request.url.userinfo:
+            raise MoodleError("Сервер Moodle указал сторонний адрес", 502)
 
     async def __aenter__(self) -> MoodleClient:
         await self.session.__aenter__()
@@ -129,7 +146,7 @@ class MoodleClient:
             resp = await self.session.get(url)
             resp.raise_for_status()
         except httpx.HTTPError as exc:
-            logger.error("Ошибка при запросе страницы входа Moodle: %s", exc)
+            logger.error("Ошибка при запросе страницы входа Moodle (%s)", type(exc).__name__)
             raise MoodleError("Не удалось связаться с сервером Moodle ЧелГУ", 502) from exc
 
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -158,15 +175,12 @@ class MoodleClient:
             resp = await self.session.post(login_url, data=payload)
             resp.raise_for_status()
         except httpx.HTTPError as exc:
-            logger.error("Ошибка при отправке учетных данных в Moodle: %s", exc)
+            logger.error("Ошибка при входе в Moodle (%s)", type(exc).__name__)
             raise MoodleError("Сервер Moodle ЧелГУ временно недоступен", 502) from exc
 
         # Если нас перенаправило обратно на страницу входа — ошибка логина
         if "/login/index.php" in resp.url.path and "testsession" not in resp.url.params:
-            soup = BeautifulSoup(resp.text, "html.parser")
-            err_el = soup.find(class_=lambda c: c and ("alert-danger" in c or "loginerrors" in c))
-            err_msg = err_el.get_text(strip=True) if err_el else "Неверный логин или пароль Moodle"
-            raise MoodleAuthError(err_msg)
+            raise MoodleAuthError()
 
         sesskey = self._extract_sesskey(resp.text)
         return resp.text, sesskey
@@ -187,7 +201,7 @@ class MoodleClient:
             resp = await self.session.get(url)
             resp.raise_for_status()
         except httpx.HTTPError as exc:
-            logger.error("Ошибка при получении профиля Moodle: %s", exc)
+            logger.error("Ошибка при получении профиля Moodle (%s)", type(exc).__name__)
             raise MoodleError("Не удалось загрузить профиль Moodle", 502) from exc
 
         html = resp.text
@@ -569,7 +583,7 @@ async def authenticate_and_detect_student(
     # Dev / Mock режим для локальной разработки
     if settings.moodle_mock:
         groups = (await db.scalars(select(Group))).all()
-        logger.info("Вход студента через Moodle MOCK режим: %s", username)
+        logger.info("Вход в тестовом режиме Moodle")
         if not groups:
             raise MoodleGroupError("В базе нет ни одной группы. Загрузите расписание перед входом.")
         # Берем первую доступную группу или ищем по имени в логине

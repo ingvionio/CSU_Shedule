@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -27,7 +27,7 @@ services:
       # DATABASE_URL из backend/.env, который нужен для запуска без Docker.
       DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/csu_schedule
     ports:
-      - "${BACKEND_PORT:-8000}:8000"
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy

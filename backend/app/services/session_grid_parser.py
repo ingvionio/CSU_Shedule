@@ -6,6 +6,7 @@ from datetime import date, datetime, time
 from io import BytesIO
 
 from openpyxl import load_workbook
+from app.services.spreadsheet_archive import check_workbook
 from openpyxl.cell.cell import Cell
 from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.worksheet.worksheet import Worksheet
@@ -183,6 +184,7 @@ def _parse_sheet(sheet: Worksheet, semester_start: date, result: ParsedExams) ->
 
 def parse_workbook(payload: bytes, semester_start: date) -> ParsedExams:
     result = ParsedExams()
+    check_workbook(payload)
     book = load_workbook(BytesIO(payload), rich_text=True, data_only=True)
     try:
         for sheet in book:

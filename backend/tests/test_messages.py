@@ -280,5 +280,6 @@ async def test_список_без_n_plus_one(bare_client, bare_admin_headers, t
     finally:
         event.remove(engine.sync_engine, "before_cursor_execute", capture)
     assert response.status_code == 200 and len(response.json()) == 4
-    assert len(queries) == 3
+    assert sum("FROM admin_revocations" in query for query in queries) == 1
+    assert len([query for query in queries if "FROM admin_revocations" not in query]) == 3
     assert sum("FROM push_deliveries" in query for query in queries) == 1

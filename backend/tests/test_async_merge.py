@@ -140,9 +140,9 @@ def test_migration_chain_runs_through_async_environment(tmp_path, monkeypatch):
     config = Config("alembic.ini")
     scripts = ScriptDirectory.from_config(config)
     chain = [revision.revision for revision in scripts.walk_revisions()]
-    assert scripts.get_heads() == ["f6e8a0b2c357"]
-    expected = ["f6e8a0b2c357", "f5d7e9a1b246", "f4c6d8e0a135", "f3b5c7d9e024",
-                "f3b5c7d9e124", "a7d9e2c4b816", "f2a4b6c8d013"]
+    expected = ["fb43e912ac62", "fa39c812bf51", "f9a9b1c2d350", "f8a9b1c2d349", "f7a9b1c2d348", "f6e8a0b2c357",
+                "f5d7e9a1b246", "f4c6d8e0a135", "f3b5c7d9e024", "f3b5c7d9e124", "a7d9e2c4b816", "f2a4b6c8d013"]
+    assert scripts.get_heads() == [expected[0]]
     assert chain[:len(expected)] == expected
     filename = tmp_path / "async-migrations.db"
     monkeypatch.setattr(get_settings(), "database_url", f"sqlite+aiosqlite:///{filename.as_posix()}")
@@ -156,9 +156,34 @@ def test_migration_chain_runs_through_async_environment(tmp_path, monkeypatch):
                 "users", recreate="always", naming_convention={"uq": "%(table_name)s_%(column_0_name)s_key"},
             ):
                 pass
+        command.upgrade(config, "f9a9b1c2d350")
+        with engine.begin() as connection:
+            connection.execute(text("""
+                INSERT INTO feedback_messages (id, kind, text, status, created_at)
+                VALUES (1, 'methodist', 'Вопрос', 'answered', CURRENT_TIMESTAMP)
+            """))
+            connection.execute(text("""
+                INSERT INTO feedback_replies (message_id, author_kind, text, created_at)
+                VALUES (1, 'staff', 'Ответ', CURRENT_TIMESTAMP)
+            """))
+        command.upgrade(config, "fa39c812bf51")
+        with engine.begin() as connection:
+            connection.execute(text("""
+                INSERT INTO feedback_messages (id, kind, text, status, created_at)
+                VALUES (2, 'certificate', 'Прежний заказ', 'new', CURRENT_TIMESTAMP)
+            """))
         command.upgrade(config, "head")
-        with engine.connect() as connection:
+        with engine.begin() as connection:
             assert connection.scalar(text("SELECT version_num FROM alembic_version")) == expected[0]
+            assert connection.scalar(text("SELECT kind FROM feedback_messages WHERE id = 1")) == "methodist"
+            assert connection.scalar(text("SELECT message_id FROM feedback_replies")) == 1
+            assert connection.execute(text("""
+                SELECT text, certificate_purpose, certificate_copies FROM feedback_messages WHERE id = 2
+            """)).one() == ("Прежний заказ", None, None)
+        command.downgrade(config, "f9a9b1c2d350")
+        with engine.connect() as connection:
+            assert connection.scalar(text("SELECT kind FROM feedback_messages WHERE id = 2")) == "methodist"
+            assert connection.scalar(text("SELECT message_id FROM feedback_replies")) == 1
         command.downgrade(config, "f2a4b6c8d013")
         command.upgrade(config, "head")
     finally:

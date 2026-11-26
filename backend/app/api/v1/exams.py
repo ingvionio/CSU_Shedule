@@ -14,6 +14,7 @@ from app.core.security import require_admin
 from app.schemas.exam import ExamCreate, ExamEventOut, ExamImportHistoryOut, ExamImportOut, ExamKind, ExamPatch
 from app.services import exams
 from app.services.exam_importer import import_workbook
+from app.services.spreadsheet_archive import MAX_WORKBOOK_BYTES
 
 admin_router = APIRouter(prefix="/admin/exams", dependencies=[Depends(require_admin)])
 T = TypeVar("T")
@@ -34,8 +35,8 @@ async def upload_exams(kind: ExamKind, apply: bool = False, file: UploadFile = F
         raise HTTPException(400, "Выберите файл .xlsx")
     if len(name) > 300:
         raise HTTPException(400, "Имя файла длиннее 300 символов")
-    payload = await file.read(20 * 1024 * 1024 + 1)
-    if len(payload) > 20 * 1024 * 1024:
+    payload = await file.read(MAX_WORKBOOK_BYTES + 1)
+    if len(payload) > MAX_WORKBOOK_BYTES:
         raise HTTPException(413, "Файл превышает допустимый размер (20 МБ)")
     current = await _call(exams.semester(db))
     try:

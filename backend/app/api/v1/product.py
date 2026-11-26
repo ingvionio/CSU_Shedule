@@ -5,10 +5,12 @@ from __future__ import annotations
 from datetime import date
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
+from app.core.config import get_settings
+from app.core.rate_limit import enforce_quota
 from app.core.security import optional_student, require_product
 from app.schemas.product import EventsIn, ProductUserDetailOut, ProductUserEventsOut, ProductUsersOut, SummaryOut
 from app.services import product_events, product_stats
@@ -20,10 +22,13 @@ product_router = APIRouter(prefix="/product", dependencies=[Depends(require_prod
 @router.post("/events", status_code=status.HTTP_204_NO_CONTENT, summary="События для статистики (публичный)")
 async def post_events(
     data: EventsIn,
+    request: Request,
     user_id: int | None = Depends(optional_student),
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> Response:
     """Токен студента необязателен: без него или с недействительным событие пишется без пользователя."""
+    ip = request.client.host if request.client else "unknown"
+    await enforce_quota(db, "events", 60, [(f"ip:{ip}", get_settings().product_events_ip_limit)])
     await product_events.accept_client_events(
         db,
         names=[event.name for event in data.events],

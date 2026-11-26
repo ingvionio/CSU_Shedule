@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
+from app.core.rate_limit import prune_quotas
 from app.models import EmailOutbox, Group, Message, PushDelivery, PushSubscription, ScheduleChange, User
 from app.schemas.message import MessageIn
 from app.services import messages, product_events
@@ -137,6 +138,8 @@ async def process_push(db: AsyncSession, now: datetime, sender: PushSender | Non
         subscriptions[item.id] = item.subscription_id
         if message is None or message.deleted_at is not None or subscription is None:
             outcomes[item.id] = ("skipped", None)
+        elif subscription.user_id != item.user_id:
+            outcomes[item.id] = ("skipped", "Владелец push-подписки изменился")
         elif subscription.platform not in configured:
             outcomes[item.id] = ("skipped", "push не настроен")
         elif now - _aware(item.created_at) > PUSH_TTL:
@@ -156,7 +159,7 @@ async def process_push(db: AsyncSession, now: datetime, sender: PushSender | Non
                 send = sender or (fcm.send_one if job[0].platform == "fcm" else push.send_one)
                 outcome = await send(*job)
             except Exception as error:
-                outcome = push.SendResult("retry", str(error)[:500])
+                outcome = push.SendResult("retry", f"Ошибка отправки push ({type(error).__name__})")
             outcomes[item_id] = (outcome.status, outcome.error)
 
     async with asyncio.TaskGroup() as tasks:
@@ -186,7 +189,7 @@ async def process_email(db: AsyncSession, now: datetime, sender: EmailSender | N
         try:
             outcome = await (sender or mailer.send_one)(letters[item.id])
         except Exception as error:
-            outcome = mailer.SendResult("retry", str(error)[:500])
+            outcome = mailer.SendResult("retry", f"Ошибка отправки SMTP ({type(error).__name__})")
         status = await _finish(db, EmailOutbox, item, outcome.status, outcome.error, now, mailer.MAX_ATTEMPTS)
         setattr(result, status, getattr(result, status) + 1)
     _log("Почта", result)
@@ -249,6 +252,7 @@ async def process_schedule_changes(db: AsyncSession, now: datetime) -> int:
 
 async def run() -> None:
     stop = asyncio.Event()
+    last_quota_cleanup = float("-inf")
 
     def shutdown(signum: int, frame: object) -> None:
         stop.set()
@@ -265,6 +269,9 @@ async def run() -> None:
             try:
                 async with SessionLocal() as db:
                     now = datetime.now(timezone.utc)
+                    if now.timestamp() - last_quota_cleanup >= 600:
+                        await prune_quotas(db)
+                        last_quota_cleanup = now.timestamp()
                     changed = await process_schedule_changes(db, now)
                     pushed = await process_push(db, now)
                     emailed = await process_email(db, now)

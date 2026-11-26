@@ -226,7 +226,7 @@ async def test_push_sender_classifies_http_errors(monkeypatch, status, expected)
         raise WebPushException("ошибка", response=type("Response", (), {"status": status})())
 
     monkeypatch.setattr(push, "_send", fail)
-    assert (await push.send_one(push.SubscriptionData("https://push.example.com", "key", "auth"), {})).status == expected
+    assert (await push.send_one(push.SubscriptionData("https://push.example.com/subscription", "key", "auth"), {})).status == expected
 
 
 @pytest.mark.parametrize("error", [OSError("сеть"), TimeoutError("таймаут")])
@@ -235,7 +235,7 @@ async def test_push_sender_retries_network_errors(monkeypatch, error):
         raise error
 
     monkeypatch.setattr(push, "_send", fail)
-    assert (await push.send_one(push.SubscriptionData("https://push.example.com", "key", "auth"), {})).status == "retry"
+    assert (await push.send_one(push.SubscriptionData("https://push.example.com/subscription", "key", "auth"), {})).status == "retry"
 
 
 async def test_claim_uses_postgres_skip_locked_and_batch_limit(db, monkeypatch):
@@ -272,6 +272,22 @@ async def test_old_claim_cannot_overwrite_new_claim(db):
     await worker.process_push(db, NOW + worker.LEASE, sender=AsyncMock(side_effect=lambda *_: push.SendResult("sent")))
     await worker._finish(db, PushDelivery, old, "retry", "поздний ответ", NOW, 5)
     assert (await delivery(db)).status == "sent"
+
+
+async def test_worker_skips_delivery_for_previous_subscription_owner(db):
+    await create(db)
+    student = User(full_name="Другой студент", device_key_hash="other-outbox-device")
+    db.add(student)
+    await db.flush()
+    subscription = await db.scalar(select(PushSubscription))
+    subscription.user_id = student.id
+    await db.commit()
+
+    sender = AsyncMock()
+    result = await worker.process_push(db, NOW, sender=sender)
+    assert result.skipped == 1
+    assert (await delivery(db)).status == "skipped"
+    sender.assert_not_called()
 
 
 async def test_send_emails_uses_same_backoff_and_respects_not_due(db, monkeypatch):
@@ -313,9 +329,11 @@ async def test_shutdown_finishes_current_pass(monkeypatch):
 
     monkeypatch.setattr(worker.signal, "signal", register)
     monkeypatch.setattr(worker, "SessionLocal", Database)
+    cleanup = AsyncMock(side_effect=lambda *_: calls.append("quotas"))
+    monkeypatch.setattr(worker, "prune_quotas", cleanup)
     monkeypatch.setattr(worker, "process_schedule_changes", AsyncMock(side_effect=lambda *_: calls.append("schedule") or 0))
     monkeypatch.setattr(worker, "process_push", push_batch)
     monkeypatch.setattr(worker, "process_email", email_batch)
     await worker.run()
-    assert calls == ["schedule", "push", "email"]
+    assert calls == ["quotas", "schedule", "push", "email"]
     assert all(handler is None for handler in handlers.values())

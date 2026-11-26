@@ -14,7 +14,7 @@ from tests import asgi_client
 
 
 @pytest.fixture
-async def upload_client(weekly_db):
+async def upload_client(weekly_db, db_schema):
     async with asgi_client(app) as client:
         yield client
 

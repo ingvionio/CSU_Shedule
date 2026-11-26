@@ -56,9 +56,9 @@ export class ApiError extends Error {
 type RequestOptions = {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'
   body?: unknown
-  /** JWT администратора для эндпоинтов /admin. */
+  /** JWT для защищённых маршрутов. */
   token?: string
-  /** Токен устройства для обращений студента. */
+  /** Ключ устройства для статистики обращений. */
   feedbackToken?: string
 }
 
@@ -162,6 +162,7 @@ export const api = {
 
   adminLogin: (login: string, password: string) =>
     request<TokenResponse>('/auth/admin/login', { method: 'POST', body: { login, password } }),
+  adminLogout: (token: string) => request<void>('/auth/admin/logout', { method: 'POST', token }),
   catalog: (token: string) => request<Catalog>('/admin/catalog', { token }),
   createOverride: (token: string, body: OverrideInput) =>
     request<OverrideCreated>('/admin/overrides', { method: 'POST', body, token }),
@@ -170,11 +171,12 @@ export const api = {
 
   sendFeedback: (feedbackToken: string, body: FeedbackInput, token: string) =>
     request<{ id: number; kind_title: string }>('/feedback', { method: 'POST', body, feedbackToken, token }),
-  myFeedback: (feedbackToken: string) => request<MyFeedback[]>('/feedback/mine', { feedbackToken }),
+  myFeedback: (token: string) => request<MyFeedback[]>('/feedback/mine', { token }),
 
   feedbackFolders: (token: string) => request<FeedbackFolder[]>('/admin/feedback/folders', { token }),
-  adminFeedback: (token: string, kind: string, status: string) => {
-    const params = new URLSearchParams({ kind, ...(status ? { status } : {}) })
+  adminFeedback: (token: string, kind: string, status: string, limit: number, beforeId?: number) => {
+    const params = new URLSearchParams({ kind, limit: String(limit), ...(status ? { status } : {}) })
+    if (beforeId !== undefined) params.set('before_id', String(beforeId))
     return request<AdminFeedback[]>(`/admin/feedback?${params}`, { token })
   },
   updateFeedback: (token: string, id: number, body: FeedbackUpdate) =>
