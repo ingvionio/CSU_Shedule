@@ -25,6 +25,8 @@ class EmailData:
     reply_to: str | None
     subject: str
     body: str
+    # (имя, MIME-тип, содержимое) — например, скан справки.
+    attachments: tuple[tuple[str, str, bytes], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -42,6 +44,9 @@ async def _send(item: EmailData) -> None:
         message["Reply-To"] = item.reply_to
     message["Subject"] = item.subject
     message.set_content(item.body)
+    for filename, content_type, data in item.attachments:
+        maintype, _, subtype = content_type.partition("/")
+        message.add_attachment(data, maintype=maintype, subtype=subtype or "octet-stream", filename=filename)
     await send(
         message, hostname=settings.smtp_host, port=settings.smtp_port,
         username=settings.smtp_user, password=settings.smtp_password, use_tls=True, timeout=20,

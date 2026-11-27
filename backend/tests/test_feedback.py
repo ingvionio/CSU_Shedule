@@ -12,7 +12,7 @@ from sqlalchemy import delete, select, update
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
-from app.models import EmailOutbox, EmailStatus, FeedbackMessage, FeedbackRecipient, FeedbackReply, User
+from app.models import EmailOutbox, EmailStatus, FeedbackAttachment, FeedbackMessage, FeedbackRecipient, FeedbackReply, User
 from app.services import mailer
 from app.services.feedback import secret_hash
 from app.services.worker import process_email
@@ -27,6 +27,7 @@ async def _clean_feedback(db_schema):
     yield
     async with SessionLocal() as session:
         await session.execute(delete(EmailOutbox))
+        await session.execute(delete(FeedbackAttachment))
         await session.execute(delete(FeedbackReply))
         await session.execute(delete(FeedbackMessage))
         await session.execute(update(FeedbackRecipient).values(emails=[], is_active=True))
@@ -159,7 +160,7 @@ async def test_ограничение_частоты_на_ip(send, monkeypatch):
 
 # --- справки ---
 
-CERTIFICATE = {"kind": "certificate", "purpose": "Для предоставления работодателю", "copies": 2}
+CERTIFICATE = {"kind": "certificate", "purpose": "Для предоставления работодателю", "copies": 2, "delivery": "pickup"}
 
 
 async def test_certificate_workflow(client, admin_headers, send, group_ids, test_groups):
@@ -171,7 +172,8 @@ async def test_certificate_workflow(client, admin_headers, send, group_ids, test
     assert response.status_code == 201, response.text
     order_id = response.json()["id"]
     assert response.json()["kind_title"] == "Справка"
-    assert await outbox() == []
+    [letter] = await outbox()
+    assert letter.to_address == "method@csu.ru" and letter.reply_to is None
 
     admin_path = "/api/v1/admin/feedback"
     assert (await client.get(admin_path, params={"kind": "certificate"})).status_code == 401
@@ -222,12 +224,15 @@ async def test_certificate_requires_moodle_and_validates_payload(client, send):
         assert invalid.status_code == 422
     for text in ("x" * 4001, "Справка\x00", 123):
         assert (await client.post(path, json={**order, "text": text}, headers=send.headers)).status_code == 422
-    for field in ("purpose", "copies"):
+    for field in ("purpose", "copies", "delivery"):
         assert (await client.post(path, json={key: value for key, value in order.items() if key != field},
                                   headers=send.headers)).status_code == 422
     for invalid_fields in ({"purpose": "   "}, {"purpose": "Цель\x00"}, {"purpose": "x" * 4001},
                            {"copies": 0}, {"copies": -1}, {"copies": 1.5}, {"copies": True},
-                           {"copies": "2"}, {"copies": 2147483648}):
+                           {"copies": "2"}, {"copies": 2147483648}, {"delivery": "courier"},
+                           {"delivery": "post"}, {"delivery": "post", "address": "   "},
+                           {"delivery": "scan"}, {"delivery": "scan", "email": "не почта"},
+                           {"email": "a@b"}, {"address": "x" * 501}):
         assert (await client.post(path, json={**order, **invalid_fields}, headers=send.headers)).status_code == 422
     assert (await client.post(path, json={**order, "website": "spam"}, headers=send.headers)).status_code == 400
     assert (await client.get(f"{path}/mine", headers=send.headers)).json() == []
@@ -531,3 +536,148 @@ async def test_smtp_wait_leaves_database_connection_available(client, admin_head
         result = await sending
     assert result.sent == 1
     smtp.assert_awaited_once()
+
+
+# --- письмо о справке и файлы в ответах ---
+
+
+async def deliver_mail():
+    async with SessionLocal() as session:
+        await process_email(session, datetime.now(timezone.utc))
+
+
+async def test_certificate_letter_follows_study_office_format(client, admin_headers, send, sent):
+    await set_emails(client, admin_headers, "methodist", ["method@csu.ru"])
+    order = {**CERTIFICATE, "purpose": "Требуется на работу", "copies": 3, "delivery": "post",
+             "address": "454001, г. Челябинск, ул. Братьев Кашириных, 129", "text": "Срочно"}
+    response = await client.post("/api/v1/feedback", json=order, headers=send.headers)
+    assert response.status_code == 201, response.text
+    order_id = response.json()["id"]
+    await deliver_mail()
+
+    [letter] = sent
+    assert letter.to_address == "method@csu.ru"
+    assert letter.subject == f"[Расписание] Заявка на справку №{order_id} · ТЕСТ ПИ 991 · Иван Петров"
+    assert letter.body.startswith(
+        "Заявка на справку о том, что студент.\n"
+        "1. Иван Петров\n"
+        "2. ТЕСТ ПИ 991\n"
+        "3. Требуется на работу\n"
+        "4. Кол-во: 3 шт.\n"
+        "5. Отправить почтой РФ, адрес: 454001, г. Челябинск, ул. Братьев Кашириных, 129\n"
+        "\nДополнительно: Срочно\n"
+    )
+    [mine] = (await client.get("/api/v1/feedback/mine", headers=send.headers)).json()
+    assert (mine["delivery"], mine["address"]) == ("post", order["address"])
+
+
+async def test_certificate_pickup_letter(client, admin_headers, send, sent):
+    await set_emails(client, admin_headers, "methodist", ["method@csu.ru"])
+    assert (await client.post("/api/v1/feedback", json=CERTIFICATE, headers=send.headers)).status_code == 201
+    await deliver_mail()
+    [letter] = sent
+    assert "4. Кол-во: 2 шт.\n5. Заберу лично в учебной части\n\n—" in letter.body
+
+
+async def test_certificate_scan_keeps_student_email(client, admin_headers, send, sent):
+    await set_emails(client, admin_headers, "methodist", ["method@csu.ru"])
+    order = {**CERTIFICATE, "delivery": "scan", "email": " student@mail.ru ", "address": "не нужен"}
+    assert (await client.post("/api/v1/feedback", json=order, headers=send.headers)).status_code == 201
+    await deliver_mail()
+    [letter] = sent
+    assert "5. Требуется скан на эл.почту: student@mail.ru\n" in letter.body
+    assert letter.reply_to == "student@mail.ru"
+    [order_out] = (await client.get("/api/v1/admin/feedback", params={"kind": "certificate"}, headers=admin_headers)).json()
+    assert order_out["contact"] == "student@mail.ru" and order_out["contact_is_email"]
+    assert order_out["address"] is None and order_out["delivery"] == "scan"
+
+
+async def test_reply_with_scan_reaches_student_mail_and_app(client, admin_headers, send, sent, test_groups):
+    order = {**CERTIFICATE, "delivery": "scan", "email": "student@mail.ru"}
+    order_id = (await client.post("/api/v1/feedback", json=order, headers=send.headers)).json()["id"]
+    path = f"/api/v1/admin/feedback/{order_id}/replies/files"
+    pdf = b"%PDF-1.4 scan"
+    files = [("files", ("..\\Справка Петров.pdf", pdf, "text/html")),
+             ("files", ("фото.JPG", b"\xff\xd8jpeg", "image/jpeg"))]
+
+    assert (await client.post(path, data={"text": "Готово"}, files=files)).status_code == 401
+    assert (await client.post(path, data={"text": "Готово"}, files=files, headers=send.headers)).status_code == 403
+    response = await client.post(path, data={"text": "Справка во вложении"}, files=files, headers=admin_headers)
+    assert response.status_code == 201, response.text
+    assert response.json()["status"] == "answered"
+    reply = response.json()["replies"][0]
+    assert [(item["filename"], item["content_type"], item["size"]) for item in reply["attachments"]] == [
+        ("Справка Петров.pdf", "application/pdf", len(pdf)), ("фото.JPG", "image/jpeg", 6),
+    ]
+
+    await deliver_mail()
+    [letter] = sent
+    assert letter.to_address == "student@mail.ru"
+    assert letter.subject == f"Ответ на вашу заявку на справку №{order_id}"
+    assert letter.body.startswith(
+        "Методист ответил на вашу заявку на справку:\n\nСправка во вложении\n\nВо вложении: Справка Петров.pdf, фото.JPG"
+    )
+    assert list(letter.attachments) == [
+        ("Справка Петров.pdf", "application/pdf", pdf), ("фото.JPG", "image/jpeg", b"\xff\xd8jpeg"),
+    ]
+
+    [mine] = (await client.get("/api/v1/feedback/mine", headers=send.headers)).json()
+    attachment_id = mine["replies"][0]["attachments"][0]["id"]
+    download = await client.get(f"/api/v1/feedback/attachments/{attachment_id}", headers=send.headers)
+    assert download.status_code == 200 and download.content == pdf
+    assert download.headers["content-type"] == "application/pdf"
+    assert download.headers["content-disposition"].startswith("attachment;")
+    assert download.headers["cache-control"] == "no-store"
+    admin_download = await client.get(f"/api/v1/admin/feedback/attachments/{attachment_id}", headers=admin_headers)
+    assert admin_download.content == pdf
+
+    other = await login_student(client, test_groups["ТЕСТ ПИ 992"], "Другой Студент", OTHER_TOKEN)
+    other_headers = {"Authorization": f"Bearer {other.json()['access_token']}"}
+    assert (await client.get(f"/api/v1/feedback/attachments/{attachment_id}", headers=other_headers)).status_code == 404
+    assert (await client.get(f"/api/v1/feedback/attachments/{attachment_id}")).status_code == 401
+
+
+async def test_reply_files_are_checked(client, admin_headers, send):
+    message_id = (await send()).json()["id"]
+    path = f"/api/v1/admin/feedback/{message_id}/replies/files"
+    assert (await client.post(path, data={"text": "  "}, headers=admin_headers)).status_code == 422
+    for name, data in (("virus.exe", b"MZ"), ("page.html", b"<script>"), ("пусто.pdf", b"")):
+        response = await client.post(path, files=[("files", (name, data))], headers=admin_headers)
+        assert response.status_code == 422, name
+    many = [("files", (f"{index}.pdf", b"%PDF")) for index in range(6)]
+    assert (await client.post(path, files=many, headers=admin_headers)).status_code == 422
+    big = [("files", ("big.pdf", b"0" * (10 * 1024 * 1024 + 1)))]
+    assert (await client.post(path, files=big, headers=admin_headers)).status_code == 413
+    # Без текста, но с файлом — можно.
+    response = await client.post(path, files=[("files", ("скан.pdf", b"%PDF"))], headers=admin_headers)
+    assert response.status_code == 201
+    assert response.json()["replies"][0]["text"] == ""
+    missing = await client.post("/api/v1/admin/feedback/999999/replies/files",
+                                files=[("files", ("a.pdf", b"%PDF"))], headers=admin_headers)
+    assert missing.status_code == 404
+
+
+async def test_text_reply_to_certificate_is_signed_by_methodist(client, admin_headers, send, sent):
+    order = {**CERTIFICATE, "email": "student@mail.ru"}
+    order_id = (await client.post("/api/v1/feedback", json=order, headers=send.headers)).json()["id"]
+    response = await client.post(f"/api/v1/admin/feedback/{order_id}/replies", json={"text": "Заберите в 305"},
+                                 headers=admin_headers)
+    assert response.status_code == 201
+    await deliver_mail()
+    [letter] = sent
+    assert letter.body.startswith("Методист ответил") and letter.attachments == ()
+
+
+async def test_mail_with_attachments_is_multipart(monkeypatch):
+    captured = []
+    monkeypatch.setattr(get_settings(), "smtp_user", "bot@yandex.ru")
+    monkeypatch.setattr(mailer, "send", AsyncMock(side_effect=lambda message, **_: captured.append(message)))
+    letter = mailer.EmailData("student@mail.ru", None, "Ответ", "Текст",
+                              (("Справка.pdf", "application/pdf", b"%PDF"),))
+    assert (await mailer.send_one(letter)).status == "sent"
+    [message] = captured
+    [part] = list(message.iter_attachments())
+    assert part.get_filename() == "Справка.pdf"
+    assert part.get_content_type() == "application/pdf"
+    assert part.get_content() == b"%PDF"
+    assert message.get_body(("plain",)).get_content().strip() == "Текст"

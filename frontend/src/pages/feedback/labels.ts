@@ -1,4 +1,4 @@
-import type { FeedbackKind, FeedbackStatus, QuestionKind } from '../../types'
+import type { CertificateDelivery, FeedbackKind, FeedbackStatus, QuestionKind } from '../../types'
 
 /**
  * Кому можно написать. Подсказка помогает выбрать адресата; если студент
@@ -24,6 +24,23 @@ export const STATUS_TITLES: Record<FeedbackStatus, string> = {
   in_progress: 'В работе',
   answered: 'Есть ответ',
   archived: 'Закрыто',
+}
+
+/** Как в заявке учебной части. */
+export const DELIVERY_OPTIONS: { value: CertificateDelivery; label: string }[] = [
+  { value: 'pickup', label: 'Заберу лично в учебной части' },
+  { value: 'scan', label: 'Требуется скан на эл.почту' },
+  { value: 'post', label: 'Отправить почтой РФ' },
+]
+
+export const DELIVERY_TITLES = Object.fromEntries(
+  DELIVERY_OPTIONS.map((option) => [option.value, option.label]),
+) as Record<CertificateDelivery, string>
+
+export function fileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} Б`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} КБ`
+  return `${(bytes / 1024 / 1024).toFixed(1).replace('.', ',')} МБ`
 }
 
 export function feedbackDate(value: string): string {

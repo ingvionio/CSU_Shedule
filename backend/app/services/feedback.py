@@ -7,16 +7,21 @@ from collections import Counter
 import hashlib
 import hmac
 import re
+import unicodedata
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from email.errors import HeaderParseError
 from email.headerregistry import Address
+from pathlib import PurePath
 
 from sqlalchemy import func, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload, undefer
 
 from app.core.config import get_settings
 from app.models import (
     EmailOutbox,
+    FeedbackAttachment,
     FeedbackKind,
     FeedbackMessage,
     FeedbackRecipient,
@@ -44,6 +49,35 @@ DEFAULT_RECIPIENTS = [
 
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 DUPLICATE_SECONDS = 60
+
+DELIVERY_TITLES: dict[str, str] = {
+    "pickup": "Заберу лично в учебной части",
+    "scan": "Требуется скан на эл.почту",
+    "post": "Отправить почтой РФ",
+}
+
+# Файлы к ответам: сканы справок и документы. Тип берётся по расширению, а не от клиента.
+ATTACHMENT_TYPES: dict[str, str] = {
+    ".pdf": "application/pdf",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".heic": "image/heic",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".odt": "application/vnd.oasis.opendocument.text",
+    ".rtf": "application/rtf",
+}
+MAX_ATTACHMENTS = 5
+MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+# Яндекс принимает письма до 30 МБ, а base64 увеличивает вложения на треть.
+MAX_ATTACHMENTS_TOTAL = 20 * 1024 * 1024
+
+
+@dataclass(frozen=True)
+class AttachmentIn:
+    filename: str
+    data: bytes
 
 
 def recipient_kind(kind: str) -> str:
@@ -112,10 +146,51 @@ def _app_link() -> str:
     return f"\n\nОткрыть приложение: {url}" if url else ""
 
 
+def certificate_letter(message: FeedbackMessage) -> tuple[str, str]:
+    """Тема и текст письма методисту в формате заявки учебной части."""
+    group = message.group.name if message.group else "группа не указана"
+    author = message.author_name or "Без имени"
+    delivery = DELIVERY_TITLES.get(message.certificate_delivery or "", "Способ получения не указан")
+    if message.certificate_delivery == "post" and message.certificate_address:
+        delivery = f"{delivery}, адрес: {message.certificate_address}"
+    elif message.certificate_delivery == "scan" and message.contact:
+        delivery = f"{delivery}: {message.contact}"
+    lines = [
+        "Заявка на справку о том, что студент.",
+        f"1. {author}",
+        f"2. {group}",
+        f"3. {message.certificate_purpose or '—'}",
+        f"4. Кол-во: {message.certificate_copies or '—'} шт.",
+        f"5. {delivery}",
+    ]
+    if message.text:
+        lines += ["", f"Дополнительно: {message.text}"]
+    lines += [
+        "",
+        "—",
+        f"Заявка №{message.id} из приложения расписания ИИТ.",
+        "Ответить студенту и приложить скан справки можно в админке, в папке «Справки»: "
+        "ответ появится у студента в приложении"
+        + (" и придёт ему на почту." if is_email(message.contact) else "."),
+    ]
+    subject = f"[Расписание] Заявка на справку №{message.id} · {group} · {author}"
+    return subject, "\n".join(lines) + _app_link()
+
+
 def _enqueue_to_recipient(db: AsyncSession, message: FeedbackMessage) -> list[EmailOutbox]:
     recipient = message.recipient
     if recipient is None or not recipient.is_active:
         return []
+    reply_to = message.contact.strip() if is_email(message.contact) else None
+
+    if message.kind == FeedbackKind.CERTIFICATE.value:
+        subject, body = certificate_letter(message)
+        items = [
+            EmailOutbox(message_id=message.id, to_address=address, reply_to=reply_to, subject=subject, body=body)
+            for address in recipient.emails
+        ]
+        db.add_all(items)
+        return items
 
     group = message.group.name if message.group else "группа не указана"
     author = message.author_name or "Без имени"
@@ -136,7 +211,6 @@ def _enqueue_to_recipient(db: AsyncSession, message: FeedbackMessage) -> list[Em
         )
         + _app_link()
     )
-    reply_to = message.contact.strip() if is_email(message.contact) else None
 
     items = [
         EmailOutbox(message_id=message.id, to_address=address, reply_to=reply_to, subject=subject, body=body)
@@ -149,16 +223,21 @@ def _enqueue_to_recipient(db: AsyncSession, message: FeedbackMessage) -> list[Em
 def _enqueue_answer(db: AsyncSession, message: FeedbackMessage, reply: FeedbackReply) -> list[EmailOutbox]:
     if not is_email(message.contact):
         return []
+    is_certificate = message.kind == FeedbackKind.CERTIFICATE.value
+    what = "вашу заявку на справку" if is_certificate else "ваше обращение"
+    original = f"Справка: {message.certificate_purpose or '—'}" if is_certificate else f"Ваше обращение:\n{message.text}"
+    files = "\n\nВо вложении: " + ", ".join(item.filename for item in reply.attachments) if reply.attachments else ""
     item = EmailOutbox(
         message_id=message.id,
+        reply_id=reply.id if reply.attachments else None,
         to_address=message.contact.strip(),
-        subject=f"Ответ на ваше обращение №{message.id}",
+        subject=f"Ответ на {what} №{message.id}",
         body=(
-            f"{KIND_TITLES[message.kind]} ответил на ваше обращение:\n\n"
-            f"{reply.text}\n\n"
+            f"{KIND_TITLES[recipient_kind(message.kind)]} ответил на {what}:\n\n"
+            f"{reply.text}{files}\n\n"
             "—\n"
-            f"Ваше обращение:\n{message.text}\n\n"
-            "Ответ также виден в приложении расписания, в разделе «Вопросы»."
+            f"{original}\n\n"
+            "Ответ также виден в приложении расписания, в разделе «Мои обращения»."
             + _app_link()
         ),
     )
@@ -187,6 +266,8 @@ async def create_message(
         raise FeedbackError("В профиле Moodle не указана учебная группа", 409)
     purpose = data.purpose if is_certificate else None
     copies = data.copies if is_certificate else None
+    delivery = data.delivery if is_certificate else None
+    address = data.address if is_certificate else None
 
     settings = get_settings()
     ip_hash = secret_hash(ip) if ip else None
@@ -228,12 +309,18 @@ async def create_message(
         raise FeedbackError("группа не найдена", 404)
 
     contact = data.contact.strip() if isinstance(data, FeedbackIn) and data.contact else None
+    if is_certificate:
+        if data.email and not is_email(data.email):
+            raise FeedbackError("Проверьте адрес почты", 422)
+        contact = data.email
     message = FeedbackMessage(
         kind=data.kind,
         recipient=await _route(db, data.kind),
         text=data.text,
         certificate_purpose=purpose,
         certificate_copies=copies,
+        certificate_delivery=delivery,
+        certificate_address=address,
         group_id=author.group_id,
         author_name=author.full_name,
         author_id=author.id,
@@ -246,8 +333,7 @@ async def create_message(
     await db.flush()
     await db.refresh(message, ["group"])
 
-    # Заказы справок доступны методисту в админке с проверкой полномочий.
-    outbox = [] if is_certificate else _enqueue_to_recipient(db, message)
+    outbox = _enqueue_to_recipient(db, message)
     await db.commit()
     return message, [item.id for item in outbox]
 
@@ -321,16 +407,60 @@ async def update_message(db: AsyncSession, message_id: int, data: FeedbackUpdate
     return message, [item.id for item in outbox]
 
 
-async def add_reply(db: AsyncSession, message_id: int, text: str, admin: str) -> tuple[FeedbackMessage, list[int]]:
+def _clean_filename(name: str, suffix: str) -> str:
+    """Имя без пути и управляющих символов: оно попадёт в заголовки письма и ответа."""
+    stem = PurePath(name.replace("\\", "/")).name
+    stem = "".join(char for char in unicodedata.normalize("NFC", stem) if unicodedata.category(char)[0] != "C")
+    stem = stem.strip().strip(".") or "файл"
+    if not stem.lower().endswith(suffix):
+        stem += suffix
+    return stem if len(stem) <= 200 else stem[: 200 - len(suffix)] + suffix
+
+
+def check_attachments(files: list[AttachmentIn]) -> list[FeedbackAttachment]:
+    if len(files) > MAX_ATTACHMENTS:
+        raise FeedbackError(f"Можно приложить не больше {MAX_ATTACHMENTS} файлов", 422)
+    if sum(len(item.data) for item in files) > MAX_ATTACHMENTS_TOTAL:
+        raise FeedbackError("Файлы вместе больше 20 МБ — письмо с ними не дойдёт", 413)
+    result = []
+    for item in files:
+        name = item.filename[:100]
+        suffix = PurePath(item.filename.replace("\\", "/")).suffix.lower()
+        content_type = ATTACHMENT_TYPES.get(suffix)
+        if content_type is None:
+            raise FeedbackError(f"Файл «{name}»: можно PDF, фото (JPG, PNG, HEIC) или документ Word", 422)
+        if not item.data:
+            raise FeedbackError(f"Файл «{name}» пустой", 422)
+        if len(item.data) > MAX_ATTACHMENT_BYTES:
+            raise FeedbackError(f"Файл «{name}» больше 10 МБ", 413)
+        result.append(FeedbackAttachment(
+            filename=_clean_filename(item.filename, suffix), content_type=content_type,
+            size=len(item.data), data=item.data,
+        ))
+    return result
+
+
+async def add_reply(
+    db: AsyncSession, message_id: int, text: str, admin: str, files: list[AttachmentIn] | None = None,
+) -> tuple[FeedbackMessage, list[int]]:
+    attachments = check_attachments(files or [])
+    text = text.strip()
+    if not text and not attachments:
+        raise FeedbackError("Введите текст ответа или приложите файл", 422)
     message = await _get(db, message_id)
-    reply = FeedbackReply(author_kind="staff", author_name=admin, text=text.strip())
+    reply = FeedbackReply(author_kind="staff", author_name=admin, text=text, attachments=attachments)
     message.replies.append(reply)
     message.status = FeedbackStatus.ANSWERED.value
     await db.flush()
 
     outbox = _enqueue_answer(db, message, reply)
     await db.commit()
-    await db.refresh(message)
+    # Перечитываем переписку целиком: у ответов после commit нужны и файлы.
+    message = await db.scalar(
+        select(FeedbackMessage).where(FeedbackMessage.id == message_id)
+        .options(selectinload(FeedbackMessage.replies).selectinload(FeedbackReply.attachments))
+        .execution_options(populate_existing=True)
+    )
     return message, [item.id for item in outbox]
 
 
@@ -383,3 +513,29 @@ async def fill_authors_from_devices(db: AsyncSession, apply: bool) -> list[tuple
     if apply:
         await db.commit()
     return filled
+
+
+async def get_attachment(db: AsyncSession, attachment_id: int, author_id: int | None = None) -> FeedbackAttachment:
+    """Файл с содержимым. С author_id — только из обращений этого студента."""
+    query = (
+        select(FeedbackAttachment)
+        .options(undefer(FeedbackAttachment.data))
+        .join(FeedbackReply, FeedbackReply.id == FeedbackAttachment.reply_id)
+        .join(FeedbackMessage, FeedbackMessage.id == FeedbackReply.message_id)
+        .where(FeedbackAttachment.id == attachment_id)
+    )
+    if author_id is not None:
+        query = query.where(FeedbackMessage.author_id == author_id)
+    attachment = await db.scalar(query)
+    if attachment is None:
+        raise FeedbackError("файл не найден", 404)
+    return attachment
+
+
+async def reply_files(db: AsyncSession, reply_id: int) -> list[tuple[str, str, bytes]]:
+    """Вложения письма: (имя, тип, содержимое)."""
+    rows = await db.scalars(
+        select(FeedbackAttachment).options(undefer(FeedbackAttachment.data))
+        .where(FeedbackAttachment.reply_id == reply_id).order_by(FeedbackAttachment.id)
+    )
+    return [(item.filename, item.content_type, item.data) for item in rows]

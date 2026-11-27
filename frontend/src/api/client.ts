@@ -95,6 +95,29 @@ async function request<T>(path: string, { method = 'GET', body, token, feedbackT
   return response.json() as Promise<T>
 }
 
+/** Скачивает файл с авторизацией: обычная ссылка не передаст заголовок Bearer. */
+async function downloadFile(path: string, token: string, filename: string): Promise<void> {
+  let response: Response
+  try {
+    response = await fetch(BASE_URL + path, { headers: { Authorization: `Bearer ${token}` } })
+  } catch {
+    throw new ApiError('Нет связи с сервером расписания', 0)
+  }
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null)
+    throw new ApiError(payload?.detail ?? `Не удалось скачать файл (${response.status})`, response.status)
+  }
+  const url = URL.createObjectURL(await response.blob())
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.append(link)
+  link.click()
+  link.remove()
+  // Ссылку освобождаем позже: браузеру нужно время начать загрузку.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
+}
+
 export const api = {
   adminExams: (token: string, filters: { kind: string; course: string; group_id: string }) => {
     const params = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== ''))
@@ -181,8 +204,15 @@ export const api = {
   },
   updateFeedback: (token: string, id: number, body: FeedbackUpdate) =>
     request<AdminFeedback>(`/admin/feedback/${id}`, { method: 'PATCH', body, token }),
-  replyFeedback: (token: string, id: number, text: string) =>
-    request<AdminFeedback>(`/admin/feedback/${id}/replies`, { method: 'POST', body: { text }, token }),
+  replyFeedback: (token: string, id: number, text: string, files: File[] = []) => {
+    if (!files.length) return request<AdminFeedback>(`/admin/feedback/${id}/replies`, { method: 'POST', body: { text }, token })
+    const body = new FormData()
+    body.append('text', text)
+    files.forEach((file) => body.append('files', file))
+    return request<AdminFeedback>(`/admin/feedback/${id}/replies/files`, { method: 'POST', body, token })
+  },
+  /** Файл из ответа: студент — `/feedback/attachments/…`, админ — `/admin/feedback/attachments/…`. */
+  downloadAttachment: (path: string, token: string, filename: string) => downloadFile(path, token, filename),
   feedbackRecipients: (token: string) => request<FeedbackRecipient[]>('/admin/feedback/recipients', { token }),
   updateRecipient: (token: string, id: number, body: RecipientUpdate) =>
     request<FeedbackRecipient>(`/admin/feedback/recipients/${id}`, { method: 'PATCH', body, token }),

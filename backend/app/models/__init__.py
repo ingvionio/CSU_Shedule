@@ -13,7 +13,7 @@ from app.models.enums import (
     WeekParity,
 )
 from app.models.exam import ExamEvent, ExamImport, exam_event_groups
-from app.models.feedback import EmailOutbox, FeedbackMessage, FeedbackRecipient, FeedbackReply
+from app.models.feedback import EmailOutbox, FeedbackAttachment, FeedbackMessage, FeedbackRecipient, FeedbackReply
 from app.models.lesson import Lesson, LessonOverride, ScheduleImport
 from app.models.message import Message, MessageRecipient
 from app.models.homework import GroupEditor, GroupHomework, HomeworkCompletion, HomeworkRevision
@@ -32,6 +32,7 @@ __all__ = [
     "exam_event_groups",
     "EmailOutbox",
     "EmailStatus",
+    "FeedbackAttachment",
     "FeedbackKind",
     "FeedbackMessage",
     "FeedbackRecipient",

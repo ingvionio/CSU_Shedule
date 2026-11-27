@@ -1,11 +1,13 @@
 import { ContextHelp } from '../../ContextHelp'
 import { useState, type FormEvent } from 'react'
-import { CheckCircle2, FileText, RefreshCw, Send } from 'lucide-react'
+import { CheckCircle2, FileText, Paperclip, RefreshCw, Send } from 'lucide-react'
 
+import { api } from '../../api/client'
 import { useSendFeedback, type useMyFeedback } from '../../api/queries'
+import { asStudent } from '../../api/student'
 import type { StudentProfile } from '../../api/types'
-import type { MyFeedback, QuestionKind } from '../../types'
-import { KIND_OPTIONS, STATUS_TITLES, feedbackDate, isEmail } from './labels'
+import type { CertificateDelivery, FeedbackAttachment, MyFeedback, QuestionKind } from '../../types'
+import { DELIVERY_OPTIONS, DELIVERY_TITLES, KIND_OPTIONS, STATUS_TITLES, feedbackDate, fileSize, isEmail } from './labels'
 
 type Tab = 'write' | 'mine'
 
@@ -188,19 +190,45 @@ function FeedbackForm({ profile, onShowMine }: { profile: StudentProfile; onShow
 function CertificateForm({ profile, onShowMine }: { profile: StudentProfile; onShowMine: () => void }) {
   const [purpose, setPurpose] = useState('')
   const [copies, setCopies] = useState('')
+  const [delivery, setDelivery] = useState<CertificateDelivery | null>(null)
+  const [address, setAddress] = useState('')
+  const [email, setEmail] = useState('')
   const [text, setText] = useState('')
   const [website, setWebsite] = useState('')
   const [orderId, setOrderId] = useState<number | null>(null)
+  const [formError, setFormError] = useState('')
   const send = useSendFeedback()
   const groupName = profile.group_name
   const hasGroup = profile.group_id !== null && Boolean(groupName)
 
+  /** Почему заказ нельзя отправить; пустая строка — можно. Остальное проверяет сам браузер. */
+  const problem = !delivery
+    ? 'Выберите, как получить справку.'
+    : delivery === 'post' && !address.trim()
+      ? 'Укажите почтовый адрес с индексом.'
+      : delivery === 'scan' && !isEmail(email)
+        ? 'Укажите почту, на которую прислать скан.'
+        : email.trim() && !isEmail(email)
+          ? 'Проверьте адрес почты.'
+          : ''
+
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     const count = Number(copies)
-    if (send.isPending || !hasGroup || !purpose.trim() || !Number.isInteger(count) || count < 1 || count > MAX_CERTIFICATE_COPIES) return
+    setFormError(problem)
+    if (send.isPending || !hasGroup || !delivery || problem || !purpose.trim()
+      || !Number.isInteger(count) || count < 1 || count > MAX_CERTIFICATE_COPIES) return
     try {
-      const order = await send.mutateAsync({ kind: 'certificate', purpose: purpose.trim(), copies: count, text, website })
+      const order = await send.mutateAsync({
+        kind: 'certificate',
+        purpose: purpose.trim(),
+        copies: count,
+        delivery,
+        address: delivery === 'post' ? address.trim() : null,
+        email: email.trim() || null,
+        text,
+        website,
+      })
       setOrderId(order.id)
     } catch {
       // Ошибка показывается из send.error.
@@ -212,7 +240,9 @@ function CertificateForm({ profile, onShowMine }: { profile: StudentProfile; onS
       <div className="screen-card selection-screen feedback-sent">
         <span className="feedback-sent-icon"><CheckCircle2 size={22} /></span>
         <h1 role="status">Справка заказана · №{orderId}</h1>
-        <p className="muted">Следите за статусом и ответом методиста в разделе «Мои обращения».</p>
+        <p className="muted">
+          Следите за статусом и ответом методиста в разделе «Мои обращения»{isEmail(email) ? '. Ответ придёт и на почту' : ''}.
+        </p>
         <button type="button" className="button button-primary full" onClick={onShowMine}>Мои обращения</button>
       </div>
     )
@@ -228,7 +258,7 @@ function CertificateForm({ profile, onShowMine }: { profile: StudentProfile; onS
       </dl>
       {!hasGroup && <p className="form-error" role="alert">В профиле Moodle не указана учебная группа.</p>}
 
-      <label className="field-label" htmlFor="certificate-purpose">Для чего нужна справка <span className="optional">— обязательно</span></label>
+      <label className="field-label" htmlFor="certificate-purpose">В какое учреждение требуется <span className="optional">— обязательно</span></label>
       <input
         id="certificate-purpose"
         className="text-field"
@@ -236,11 +266,11 @@ function CertificateForm({ profile, onShowMine }: { profile: StudentProfile; onS
         pattern={'.*\\S.*'}
         maxLength={4000}
         value={purpose}
-        placeholder="Например, для предоставления работодателю"
+        placeholder="Например, на работу"
         onChange={(event) => setPurpose(event.target.value)}
       />
 
-      <label className="field-label" htmlFor="certificate-copies">Количество экземпляров <span className="optional">— обязательно</span></label>
+      <label className="field-label" htmlFor="certificate-copies">Количество справок <span className="optional">— обязательно</span></label>
       <input
         id="certificate-copies"
         className="text-field"
@@ -252,6 +282,52 @@ function CertificateForm({ profile, onShowMine }: { profile: StudentProfile; onS
         step={1}
         value={copies}
         onChange={(event) => setCopies(event.target.value)}
+      />
+
+      <span className="field-label" id="certificate-delivery">Способ получения <span className="optional">— обязательно</span></span>
+      <div className="certificate-delivery" role="radiogroup" aria-labelledby="certificate-delivery">
+        {DELIVERY_OPTIONS.map((option) => (
+          <button
+            type="button"
+            key={option.value}
+            role="radio"
+            aria-checked={delivery === option.value}
+            className={`choice ${delivery === option.value ? 'selected' : ''}`}
+            onClick={() => setDelivery(option.value)}
+          >{option.label}</button>
+        ))}
+      </div>
+
+      {delivery === 'post' && <>
+        <label className="field-label" htmlFor="certificate-address">Почтовый адрес с индексом <span className="optional">— обязательно</span></label>
+        <textarea
+          id="certificate-address"
+          className="text-field text-area"
+          rows={2}
+          required
+          maxLength={500}
+          autoComplete="street-address"
+          placeholder="454001, г. Челябинск, ул. Братьев Кашириных, д. 129, кв. 1"
+          value={address}
+          onChange={(event) => setAddress(event.target.value)}
+        />
+      </>}
+
+      <label className="field-label" htmlFor="certificate-email">
+        Почта {delivery === 'scan'
+          ? <span className="optional">— обязательно, сюда придёт скан</span>
+          : <span className="optional">— необязательно, сюда придёт ответ</span>}
+      </label>
+      <input
+        id="certificate-email"
+        className="text-field"
+        type="email"
+        required={delivery === 'scan'}
+        maxLength={200}
+        autoComplete="email"
+        placeholder="name@mail.ru"
+        value={email}
+        onChange={(event) => setEmail(event.target.value)}
       />
 
       <label className="field-label" htmlFor="certificate-text">Дополнительная информация <span className="optional">— необязательно</span></label>
@@ -271,6 +347,7 @@ function CertificateForm({ profile, onShowMine }: { profile: StudentProfile; onS
         value={website}
         onChange={(event) => setWebsite(event.target.value)}
       />
+      {formError && problem && <p className="form-error" role="alert">{problem}</p>}
       {send.error && <p className="form-error" role="alert">{send.error.message}</p>}
       <button className="button button-primary full" type="submit" disabled={send.isPending || !hasGroup}>
         <Send size={16} />{send.isPending ? 'Отправляем…' : 'Отправить заказ'}
@@ -324,15 +401,18 @@ function MyFeedbackList({
           </div>
           {item.kind === 'certificate' && item.purpose && (
             <dl className="feedback-meta">
-              <dt>Для чего</dt><dd>{item.purpose}</dd>
-              <dt>Экземпляров</dt><dd>{item.copies}</dd>
+              <dt>Куда</dt><dd>{item.purpose}</dd>
+              <dt>Справок</dt><dd>{item.copies}</dd>
+              {item.delivery && <><dt>Получение</dt><dd>{DELIVERY_TITLES[item.delivery]}{item.address ? `: ${item.address}` : ''}</dd></>}
             </dl>
           )}
           {item.text && <p className="feedback-text">{item.text}</p>}
           {item.replies.map((reply) => (
             <div key={reply.id} className={`feedback-reply ${reply.author_kind}`}>
               <b>{reply.author_title} · {feedbackDate(reply.created_at)}</b>
-              <p className="feedback-text">{reply.text}</p>
+              {reply.text && <p className="feedback-text">{reply.text}</p>}
+              <AttachmentList items={reply.attachments}
+                download={(file) => asStudent((token) => api.downloadAttachment(`/feedback/attachments/${file.id}`, token, file.filename))} />
             </div>
           ))}
           {update && (
@@ -342,6 +422,41 @@ function MyFeedbackList({
           )}
         </article>
       })}
+    </div>
+  )
+}
+
+/** Файлы ответа. Скачивание идёт через API с авторизацией. */
+export function AttachmentList({ items, download }: {
+  items?: FeedbackAttachment[]
+  download: (file: FeedbackAttachment) => Promise<void>
+}) {
+  const [busy, setBusy] = useState<number | null>(null)
+  const [error, setError] = useState('')
+  if (!items?.length) return null
+
+  const open = async (file: FeedbackAttachment) => {
+    setBusy(file.id)
+    setError('')
+    try {
+      await download(file)
+    } catch (reason) {
+      setError((reason as Error).message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div className="feedback-attachments">
+      {items.map((file) => (
+        <button key={file.id} type="button" className="feedback-attachment" disabled={busy === file.id} onClick={() => open(file)}>
+          <Paperclip size={14} />
+          <span>{file.filename}</span>
+          <small>{busy === file.id ? 'скачиваем…' : fileSize(file.size)}</small>
+        </button>
+      ))}
+      {error && <p className="form-error" role="alert">{error}</p>}
     </div>
   )
 }

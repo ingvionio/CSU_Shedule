@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.security import require_admin, require_student_profile
-from app.models import FeedbackKind, FeedbackMessage, FeedbackRecipient, FeedbackReply, User
+from app.models import FeedbackAttachment, FeedbackKind, FeedbackMessage, FeedbackRecipient, FeedbackReply, User
 from app.schemas.feedback import (
     AdminFeedbackOut,
+    AttachmentOut,
     AdminReplyOut,
     FeedbackCreatedOut,
     FeedbackSubmission,
@@ -38,6 +41,24 @@ def _reply_title(message: FeedbackMessage, reply: FeedbackReply) -> str:
     return KIND_TITLES[feedback_service.recipient_kind(message.kind)] if reply.author_kind == "staff" else "Вы"
 
 
+def _attachments(reply: FeedbackReply) -> list[AttachmentOut]:
+    return [
+        AttachmentOut(id=item.id, filename=item.filename, content_type=item.content_type, size=item.size)
+        for item in reply.attachments
+    ]
+
+
+def _file_response(attachment: FeedbackAttachment) -> Response:
+    ascii_name = attachment.filename.encode("ascii", "replace").decode().replace('"', "_").replace("?", "_")
+    return Response(
+        attachment.data,
+        media_type=attachment.content_type,
+        headers={
+            "Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(attachment.filename)}",
+        },
+    )
+
+
 def _my_out(message: FeedbackMessage) -> MyFeedbackOut:
     return MyFeedbackOut(
         id=message.id,
@@ -46,6 +67,8 @@ def _my_out(message: FeedbackMessage) -> MyFeedbackOut:
         text=message.text,
         purpose=message.certificate_purpose,
         copies=message.certificate_copies,
+        delivery=message.certificate_delivery,
+        address=message.certificate_address,
         status=message.status,
         created_at=message.created_at,
         replies=[
@@ -55,6 +78,7 @@ def _my_out(message: FeedbackMessage) -> MyFeedbackOut:
                 author_title=_reply_title(message, reply),
                 text=reply.text,
                 created_at=reply.created_at,
+                attachments=_attachments(reply),
             )
             for reply in message.replies
         ],
@@ -70,6 +94,8 @@ def _admin_out(message: FeedbackMessage) -> AdminFeedbackOut:
         text=message.text,
         purpose=message.certificate_purpose,
         copies=message.certificate_copies,
+        delivery=message.certificate_delivery,
+        address=message.certificate_address,
         status=message.status,
         group_id=message.group_id,
         group_name=message.group.name if message.group else None,
@@ -86,6 +112,7 @@ def _admin_out(message: FeedbackMessage) -> AdminFeedbackOut:
                 author_name=reply.author_name,
                 text=reply.text,
                 created_at=reply.created_at,
+                attachments=_attachments(reply),
             )
             for reply in message.replies
         ],
@@ -149,6 +176,18 @@ async def my_feedback(
     db: AsyncSession = Depends(get_db, scope="function"),
 ) -> list[MyFeedbackOut]:
     return [_my_out(message) for message in await feedback_service.list_for_student(db, author.id)]
+
+
+@router.get("/feedback/attachments/{attachment_id}", summary="Скачать файл из ответа на своё обращение")
+async def my_attachment(
+    attachment_id: int,
+    author: User = Depends(require_student_profile),
+    db: AsyncSession = Depends(get_db, scope="function"),
+) -> Response:
+    try:
+        return _file_response(await feedback_service.get_attachment(db, attachment_id, author.id))
+    except feedback_service.FeedbackError as error:
+        raise _raise(error) from error
 
 
 # --- админка ---
@@ -221,4 +260,42 @@ async def reply_feedback(
         message, _ = await feedback_service.add_reply(db, message_id, data.text, admin)
     except feedback_service.FeedbackError as error:
         raise _raise(error) from error
+    return _admin_out(message)
+
+
+@admin_router.get("/attachments/{attachment_id}", summary="Скачать файл из ответа")
+async def admin_attachment(attachment_id: int, db: AsyncSession = Depends(get_db, scope="function")) -> Response:
+    try:
+        return _file_response(await feedback_service.get_attachment(db, attachment_id))
+    except feedback_service.FeedbackError as error:
+        raise _raise(error) from error
+
+
+@admin_router.post(
+    "/{message_id}/replies/files",
+    response_model=AdminFeedbackOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Ответить студенту с файлами (скан справки)",
+)
+async def reply_feedback_with_files(
+    message_id: int,
+    text: str = Form(default="", max_length=4000),
+    files: list[UploadFile] = File(default_factory=list),
+    db: AsyncSession = Depends(get_db, scope="function"),
+    admin: str = Depends(require_admin),
+) -> AdminFeedbackOut:
+    try:
+        ReplyIn.check_controls_only(text)
+        uploads = []
+        for upload in files[: feedback_service.MAX_ATTACHMENTS + 1]:
+            data = await upload.read(feedback_service.MAX_ATTACHMENT_BYTES + 1)
+            uploads.append(feedback_service.AttachmentIn(upload.filename or "файл", data))
+        message, _ = await feedback_service.add_reply(db, message_id, text, admin, uploads)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+    except feedback_service.FeedbackError as error:
+        raise _raise(error) from error
+    finally:
+        for upload in files:
+            await upload.close()
     return _admin_out(message)
