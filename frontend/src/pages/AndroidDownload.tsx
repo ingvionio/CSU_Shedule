@@ -3,6 +3,7 @@ import { Capacitor } from '@capacitor/core'
 import { useEffect, useRef } from 'react'
 
 import { track } from '../api/analytics'
+import { ThemeSetting } from '../ThemeSetting'
 
 // APK публикуется на сервере после сборки и отсутствует в ресурсах WebView.
 const apkDownloadOrigin = import.meta.env.VITE_APK_DOWNLOAD_ORIGIN ?? (Capacitor.isNativePlatform() ? 'https://iit-app.ru' : '')
@@ -28,6 +29,7 @@ export function AndroidDownload() {
         Скачать APK <Download size={16} aria-hidden="true" />
       </a>
       <a href="/#/landing">На главную</a>
+      <ThemeSetting />
     </main>
   )
 }

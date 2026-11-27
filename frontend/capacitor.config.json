@@ -6,6 +6,9 @@
     "androidScheme": "https"
   },
   "plugins": {
+    "SystemBars": {
+      "initialViewportFitValueHint": "cover"
+    },
     "PushNotifications": {
       "presentationOptions": []
     }

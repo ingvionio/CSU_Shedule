@@ -2,10 +2,24 @@ import React, { Suspense, lazy } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { registerSW } from 'virtual:pwa-register'
+import { Capacitor, SystemBars, SystemBarsStyle } from '@capacitor/core'
+import { StatusBar, Style } from '@capacitor/status-bar'
 
 import { App } from './App'
 import { AndroidDownload } from './pages/AndroidDownload'
-import './styles.css'
+
+if (Capacitor.getPlatform() === 'android' && window.iitTheme) {
+  const syncBars = () => {
+    const dark = document.documentElement.dataset.theme === 'dark'
+    // Оба плагина восстанавливают собственный стиль при смене конфигурации Android.
+    void Promise.allSettled([
+      SystemBars.setStyle({ style: dark ? SystemBarsStyle.Dark : SystemBarsStyle.Light }),
+      StatusBar.setStyle({ style: dark ? Style.Dark : Style.Light }),
+    ])
+  }
+  window.iitTheme.subscribe(syncBars)
+  syncBars()
+}
 
 // Service worker: офлайн-статика и push-уведомления. Новая версия ставится сама.
 registerSW({ immediate: true })

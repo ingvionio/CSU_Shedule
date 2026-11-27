@@ -85,12 +85,12 @@ export function MoodleLogin({ onLogin, onGoToAdmin }: MoodleLoginProps) {
           alignItems: 'center',
           gap: '8px',
           fontSize: '11px',
-          color: '#6c757d',
+          color: 'var(--moodle-hint)',
           marginTop: '6px',
           marginBottom: '14px',
         }}
       >
-        <ShieldCheck size={16} style={{ color: '#28a745', flexShrink: 0 }} />
+        <ShieldCheck size={16} style={{ color: 'var(--moodle-verified)', flexShrink: 0 }} />
         <span>Пароль используется только для входа в Moodle и не сохраняется в сервисе.</span>
       </div>
 

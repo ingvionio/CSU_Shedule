@@ -6,6 +6,7 @@ import { clearProductSession, readProductSession, writeProductSession } from '..
 import { ApiError, api } from '../../api/client'
 import type { AdminSession, ProductSummary, ProductUserFilters } from '../../api/types'
 import { AreaChart } from './charts'
+import { ThemeSetting } from '../../ThemeSetting'
 import { coursesOf } from './courses'
 import {
   COUNT_GROUPS, FEATURE_LABELS, conversion, eventLabel, formatDateTime, formatDay, percent, platformLabel,
@@ -37,13 +38,9 @@ function useRoute(): [Route, (next: string) => void] {
   return [route, (next) => { window.location.hash = next }]
 }
 
-/** ЛК продукта: статистика для разработчиков и менеджера продукта. Открывается по /statistic. Тёмная тема. */
+/** ЛК продукта: статистика для разработчиков и менеджера продукта. Открывается по /statistic. */
 export function ProductStatistics() {
   const [session, setSession] = useState<AdminSession | null>(() => readProductSession())
-  useEffect(() => {
-    document.body.classList.add('pl-body')
-    return () => document.body.classList.remove('pl-body')
-  }, [])
   const login = (next: AdminSession) => {
     writeProductSession(next)
     setSession(next)
@@ -90,6 +87,7 @@ function Login({ onLogin }: { onLogin: (session: AdminSession) => void }) {
         {error && <p className="pl-error" role="alert">{error}</p>}
         <button className="pl-button pl-button-primary" disabled={busy || !login.trim() || !password}>{busy ? 'Входим…' : 'Войти'}</button>
       </form>
+      <ThemeSetting />
     </main>
   )
 }
@@ -127,6 +125,7 @@ function Shell({ token, onLogout }: { token: string; onLogout: () => void }) {
           {nav('overview', 'Обзор', <BarChart3 size={16} />, '#/')}
           {nav('users', 'Пользователи', <Users size={16} />, '#/users')}
         </nav>
+        <ThemeSetting />
         <button className="pl-sidebar-logout" onClick={onLogout}><LogOut size={15} />Выйти</button>
       </aside>
       <main className="pl-main">

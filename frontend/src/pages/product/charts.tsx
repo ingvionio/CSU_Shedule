@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 
 /** Цвет ряда на тёмной поверхности (синий из проверенной категориальной палитры, тёмный шаг). */
-export const SERIES_COLOR = '#3987e5'
+const SERIES_COLOR = 'var(--primary)'
 
 function useWidth<T extends HTMLElement>(): [React.RefObject<T>, number] {
   const ref = useRef<T>(null)
@@ -84,7 +84,7 @@ export function AreaChart({ dates, values, label }: { dates: string[]; values: n
           {hover !== null && (
             <g>
               <line className="pl-crosshair" x1={x(hover)} x2={x(hover)} y1={margin.top} y2={margin.top + plotHeight} />
-              <circle cx={x(hover)} cy={y(values[hover] ?? 0)} r={4} fill={SERIES_COLOR} stroke="var(--pl-surface)" strokeWidth={2} />
+              <circle cx={x(hover)} cy={y(values[hover] ?? 0)} r={4} fill={SERIES_COLOR} stroke="var(--surface)" strokeWidth={2} />
             </g>
           )}
           <rect x={margin.left} y={margin.top} width={plotWidth} height={plotHeight} fill="transparent"
