@@ -18,6 +18,7 @@ import { useNavigation } from './navigation'
 import { Capacitor } from '@capacitor/core'
 import { startNativePush } from './api/native-push'
 import { ContextHelp } from './ContextHelp'
+import { ThemeSetting } from './ThemeSetting'
 import { Landing } from './pages/Landing'
 import { Help } from './pages/Help'
 import { CampusMap } from './pages/CampusMap'
@@ -437,14 +438,15 @@ export function App() {
           <div className="role-switch-menu" ref={menuRef}>
             <span>МЕНЮ</span>
             {studentSession && (
-              <div style={{ padding: '6px 12px', fontSize: '12px', color: '#666', borderBottom: '1px solid #eee' }}>
-                <div style={{ fontWeight: 600, color: '#212529' }}>{studentSession.profile.full_name}</div>
+              <div className="menu-profile">
+                <strong>{studentSession.profile.full_name}</strong>
                 <div>Группа: {studentSession.profile.group_name ?? 'не определена'}</div>
               </div>
             )}
             <button onClick={() => nav('landing')}>О проекте</button>
             <button onClick={() => nav('help')}>Помощь</button>
             <button onClick={() => nav('admin')}>Администрирование расписания</button>
+            <ThemeSetting />
             {studentSession && <button onClick={handleStudentLogout}>Выйти на всех устройствах</button>}
             {adminSession && <button onClick={endAdminSession} disabled={adminLogoutPending}>Выйти из админки</button>}
             {adminSession && adminLogoutError && <p className="form-error" role="alert">{adminLogoutError}</p>}
@@ -477,17 +479,17 @@ export function App() {
                     <p className="muted">Данные синхронизированы с платформой Moodle ЧелГУ.</p>
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', marginTop: '1.25rem' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color, #e9ecef)', paddingBottom: '0.6rem' }}>
+                      <div className="profile-detail">
                         <span className="field-label" style={{ margin: 0 }}>ФИО</span>
                         <strong>{studentSession.profile.full_name}</strong>
                       </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color, #e9ecef)', paddingBottom: '0.6rem' }}>
+                      <div className="profile-detail">
                         <span className="field-label" style={{ margin: 0 }}>Логин Moodle</span>
                         <span>@{studentSession.profile.moodle_username}</span>
                       </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color, #e9ecef)', paddingBottom: '0.6rem' }}>
+                      <div className="profile-detail">
                         <span className="field-label" style={{ margin: 0 }}>Академическая группа</span>
-                        <strong style={{ color: 'var(--primary, #1971c2)' }}>
+                        <strong className="profile-group">
                           {selectedGroup?.name ?? studentSession.profile.group_name ?? '—'}
                         </strong>
                       </div>
@@ -498,6 +500,7 @@ export function App() {
                     </div>
 
                     <div className="profile-actions">
+                      <ThemeSetting />
                       <button className="button button-secondary profile-certificate-action" onClick={() => nav('feedback/certificate')}>
                         Заказать справку
                       </button>

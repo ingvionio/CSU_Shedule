@@ -352,7 +352,7 @@ export function WeekGrid({
   }
 
   return (
-    <div className="week-grid-scroll">
+    <div className="week-grid-scroll" role="region" aria-label="Сетка расписания на неделю" tabIndex={0}>
       <div className="week-grid" style={{ gridTemplateRows: `auto ${hasUntimed ? 'auto ' : ''}repeat(${slots.length}, 1fr)`,
         gridTemplateColumns: `var(--grid-time-width, 48px) repeat(${days.length}, minmax(var(--grid-day-width, 104px), 1fr))` }}>
         <div className="grid-corner" />
