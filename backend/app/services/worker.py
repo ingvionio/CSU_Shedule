@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
@@ -20,6 +20,7 @@ from app.models import EmailOutbox, Group, Message, PushDelivery, PushSubscripti
 from app.schemas.message import MessageIn
 from app.services import messages, product_events
 from app.services import fcm, mailer, push
+from app.services import feedback as feedback_service
 
 logger = logging.getLogger(__name__)
 LEASE = timedelta(minutes=5)
@@ -182,12 +183,19 @@ async def process_email(db: AsyncSession, now: datetime, sender: EmailSender | N
         return result
     rows = (await db.scalars(select(EmailOutbox).where(EmailOutbox.id.in_([item.id for item in claimed])))).all()
     letters = {item.id: mailer.EmailData(item.to_address, item.reply_to, item.subject, item.body) for item in rows}
+    reply_ids = {item.id: item.reply_id for item in rows if item.reply_id is not None}
     await db.commit()
     for item in claimed:
         if item.id not in letters:
             continue
         try:
-            outcome = await (sender or mailer.send_one)(letters[item.id])
+            letter = letters.pop(item.id)
+            if item.id in reply_ids:
+                # Вложения читаются по одному письму, чтобы не держать в памяти всю пачку.
+                files = await feedback_service.reply_files(db, reply_ids[item.id])
+                await db.commit()
+                letter = replace(letter, attachments=tuple(files))
+            outcome = await (sender or mailer.send_one)(letter)
         except Exception as error:
             outcome = mailer.SendResult("retry", f"Ошибка отправки SMTP ({type(error).__name__})")
         status = await _finish(db, EmailOutbox, item, outcome.status, outcome.error, now, mailer.MAX_ATTEMPTS)

@@ -140,7 +140,7 @@ def test_migration_chain_runs_through_async_environment(tmp_path, monkeypatch):
     config = Config("alembic.ini")
     scripts = ScriptDirectory.from_config(config)
     chain = [revision.revision for revision in scripts.walk_revisions()]
-    expected = ["fb43e912ac62", "fa39c812bf51", "f9a9b1c2d350", "f8a9b1c2d349", "f7a9b1c2d348", "f6e8a0b2c357",
+    expected = ["fc61d2a7e930", "fb43e912ac62", "fa39c812bf51", "f9a9b1c2d350", "f8a9b1c2d349", "f7a9b1c2d348", "f6e8a0b2c357",
                 "f5d7e9a1b246", "f4c6d8e0a135", "f3b5c7d9e024", "f3b5c7d9e124", "a7d9e2c4b816", "f2a4b6c8d013"]
     assert scripts.get_heads() == [expected[0]]
     assert chain[:len(expected)] == expected

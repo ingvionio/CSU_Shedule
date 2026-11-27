@@ -141,14 +141,28 @@ test('certificate order requires purpose and an integer number of copies', async
   assert.equal(count.required, true)
   assert.equal(count.min, 1)
   assert.equal(count.step, 1)
-  for (const [purpose, copies] of [['', '2'], ['  ', '2'], ['Для вуза', ''], ['Для вуза', '0'], ['Для вуза', '1.5']]) {
-    formValues = [purpose, copies]
+  // Порядок useState в CertificateForm: цель, количество, способ, адрес, почта.
+  for (const values of [['', '2', 'pickup'], ['  ', '2', 'pickup'], ['Для вуза', '', 'pickup'], ['Для вуза', '0', 'pickup'],
+    ['Для вуза', '1.5', 'pickup'], ['Для вуза', '2'], ['Для вуза', '2', 'post', '  '], ['Для вуза', '2', 'scan', '', ''],
+    ['Для вуза', '2', 'scan', '', 'не почта'], ['Для вуза', '2', 'pickup', '', 'a@b']]) {
+    formValues = values
     await component.type(component.props).props.onSubmit({ preventDefault() {} })
   }
   assert.deepEqual(submissions, [])
-  formValues = [' Для вуза ', '2']
+  formValues = [' Для вуза ', '2', 'pickup', 'не нужен']
   await component.type(component.props).props.onSubmit({ preventDefault() {} })
-  assert.deepEqual(submissions, [{ kind: 'certificate', purpose: 'Для вуза', copies: 2, text: '', website: '' }])
+  formValues = ['Для вуза', '1', 'post', ' 454001, Челябинск ', ' me@mail.ru ']
+  await component.type(component.props).props.onSubmit({ preventDefault() {} })
+  formValues = ['Для вуза', '1', 'scan', '', 'me@mail.ru']
+  const scanForm = component.type(component.props)
+  assert.equal(nodes(scanForm).find(node => node.props?.id === 'certificate-email').props.required, true)
+  await scanForm.props.onSubmit({ preventDefault() {} })
+  const base = { kind: 'certificate', purpose: 'Для вуза', text: '', website: '' }
+  assert.deepEqual(submissions, [
+    { ...base, copies: 2, delivery: 'pickup', address: null, email: null },
+    { ...base, copies: 1, delivery: 'post', address: '454001, Челябинск', email: 'me@mail.ru' },
+    { ...base, copies: 1, delivery: 'scan', address: null, email: 'me@mail.ru' },
+  ])
 })
 
 test('certificate history has a badge and the admin card has status and reply controls', () => {
@@ -181,7 +195,8 @@ test('certificate history has a badge and the admin card has status and reply co
   assert.match(admin, /ЗАКАЗ СПРАВКИ №17/)
   assert.match(admin, /<dd>Иванов Иван<\/dd>/)
   assert.match(admin, /<dd>ПИ 201<\/dd>/)
-  assert.match(admin, /<dt>Количество экземпляров<\/dt><dd>2<\/dd>/)
+  assert.match(admin, /<dt>Количество справок<\/dt><dd>2<\/dd>/)
+  assert.match(admin, /Прикрепить файл/)
   assert.match(admin, /Ответ студенту/)
   assert.match(admin, /<option value="archived">Закрыто<\/option>/)
   assert.doesNotMatch(admin, /<span>Папка<\/span>/)

@@ -158,6 +158,8 @@ export type Catalog = {
 export type QuestionKind = 'dev' | 'methodist' | 'deanery' | 'unknown'
 export type FeedbackKind = QuestionKind | 'certificate'
 export type FeedbackStatus = 'new' | 'in_progress' | 'answered' | 'archived'
+/** Способ получения справки: лично, скан на почту или Почтой России. */
+export type CertificateDelivery = 'pickup' | 'scan' | 'post'
 
 export type FeedbackInput = {
   kind: QuestionKind
@@ -170,8 +172,20 @@ export type FeedbackInput = {
   kind: 'certificate'
   purpose: string
   copies: number
+  delivery: CertificateDelivery
+  /** Почтовый адрес с индексом — для `post`. */
+  address?: string | null
+  /** Куда прислать скан — для `scan`, для остальных необязательно. */
+  email?: string | null
   text?: string
   website?: string
+}
+
+export type FeedbackAttachment = {
+  id: number
+  filename: string
+  content_type: string
+  size: number
 }
 
 export type FeedbackReply = {
@@ -181,6 +195,7 @@ export type FeedbackReply = {
   author_title: string
   text: string
   created_at: string
+  attachments: FeedbackAttachment[]
 }
 
 export type MyFeedback = {
@@ -190,6 +205,8 @@ export type MyFeedback = {
   text: string
   purpose: string | null
   copies: number | null
+  delivery: CertificateDelivery | null
+  address: string | null
   status: FeedbackStatus
   created_at: string
   replies: FeedbackReply[]

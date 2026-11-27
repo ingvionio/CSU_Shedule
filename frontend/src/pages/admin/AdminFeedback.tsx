@@ -1,12 +1,19 @@
 import { ContextHelp } from '../../ContextHelp'
 import { adminHelpItems } from './helpContent'
-import { useEffect, useState } from 'react'
-import { Mail, RefreshCw, Send, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Mail, Paperclip, RefreshCw, Send, X } from 'lucide-react'
 
-import { ApiError } from '../../api/client'
+import { ApiError, api } from '../../api/client'
 import { useAdminFeedback, useFeedbackFolders, useFeedbackMutations, useFeedbackRecipients } from '../../api/queries'
 import type { AdminFeedback as Feedback, FeedbackKind, FeedbackRecipient, FeedbackStatus, QuestionKind } from '../../types'
-import { KIND_TITLES, STATUS_TITLES, feedbackDate } from '../feedback/labels'
+import { AttachmentList } from '../feedback/StudentFeedback'
+import { DELIVERY_TITLES, KIND_TITLES, STATUS_TITLES, feedbackDate, fileSize } from '../feedback/labels'
+
+/** Как на бэкенде: services/feedback.py. */
+const MAX_FILES = 5
+const MAX_FILE_BYTES = 10 * 1024 * 1024
+const MAX_TOTAL_BYTES = 20 * 1024 * 1024
+const FILE_TYPES = '.pdf,.jpg,.jpeg,.png,.heic,.doc,.docx,.odt,.rtf'
 
 const QUESTION_FOLDERS: QuestionKind[] = ['unknown', 'methodist', 'deanery', 'dev']
 const FOLDERS: FeedbackKind[] = [...QUESTION_FOLDERS, 'certificate']
@@ -140,6 +147,8 @@ function FeedbackDialog({
   onUnauthorized: () => void
 }) {
   const [answer, setAnswer] = useState('')
+  const [files, setFiles] = useState<File[]>([])
+  const fileInput = useRef<HTMLInputElement>(null)
   const [note, setNote] = useState(item.admin_note ?? '')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -163,10 +172,26 @@ function FeedbackDialog({
     }
   }
 
+  const filesProblem = files.length > MAX_FILES
+    ? `Можно приложить не больше ${MAX_FILES} файлов.`
+    : files.find((file) => file.size > MAX_FILE_BYTES)
+      ? 'Файл больше 10 МБ — уменьшите скан.'
+      : files.reduce((sum, file) => sum + file.size, 0) > MAX_TOTAL_BYTES
+        ? 'Файлы вместе больше 20 МБ — письмо с ними не дойдёт.'
+        : ''
+
+  const addFiles = (picked: FileList | null) => {
+    if (picked) setFiles((previous) => [...previous, ...Array.from(picked)])
+    if (fileInput.current) fileInput.current.value = ''
+  }
+
   const sendAnswer = () => run(async () => {
-    await reply.mutateAsync({ id: item.id, text: answer.trim() })
+    await reply.mutateAsync({ id: item.id, text: answer.trim(), files })
     setAnswer('')
-  }, item.contact_is_email ? 'Ответ отправлен: в приложение и на почту студента.' : 'Ответ отправлен в приложение.')
+    setFiles([])
+  }, item.contact_is_email
+    ? `Ответ${files.length ? ' с файлами' : ''} отправлен: в приложение и на почту студента.`
+    : `Ответ${files.length ? ' с файлами' : ''} отправлен в приложение.`)
 
   const move = (kind: QuestionKind) => run(
     () => update.mutateAsync({ id: item.id, body: { kind } }),
@@ -185,8 +210,11 @@ function FeedbackDialog({
           {!isCertificate && <><dt>Контакт</dt><dd>{item.contact ?? '—'}</dd></>}
           <dt>Получено</dt><dd>{feedbackDate(item.created_at)}{item.recipient_title ? ` · ${item.recipient_title}` : ''}</dd>
           {isCertificate && <>
-            <dt>Для чего нужна справка</dt><dd>{item.purpose ?? '—'}</dd>
-            <dt>Количество экземпляров</dt><dd>{item.copies ?? '—'}</dd>
+            <dt>В какое учреждение</dt><dd>{item.purpose ?? '—'}</dd>
+            <dt>Количество справок</dt><dd>{item.copies ?? '—'}</dd>
+            <dt>Способ получения</dt><dd>{item.delivery ? DELIVERY_TITLES[item.delivery] : '—'}</dd>
+            {item.address && <><dt>Почтовый адрес</dt><dd>{item.address}</dd></>}
+            <dt>Почта студента</dt><dd>{item.contact ?? '—'}</dd>
           </>}
         </dl>
 
@@ -195,7 +223,9 @@ function FeedbackDialog({
         {item.replies.map((entry) => (
           <div key={entry.id} className={`feedback-reply ${entry.author_kind}`}>
             <b>{entry.author_title}{entry.author_name ? ` (${entry.author_name})` : ''} · {feedbackDate(entry.created_at)}</b>
-            <p className="feedback-text">{entry.text}</p>
+            {entry.text && <p className="feedback-text">{entry.text}</p>}
+            <AttachmentList items={entry.attachments}
+              download={(file) => api.downloadAttachment(`/admin/feedback/attachments/${file.id}`, token, file.filename)} />
           </div>
         ))}
 
@@ -203,12 +233,36 @@ function FeedbackDialog({
           <span>Ответ студенту</span>
           <textarea className="text-field text-area" rows={4} maxLength={4000} value={answer} onChange={(event) => setAnswer(event.target.value)} />
         </label>
+
+        {files.length > 0 && (
+          <ul className="feedback-files">
+            {files.map((file, index) => (
+              <li key={`${file.name}-${index}`}>
+                <Paperclip size={14} />
+                <span>{file.name}</span>
+                <small>{fileSize(file.size)}</small>
+                <button type="button" aria-label={`Убрать ${file.name}`} disabled={busy}
+                  onClick={() => setFiles((previous) => previous.filter((_, position) => position !== index))}>
+                  <X size={14} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <input ref={fileInput} type="file" multiple accept={FILE_TYPES} hidden onChange={(event) => addFiles(event.target.files)} />
+        <button type="button" className="button button-secondary full" disabled={busy || files.length >= MAX_FILES}
+          onClick={() => fileInput.current?.click()}>
+          <Paperclip size={16} />Прикрепить файл
+        </button>
+        {filesProblem && <p className="form-error" role="alert">{filesProblem}</p>}
+
         <p className="admin-dialog-hint">
           {item.contact_is_email
-            ? 'Студент увидит ответ в приложении и получит его на почту.'
-            : 'Студент увидит ответ во вкладке «Мои обращения».'}
+            ? 'Студент увидит ответ в приложении и получит его на почту — вместе с файлами.'
+            : 'Студент увидит ответ и файлы во вкладке «Мои обращения». Почту он не оставил.'}
+          {' '}Можно PDF, фото или документ Word: до {MAX_FILES} файлов, вместе до 20 МБ.
         </p>
-        <button className="button button-primary full" disabled={busy || !answer.trim()} onClick={sendAnswer}>
+        <button className="button button-primary full" disabled={busy || Boolean(filesProblem) || (!answer.trim() && !files.length)} onClick={sendAnswer}>
           <Send size={16} />Ответить
         </button>
 
@@ -271,7 +325,7 @@ function RecipientsEditor({ token }: { token: string }) {
 
   return (
     <div className="feedback-recipients">
-      <p className="muted">Обычные обращения дублируются на эти адреса. Несколько адресов — через запятую.</p>
+      <p className="muted">Обращения и заказы справок дублируются на эти адреса. Несколько адресов — через запятую.</p>
       {recipients.data?.map((recipient) => <RecipientRow key={recipient.id} recipient={recipient} token={token} />)}
     </div>
   )

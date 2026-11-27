@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, SmallInteger, String, Text, func
+from sqlalchemy import JSON, Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, LargeBinary, SmallInteger, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -44,6 +44,9 @@ class FeedbackMessage(Base, TimestampMixin):
     text: Mapped[str] = mapped_column(Text)
     certificate_purpose: Mapped[str | None] = mapped_column(Text)
     certificate_copies: Mapped[int | None] = mapped_column(Integer)
+    # Способ получения справки: pickup, scan или post; для post — почтовый адрес.
+    certificate_delivery: Mapped[str | None] = mapped_column(String(16))
+    certificate_address: Mapped[str | None] = mapped_column(Text)
 
     group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id", ondelete="SET NULL"), nullable=True)
     # В исторических обращениях имя и идентификатор автора могут отсутствовать.
@@ -91,10 +94,32 @@ class FeedbackReply(Base):
     author_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     text: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    attachments: Mapped[list["FeedbackAttachment"]] = relationship(
+        lazy="selectin", order_by="FeedbackAttachment.id", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         CheckConstraint("author_kind IN ('staff','student')", name="ck_feedback_replies_author_kind"),
     )
+
+
+class FeedbackAttachment(Base):
+    """Файл к ответу: например, скан справки.
+
+    Хранится в базе, а не на диске: выкладка заменяет папку бэкенда целиком,
+    а дамп базы заодно сохраняет и файлы.
+    """
+
+    __tablename__ = "feedback_attachments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    reply_id: Mapped[int] = mapped_column(ForeignKey("feedback_replies.id", ondelete="CASCADE"), index=True)
+    filename: Mapped[str] = mapped_column(String(200))
+    content_type: Mapped[str] = mapped_column(String(100))
+    size: Mapped[int] = mapped_column(Integer)
+    # Содержимое грузится только при скачивании и отправке письма.
+    data: Mapped[bytes] = mapped_column(LargeBinary, deferred=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class EmailOutbox(Base):
@@ -105,6 +130,10 @@ class EmailOutbox(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     message_id: Mapped[int | None] = mapped_column(
         ForeignKey("feedback_messages.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    # Ответ, файлы которого вкладываются в письмо.
+    reply_id: Mapped[int | None] = mapped_column(
+        ForeignKey("feedback_replies.id", name="fk_email_outbox_reply", ondelete="CASCADE"), nullable=True
     )
     to_address: Mapped[str] = mapped_column(String(200))
     reply_to: Mapped[str | None] = mapped_column(String(200), nullable=True)

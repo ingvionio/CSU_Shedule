@@ -1,5 +1,7 @@
 """Размер запроса и заголовки API на уровне ASGI."""
 
+import re
+
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 from fastapi.security.utils import get_authorization_scheme_param
@@ -18,8 +20,19 @@ UPLOAD_LIMITS = {
     "/admin/imports/semester": 21 * MIB,
     "/admin/exams/import": 21 * MIB,
 }
+# Маршруты загрузки с идентификатором в пути.
+UPLOAD_PATTERNS = (
+    # Ответ на обращение с файлами: до 20 МБ файлов и запас на текст и разметку multipart.
+    (re.compile(r"/admin/feedback/\d+/replies/files"), 21 * MIB),
+)
 PRIVATE_PREFIXES = ("/auth/", "/admin", "/me", "/product", "/feedback")
 TOO_LARGE = "Превышен допустимый размер запроса"
+
+
+def upload_limit(route: str) -> int | None:
+    if route in UPLOAD_LIMITS:
+        return UPLOAD_LIMITS[route]
+    return next((limit for pattern, limit in UPLOAD_PATTERNS if pattern.fullmatch(route)), None)
 
 
 class ApiSecurityMiddleware:
@@ -35,7 +48,8 @@ class ApiSecurityMiddleware:
         request_headers = Headers(scope=scope)
         route = scope["path"][len(self.prefix):].rstrip("/")
         multipart = request_headers.get("content-type", "").lower().startswith("multipart/form-data")
-        limit = UPLOAD_LIMITS.get(route, BODY_LIMIT) if multipart else BODY_LIMIT
+        upload = upload_limit(route)
+        limit = (upload or BODY_LIMIT) if multipart else BODY_LIMIT
         length = request_headers.get("content-length", "")
         oversized = length.isascii() and length.isdecimal() and (len(length) > 10 or int(length) > limit)
         consumed = 0
@@ -67,7 +81,7 @@ class ApiSecurityMiddleware:
             await JSONResponse({"detail": TOO_LARGE}, 413)(scope, receive, secured_send)
             return
 
-        if route in UPLOAD_LIMITS and scope["method"] == "POST":
+        if upload is not None and scope["method"] == "POST":
             # FastAPI разбирает multipart до зависимостей маршрута.
             scheme, value = get_authorization_scheme_param(request_headers.get("authorization"))
             credentials = None

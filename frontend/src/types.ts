@@ -3,6 +3,8 @@ export type View = 'group' | 'day' | 'week' | 'messages' | 'feedback' | 'feedbac
 
 export type {
   AdminFeedback,
+  CertificateDelivery,
+  FeedbackAttachment,
   AdminMessage,
   AdminMessageDetail,
   AdminSession,

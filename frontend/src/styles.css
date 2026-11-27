@@ -417,6 +417,18 @@ h1 { margin-top: 7px; font-size: 24px; line-height: 1.16; letter-spacing: -.045e
 .feedback-reply b { color: var(--purple); font-size: 10px; }
 .feedback-reply.student { background: #f3f4f6; }
 .feedback-reply.student b { color: var(--muted); }
+.feedback-attachments { display: flex; flex-direction: column; gap: 5px; margin-top: 2px; }
+.feedback-attachment { display: flex; min-height: 36px; align-items: center; gap: 7px; padding: 6px 10px; border: 1px solid #d8cdea; border-radius: 9px; background: var(--surface); color: var(--purple); font-size: 12px; font-weight: 600; text-align: left; }
+.feedback-attachment span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.feedback-attachment small { flex: none; color: var(--muted); font-size: 10px; font-weight: 500; }
+.feedback-attachment:disabled { opacity: .7; }
+.feedback-files { display: flex; flex-direction: column; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.feedback-files li { display: flex; align-items: center; gap: 7px; padding: 6px 6px 6px 10px; border: 1px solid var(--line); border-radius: 9px; font-size: 12px; }
+.feedback-files span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.feedback-files small { flex: none; color: var(--muted); font-size: 10px; }
+.feedback-files button { display: grid; width: 28px; height: 28px; flex: none; place-items: center; border: 0; border-radius: 7px; background: transparent; color: var(--muted); }
+.certificate-delivery { display: grid; gap: 7px; }
+.certificate-delivery .choice { min-height: 42px; justify-content: flex-start; padding: 0 12px; font-size: 12px; text-align: left; }
 .feedback-status-new { background: var(--amber-soft); color: var(--amber); }
 .feedback-status-in_progress { background: var(--purple-soft); color: var(--purple); }
 .feedback-status-answered { background: var(--green-soft); color: var(--green); }

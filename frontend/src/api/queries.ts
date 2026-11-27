@@ -225,7 +225,7 @@ export function useFeedbackMutations(token: string) {
     onSuccess: refresh,
   })
   const reply = useMutation({
-    mutationFn: ({ id, text }: { id: number; text: string }) => api.replyFeedback(token, id, text),
+    mutationFn: ({ id, text, files }: { id: number; text: string; files?: File[] }) => api.replyFeedback(token, id, text, files),
     onSuccess: refresh,
   })
   const updateRecipient = useMutation({

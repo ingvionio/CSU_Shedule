@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 QuestionKindLiteral = Literal["dev", "methodist", "deanery", "unknown"]
 FeedbackKindLiteral = Literal[QuestionKindLiteral, "certificate"]
 FeedbackStatusLiteral = Literal["new", "in_progress", "answered", "archived"]
+CertificateDeliveryLiteral = Literal["pickup", "scan", "post"]
+
+EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
 
 
 def _check_controls(value: str | None, *, multiline: bool) -> str | None:
@@ -57,8 +61,13 @@ class CertificateRequestIn(FeedbackFormIn):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["certificate"]
-    purpose: str = Field(max_length=4000)
+    purpose: str = Field(max_length=4000, description="В какое учреждение требуется справка")
     copies: int = Field(strict=True, ge=1, le=2_147_483_647)
+    delivery: CertificateDeliveryLiteral = Field(
+        description="Способ получения: лично в учебной части, скан на почту или Почтой России"
+    )
+    address: str | None = Field(default=None, max_length=500, description="Почтовый адрес с индексом — для post")
+    email: str | None = Field(default=None, max_length=200, description="Куда прислать скан — для scan")
     text: str = Field(default="", max_length=4000)
 
     @field_validator("purpose")
@@ -76,8 +85,39 @@ class CertificateRequestIn(FeedbackFormIn):
         _check_controls(value, multiline=True)
         return value.strip()
 
+    @field_validator("address")
+    @classmethod
+    def check_address(cls, value: str | None) -> str | None:
+        _check_controls(value, multiline=True)
+        return value.strip() or None if value is not None else None
+
+    @field_validator("email")
+    @classmethod
+    def check_email(cls, value: str | None) -> str | None:
+        _check_controls(value, multiline=False)
+        return value.strip() or None if value is not None else None
+
+    @model_validator(mode="after")
+    def check_delivery(self) -> "CertificateRequestIn":
+        if self.delivery == "post" and not self.address:
+            raise ValueError("Укажите почтовый адрес с индексом")
+        if self.delivery == "scan" and not self.email:
+            raise ValueError("Укажите почту, на которую прислать скан")
+        if self.email and not re.fullmatch(EMAIL_PATTERN, self.email):
+            raise ValueError("Проверьте адрес почты")
+        if self.delivery != "post":
+            self.address = None
+        return self
+
 
 FeedbackSubmission = Annotated[FeedbackIn | CertificateRequestIn, Field(discriminator="kind")]
+
+
+class AttachmentOut(BaseModel):
+    id: int
+    filename: str
+    content_type: str
+    size: int
 
 
 class ReplyOut(BaseModel):
@@ -87,11 +127,14 @@ class ReplyOut(BaseModel):
     author_title: str
     text: str
     created_at: datetime
+    attachments: list[AttachmentOut] = []
 
 
 class CertificateDetailsOut(BaseModel):
     purpose: str | None
     copies: int | None
+    delivery: CertificateDeliveryLiteral | None = None
+    address: str | None = None
 
 
 class MyFeedbackOut(CertificateDetailsOut):
@@ -147,6 +190,11 @@ class FeedbackUpdateIn(BaseModel):
 
 class ReplyIn(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
+
+    @staticmethod
+    def check_controls_only(value: str) -> None:
+        """Проверка текста ответа с файлами: пустой текст допустим."""
+        _check_controls(value, multiline=True)
 
     @field_validator("text")
     @classmethod
